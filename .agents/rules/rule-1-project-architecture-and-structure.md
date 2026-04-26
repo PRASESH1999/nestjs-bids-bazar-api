@@ -36,12 +36,13 @@ src/
         │   └── bid.interface.ts
         └── bids.spec.ts
 
-## Layering Rules
-- Request flow must always follow: Controller → Service → Repository
-- Controllers handle HTTP only — no business logic, no DB calls ever.
-- Services contain all business logic — no direct DB queries, always go through repository.
-- Repositories handle all DB interactions — no business logic here.
-- Never skip a layer (e.g. controller calling repository directly is forbidden).
+## Layering Rules — SRP Enforcement
+- Request flow must always follow: Controller → Service → Repository.
+- **Controllers**: Handle HTTP only (routing, status codes, DTO mapping). **No business logic, no DB calls.**
+- **Services**: Responsible for **Business Logic & Orchestration**. This includes domain validation, business rules, and coordinating multiple repository calls. **No direct DB queries, no knowledge of ORM implementation.**
+- **Repositories**: Responsible for **Data Persistence & Retrieval**. This includes ORM-specific operations (TypeORM, SQL), query optimization, and mapping. **No business logic.**
+- **Never skip a layer**: e.g., controller calling repository directly is strictly forbidden.
+- **Strict SRP**: Services must never call inherited ORM methods (e.g., `.save`, `.find`, `.update`) directly. They must use custom-named methods defined in the Repository.
 
 ## Module Rules
 - Every feature gets its own NestJS module file (e.g. bids.module.ts).

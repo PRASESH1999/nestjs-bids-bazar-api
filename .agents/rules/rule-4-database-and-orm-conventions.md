@@ -9,13 +9,12 @@ trigger: always_on
 - ORM: TypeORM
 - All TypeORM configuration lives in config/ — never inline or scattered across modules.
 
-## Repository Pattern
+## Repository Pattern — SRP & Wrapper Pattern
 - All database access must go through a repository class — no exceptions.
-- Services never call TypeORM EntityManager or DataSource directly.
-- Every feature module that needs DB access has its own repository file:
-  e.g. bids.repository.ts, auctions.repository.ts
-- Repositories are the only layer allowed to use TypeORM methods
-  (find, save, update, delete, createQueryBuilder, etc.)
+- **Strict SRP**: Repositories must use the **Wrapper Pattern** (composition) rather than extending TypeORM's `Repository` class directly.
+- Use `private readonly repo: Repository<Entity>` initialized via `DataSource.getRepository()`.
+- Services must only call custom-named methods defined in the repository (e.g., `findById`, `saveBid`).
+- Repositories are the only layer allowed to use TypeORM methods (`find`, `save`, `update`, `delete`, `createQueryBuilder`, etc.).
 - Repositories must be provided and injected via NestJS DI — never instantiated manually.
 
 ## Entity Rules
@@ -39,8 +38,9 @@ trigger: always_on
 - Entity class names: PascalCase singular (e.g. Bid, Auction, PaymentRecord)
 
 ## Migrations
-- Never use TypeORM synchronize: true in any environment — migrations only.
-- All schema changes must go through a migration file — no manual DB edits ever.
+- Never use TypeORM synchronize: true in staging or production.
+- **Development Exception**: `synchronize: true` may be used in the development environment for rapid prototyping, but all schema changes must eventually be captured in migrations for deployment.
+- All schema changes must go through a migration file for staging and production — no manual DB edits ever.
 - Migration file naming: <timestamp>-<descriptive-name>.ts
   e.g. 1714000000000-CreateBidsTable.ts
 - Each migration must have both an up() and a down() method implemented.

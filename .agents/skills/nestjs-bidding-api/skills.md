@@ -171,6 +171,8 @@ These are non-negotiable. Follow them on every single task.
 - Never skip a layer — controller → service → repository, always.
 - Never put business logic in controllers or repositories.
 - Never put DB queries in services.
+- **Strict SRP**: Services must never use inherited ORM methods; all DB operations must be called via custom Repository methods.
+- **Wrapper Pattern**: Repositories must use composition (`private readonly repo`) instead of inheritance.
 - Always use the standard response envelope (references/response-standards.md).
 - Always throw domain exceptions, never raw HTTP exceptions (references/error-handling.md).
 - Always use nestjs-cls for request context access (references/cls-context.md).
@@ -206,6 +208,8 @@ Every item must pass — no exceptions.
 - [ ] No business logic in controllers
 - [ ] No DB queries in services
 - [ ] No layer skipped (controller → service → repository)
+- [ ] **Strict SRP**: Service uses custom repository methods only (no `.save`, `.find`, etc.)
+- [ ] **Wrapper Pattern**: Repository uses `private readonly repo` (no `extends Repository`)
 - [ ] No cross-module direct imports (shared code extracted to common/)
 - [ ] Correct file location per Section 3 of this skill
 
