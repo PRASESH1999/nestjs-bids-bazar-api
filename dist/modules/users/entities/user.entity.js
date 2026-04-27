@@ -19,6 +19,7 @@ let User = class User extends base_entity_1.BaseEntity {
     password;
     role;
     isActive;
+    isEmailVerified;
     hashedRefreshToken;
 };
 exports.User = User;
@@ -46,6 +47,10 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'boolean', default: true }),
     __metadata("design:type", Boolean)
 ], User.prototype, "isActive", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'boolean', default: false }),
+    __metadata("design:type", Boolean)
+], User.prototype, "isEmailVerified", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: 'varchar', nullable: true }),
     __metadata("design:type", Object)

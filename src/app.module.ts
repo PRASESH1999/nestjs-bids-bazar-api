@@ -7,13 +7,22 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { UsersModule } from '@modules/users/users.module';
 import { AuthModule } from '@modules/auth/auth.module';
+import { KycModule } from '@modules/kyc/kyc.module';
+import { MailModule } from '@modules/mail/mail.module';
+import { CommonModule } from '@common/common.module';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { envValidationSchema } from './config/env.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.development', '.env'],
+      validationSchema: envValidationSchema,
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: true,
+      },
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -39,8 +48,11 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
         limit: 100,
       },
     ]),
+    CommonModule,
     UsersModule,
     AuthModule,
+    KycModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [

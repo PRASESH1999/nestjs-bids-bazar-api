@@ -3,9 +3,13 @@ import { LocalAuthGuard } from '@common/guards/local-auth.guard';
 import {
   Body,
   Controller,
-  Response as NestResponse,
+  Get,
+  HttpCode,
+  HttpStatus,
   Post,
+  Query,
   Request,
+  Response as NestResponse,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -13,11 +17,13 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import type { Response } from 'express';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -32,15 +38,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @Throttle({ default: { limit: 10, ttl: 3600000 } }) // 10 attempts per hour
   @Post('register')
-  async register(
-    @Body() registerDto: RegisterDto,
-    @NestResponse({ passthrough: true }) res: Response,
-  ) {
-    const { accessToken, refreshToken } =
-      await this.authService.register(registerDto);
-
-    this.setRefreshTokenCookie(res, refreshToken);
-    return { accessToken };
+  async register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto);
   }
 
   @Public()
@@ -48,13 +47,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiBody({ type: LoginDto })
   @Throttle({ default: { limit: 5, ttl: 900000 } }) // 5 attempts per 15 mins
+  @HttpCode(HttpStatus.OK)
   @Post('login')
   async login(
     @Request() req: RequestWithUser,
     @NestResponse({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken } = await this.authService.login(
-      req.user as any, // req.user from LocalAuthGuard might differ slightly from RequestWithUser before login
+      req.user as any,
     );
 
     this.setRefreshTokenCookie(res, refreshToken);
@@ -62,11 +62,32 @@ export class AuthController {
   }
 
   @Public()
+  @ApiOperation({ summary: 'Verify email with token' })
+  @Get('verify-email')
+  async verifyEmail(@Query() query: VerifyEmailQueryDto) {
+    await this.authService.verifyEmail(query.token);
+    return { message: 'Email verified successfully. You can now log in.' };
+  }
+
+  @Public()
+  @ApiOperation({ summary: 'Resend verification email' })
+  @Throttle({ default: { limit: 3, ttl: 3600000 } }) // 3 attempts per hour per IP
+  @HttpCode(HttpStatus.OK)
+  @Post('resend-verification')
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    await this.authService.resendVerification(dto.email);
+    return {
+      message:
+        'If your email exists and is unverified, a new verification email has been sent.',
+    };
+  }
+
+  @Public()
   @ApiOperation({ summary: 'Refresh access token using refresh token cookie' })
   @Throttle({ default: { limit: 20, ttl: 900000 } }) // 20 attempts per 15 mins
   @Post('refresh')
   async refresh(
-    @Request() req: any, // req.cookies not on RequestWithUser
+    @Request() req: any,
     @NestResponse({ passthrough: true }) res: Response,
   ) {
     const refreshToken = req.cookies['refreshToken'];

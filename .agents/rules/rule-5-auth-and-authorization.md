@@ -124,3 +124,153 @@ enum Permission {
     POST /auth/login    : 5 attempts per 15 minutes per IP
     POST /auth/register : 10 attempts per hour per IP
     POST /auth/refresh  : 20 attempts per 15 minutes per IP
+
+---
+
+## RuleKYC Verification
+
+### Who needs KYC
+- Any USER who wants to SELL a product must have a KYC status of APPROVED.
+- Users without KYC or with PENDING/REJECTED KYC can only BUY products.
+- KYC is optional for buyers — no restrictions on purchasing.
+- KYC is enforced at the service layer when a user attempts to create a listing.
+
+### KYC Flow
+1. User submits KYC via POST /kyc/submit (uploads documents + fills address + bank details)
+2. KYC status is set to PENDING immediately on submission
+3. ADMIN or SUPERADMIN reviews the submission via the admin endpoints
+4. ADMIN approves → status becomes APPROVED → user can now sell
+   ADMIN rejects → status becomes REJECTED → user must resubmit with corrections
+5. A user with REJECTED status may resubmit — this resets status to PENDING
+6. A user with PENDING or APPROVED status cannot resubmit
+
+### Document Requirements
+- User must upload EITHER:
+    Citizenship: front image AND back image (both required together)
+    OR
+    Passport: single image
+- Mixing document types is not allowed
+- Accepted formats: JPEG, PNG, PDF
+- Max file size: 5 MB per file
+
+### Address Requirements
+- Permanent address: required (street, city, district, province, country)
+- Temporary address: optional (same structure)
+- Country defaults to Nepal
+
+### Bank Details
+- Required at KYC submission time
+- Sensitive fields (accountNumber, branch, swiftCode) are encrypted at rest
+  using AES-256-GCM via EncryptionService (common/services/encryption.service.ts)
+- Bank details are used later for seller payouts
+- Only SUPERADMIN can view decrypted bank details (BANK_VIEW_DECRYPTED permission)
+
+### File Storage
+- Document images are saved to the local server filesystem (no S3 or cloud bucket)
+- Stored under: /uploads/kyc/:userId/ (relative to UPLOAD_BASE_DIR env var)
+- Files are served via a protected endpoint — never publicly accessible
+- Only ADMIN and SUPERADMIN can access document files via GET /kyc/:id/documents/:fileKey
+- The /uploads/ directory is in .gitignore — never commit uploaded files
+
+### Permissions
+Added to Permission enum (common/enums/permission.enum.ts):
+  KYC_SUBMIT          = 'kyc:submit'         → USER
+  KYC_VIEW_OWN        = 'kyc:view_own'       → USER
+  KYC_VIEW_ALL        = 'kyc:view_all'       → ADMIN, SUPERADMIN
+  KYC_REVIEW          = 'kyc:review'         → ADMIN, SUPERADMIN
+  BANK_VIEW_DECRYPTED = 'bank:view_decrypted' → SUPERADMIN only
+
+### Endpoint Access Matrix
+| Endpoint                           | Required Permission  |
+|------------------------------------|----------------------|
+| POST /kyc/submit                   | KYC_SUBMIT           |
+| GET  /kyc/me                       | KYC_VIEW_OWN         |
+| GET  /kyc                          | KYC_VIEW_ALL         |
+| GET  /kyc/:id                      | KYC_VIEW_ALL         |
+| PATCH /kyc/:id/review              | KYC_REVIEW           |
+| GET  /kyc/:id/bank                 | BANK_VIEW_DECRYPTED  |
+| GET  /kyc/:id/documents/:fileKey   | KYC_VIEW_ALL         |
+
+### Sell Gate (enforced in listings/items service — NOT in KYC module)
+- Before creating a listing, the items/listings service must call
+  kycService.isVerified(userId) which returns true only if KycStatus === APPROVED
+- If not verified: throw ForbiddenException with message:
+  'KYC verification required to sell products. Please complete and submit your KYC.'
+- This check is the responsibility of the feature module (items),
+  not the KYC module itself
+- KycModule exports KycService so the items module can inject it directly
+
+### Encryption Key Management
+- ENCRYPTION_KEY env var: 32-byte hex string (64 hex characters)
+- Generate with: openssl rand -hex 32
+- Never log plaintext values or the key
+- UPLOAD_BASE_DIR env var: base directory for uploads (e.g. ./uploads)
+
+---
+
+## Email Verification
+
+### Flow
+1. User registers → account created with isEmailVerified: false
+2. Verification email sent automatically on registration
+3. JWT is NOT issued on registration — user must verify email first
+4. User clicks verification link in email → isEmailVerified set to true
+5. User can now log in normally
+6. If user tries to log in with an unverified email → blocked with 403 and
+   code: "EMAIL_NOT_VERIFIED" so the frontend can show a resend button
+
+### Token Rules
+- Verification token generated with crypto.randomBytes(32)
+- Raw token sent in email link — NEVER stored in DB
+- Only the SHA-256 hash of the token is stored in DB
+- Token expires in 24 hours
+- Token deleted immediately after successful verification
+- Any existing token for a user is invalidated before issuing a new one
+
+### Resend Rules
+- User requests resend via POST /auth/resend-verification (body: { email })
+- Rate limited: max 3 resends per hour per email address
+- If email already verified: return 400 "Email already verified"
+- Always invalidate existing token before creating a new one
+
+### Impact on Other Modules
+- Unverified users never receive a JWT — no guard changes needed elsewhere
+- KYC submission is naturally gated — if they can log in, email is verified
+- Selling requires: isEmailVerified (via login gate) AND KYC status === APPROVED
+- Buying requires: isEmailVerified (via login gate)
+
+### Notification Emails
+- On registration → verification email with link (24hr expiry)
+- On KYC submission → "We received your KYC submission, it is under review"
+- On KYC approval → "Your KYC has been approved. You can now sell on Antigravity."
+- On KYC rejection → "Your KYC was rejected. Reason: [rejectionReason]. Please resubmit."
+- On resend request → fresh verification email
+
+### Security Rules
+- Never log raw tokens anywhere
+- Never return the token in any API response
+- Rate limit resend endpoint: 3 per hour per email
+- Verification link format: GET /auth/verify-email?token=<rawToken>
+- Token is single-use — invalidated immediately on use
+
+### Endpoint Access Matrix (additions)
+| Endpoint                           | Auth         | Notes                             |
+|------------------------------------|--------------|-----------------------------------|
+| GET  /auth/verify-email?token=...  | @Public()    | Verifies email, single-use token  |
+| POST /auth/resend-verification     | @Public()    | Rate-limited: 3/hr per IP + email |
+
+### Entity: EmailVerificationToken
+Lives in: modules/auth/entities/email-verification-token.entity.ts
+- id: UUID (primary key)
+- userId: UUID (FK → users, indexed)
+- tokenHash: string (SHA-256 hash of raw token — never store raw)
+- expiresAt: timestamptz
+- createdAt: timestamptz
+
+### Mail Module
+- Lives in: modules/mail/
+- Registered as @Global() so any module can inject MailService
+- Uses nodemailer with SMTP config from env
+- Templates: plain functions returning { subject, html } — no template engine
+- Required env vars: MAIL_HOST, MAIL_PORT, MAIL_SECURE, MAIL_USER,
+  MAIL_PASSWORD, MAIL_FROM, APP_FRONTEND_URL

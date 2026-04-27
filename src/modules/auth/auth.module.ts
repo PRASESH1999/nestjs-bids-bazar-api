@@ -5,11 +5,15 @@ import { UsersModule } from '../users/users.module';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
+import { EmailVerificationToken } from './entities/email-verification-token.entity';
+import { AuthRepository } from './auth.repository';
 
 @Module({
   imports: [
+    TypeOrmModule.forFeature([EmailVerificationToken]),
     UsersModule,
     PassportModule,
     JwtModule.registerAsync({
@@ -29,7 +33,7 @@ import { LocalStrategy } from './strategies/local.strategy';
       }),
     }),
   ],
-  providers: [AuthService, LocalStrategy, JwtStrategy],
+  providers: [AuthService, LocalStrategy, JwtStrategy, AuthRepository],
   controllers: [AuthController],
   exports: [AuthService],
 })

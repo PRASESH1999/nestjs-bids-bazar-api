@@ -14,14 +14,18 @@ const users_module_1 = require("../users/users.module");
 const passport_1 = require("@nestjs/passport");
 const jwt_1 = require("@nestjs/jwt");
 const config_1 = require("@nestjs/config");
+const typeorm_1 = require("@nestjs/typeorm");
 const jwt_strategy_1 = require("./strategies/jwt.strategy");
 const local_strategy_1 = require("./strategies/local.strategy");
+const email_verification_token_entity_1 = require("./entities/email-verification-token.entity");
+const auth_repository_1 = require("./auth.repository");
 let AuthModule = class AuthModule {
 };
 exports.AuthModule = AuthModule;
 exports.AuthModule = AuthModule = __decorate([
     (0, common_1.Module)({
         imports: [
+            typeorm_1.TypeOrmModule.forFeature([email_verification_token_entity_1.EmailVerificationToken]),
             users_module_1.UsersModule,
             passport_1.PassportModule,
             jwt_1.JwtModule.registerAsync({
@@ -41,7 +45,7 @@ exports.AuthModule = AuthModule = __decorate([
                 }),
             }),
         ],
-        providers: [auth_service_1.AuthService, local_strategy_1.LocalStrategy, jwt_strategy_1.JwtStrategy],
+        providers: [auth_service_1.AuthService, local_strategy_1.LocalStrategy, jwt_strategy_1.JwtStrategy, auth_repository_1.AuthRepository],
         controllers: [auth_controller_1.AuthController],
         exports: [auth_service_1.AuthService],
     })

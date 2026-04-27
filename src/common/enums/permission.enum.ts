@@ -14,6 +14,13 @@ export enum Permission {
   USER_MANAGE = 'user:manage',
   CONTENT_MODERATE = 'content:moderate',
 
+  // KYC permissions
+  KYC_SUBMIT = 'kyc:submit',
+  KYC_VIEW_OWN = 'kyc:view_own',
+  KYC_VIEW_ALL = 'kyc:view_all',
+  KYC_REVIEW = 'kyc:review',
+  BANK_VIEW_DECRYPTED = 'bank:view_decrypted',
+
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',
   ADMIN_MANAGE = 'admin:manage',

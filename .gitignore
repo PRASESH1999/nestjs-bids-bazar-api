@@ -53,3 +53,6 @@ build/config\.gypi
 .npmrc
 pnpm-lock.yaml
 /.history
+
+# uploaded KYC documents — never commit user files
+/uploads/

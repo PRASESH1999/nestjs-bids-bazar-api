@@ -23,6 +23,8 @@ const throttler_1 = require("@nestjs/throttler");
 const auth_service_1 = require("./auth.service");
 const login_dto_1 = require("./dto/login.dto");
 const register_dto_1 = require("./dto/register.dto");
+const resend_verification_dto_1 = require("./dto/resend-verification.dto");
+const verify_email_query_dto_1 = require("./dto/verify-email-query.dto");
 let AuthController = class AuthController {
     authService;
     jwtService;
@@ -32,15 +34,23 @@ let AuthController = class AuthController {
         this.jwtService = jwtService;
         this.configService = configService;
     }
-    async register(registerDto, res) {
-        const { accessToken, refreshToken } = await this.authService.register(registerDto);
-        this.setRefreshTokenCookie(res, refreshToken);
-        return { accessToken };
+    async register(registerDto) {
+        return this.authService.register(registerDto);
     }
     async login(req, res) {
         const { accessToken, refreshToken } = await this.authService.login(req.user);
         this.setRefreshTokenCookie(res, refreshToken);
         return { accessToken };
+    }
+    async verifyEmail(query) {
+        await this.authService.verifyEmail(query.token);
+        return { message: 'Email verified successfully. You can now log in.' };
+    }
+    async resendVerification(dto) {
+        await this.authService.resendVerification(dto.email);
+        return {
+            message: 'If your email exists and is unverified, a new verification email has been sent.',
+        };
     }
     async refresh(req, res) {
         const refreshToken = req.cookies['refreshToken'];
@@ -88,9 +98,8 @@ __decorate([
     (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 3600000 } }),
     (0, common_1.Post)('register'),
     __param(0, (0, common_1.Body)()),
-    __param(1, (0, common_1.Response)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [register_dto_1.RegisterDto, Object]),
+    __metadata("design:paramtypes", [register_dto_1.RegisterDto]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "register", null);
 __decorate([
@@ -99,6 +108,7 @@ __decorate([
     (0, swagger_1.ApiOperation)({ summary: 'Login with email and password' }),
     (0, swagger_1.ApiBody)({ type: login_dto_1.LoginDto }),
     (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 900000 } }),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
     (0, common_1.Post)('login'),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Response)({ passthrough: true })),
@@ -106,6 +116,26 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Verify email with token' }),
+    (0, common_1.Get)('verify-email'),
+    __param(0, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [verify_email_query_dto_1.VerifyEmailQueryDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "verifyEmail", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Resend verification email' }),
+    (0, throttler_1.Throttle)({ default: { limit: 3, ttl: 3600000 } }),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    (0, common_1.Post)('resend-verification'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [resend_verification_dto_1.ResendVerificationDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "resendVerification", null);
 __decorate([
     (0, public_decorator_1.Public)(),
     (0, swagger_1.ApiOperation)({ summary: 'Refresh access token using refresh token cookie' }),

@@ -23,6 +23,9 @@ export class User extends BaseEntity {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isEmailVerified: boolean;
+
   @Column({ type: 'varchar', nullable: true })
   hashedRefreshToken: string | null;
 }

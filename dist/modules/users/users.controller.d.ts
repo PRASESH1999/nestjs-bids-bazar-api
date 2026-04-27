@@ -12,6 +12,7 @@ export declare class UsersController {
         email: string;
         role: import("../../common/enums/role.enum").Role;
         isActive: boolean;
+        isEmailVerified: boolean;
         id: string;
         createdAt: Date;
         updatedAt: Date;
@@ -22,6 +23,7 @@ export declare class UsersController {
         email: string;
         role: import("../../common/enums/role.enum").Role;
         isActive: boolean;
+        isEmailVerified: boolean;
         id: string;
         createdAt: Date;
         updatedAt: Date;
@@ -32,6 +34,7 @@ export declare class UsersController {
         email: string;
         role: import("../../common/enums/role.enum").Role;
         isActive: boolean;
+        isEmailVerified: boolean;
         id: string;
         createdAt: Date;
         updatedAt: Date;
@@ -43,6 +46,7 @@ export declare class UsersController {
             email: string;
             role: import("../../common/enums/role.enum").Role;
             isActive: boolean;
+            isEmailVerified: boolean;
             id: string;
             createdAt: Date;
             updatedAt: Date;
@@ -59,6 +63,7 @@ export declare class UsersController {
         email: string;
         role: import("../../common/enums/role.enum").Role;
         isActive: boolean;
+        isEmailVerified: boolean;
         id: string;
         createdAt: Date;
         updatedAt: Date;
@@ -72,6 +77,7 @@ export declare class UsersController {
         email: string;
         role: import("../../common/enums/role.enum").Role;
         isActive: boolean;
+        isEmailVerified: boolean;
         id: string;
         createdAt: Date;
         updatedAt: Date;

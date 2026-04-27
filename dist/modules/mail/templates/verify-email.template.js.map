@@ -1,0 +1,1 @@
+{"version":3,"file":"verify-email.template.js","sourceRoot":"","sources":["../../../../src/modules/mail/templates/verify-email.template.ts"],"names":[],"mappings":";;AACA,kDA2DC;AA3DD,SAAgB,mBAAmB,CACjC,eAAuB;IAEvB,OAAO;QACL,OAAO,EAAE,+BAA+B;QACxC,IAAI,EAAE;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;iBAyCO,eAAe;;;;;;;eAOjB,IAAI,IAAI,EAAE,CAAC,WAAW,EAAE;;;;QAI/B;KACL,CAAC;AACJ,CAAC"}

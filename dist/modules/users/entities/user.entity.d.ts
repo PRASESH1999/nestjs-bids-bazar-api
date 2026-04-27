@@ -6,5 +6,6 @@ export declare class User extends BaseEntity {
     password: string;
     role: Role;
     isActive: boolean;
+    isEmailVerified: boolean;
     hashedRefreshToken: string | null;
 }
