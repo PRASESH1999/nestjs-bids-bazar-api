@@ -1,9 +1,22 @@
 import { DocumentType } from "../../../common/enums/document-type.enum";
-import { AddressDto } from './address.dto';
-import { BankDetailDto } from './bank-detail.dto';
 export declare class SubmitKycDto {
     documentType: DocumentType;
-    permanentAddress: AddressDto;
-    temporaryAddress?: AddressDto;
-    bankDetails: BankDetailDto;
+    permanentAddressStreet: string;
+    permanentAddressCity: string;
+    permanentAddressDistrict: string;
+    permanentAddressProvince: string;
+    permanentAddressCountry?: string;
+    temporaryAddressStreet?: string;
+    temporaryAddressCity?: string;
+    temporaryAddressDistrict?: string;
+    temporaryAddressProvince?: string;
+    temporaryAddressCountry?: string;
+    bankName: string;
+    accountHolderName: string;
+    accountNumber: string;
+    branch: string;
+    swiftCode?: string;
+    citizenshipFront?: any;
+    citizenshipBack?: any;
+    passport?: any;
 }

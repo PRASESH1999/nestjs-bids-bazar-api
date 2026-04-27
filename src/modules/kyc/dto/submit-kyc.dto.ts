@@ -1,20 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsOptional, ValidateNested } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { DocumentType } from '@common/enums/document-type.enum';
-import { AddressDto } from './address.dto';
-import { BankDetailDto } from './bank-detail.dto';
-
-function parseJsonField(value: unknown): unknown {
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
-  }
-  return value;
-}
 
 export class SubmitKycDto {
   @ApiProperty({ enum: DocumentType })
@@ -22,31 +8,109 @@ export class SubmitKycDto {
   @IsEnum(DocumentType)
   documentType: DocumentType;
 
-  @ApiProperty({
-    description: 'Permanent address as a JSON string in multipart forms',
-    type: AddressDto,
-  })
-  @Transform(({ value }) => parseJsonField(value))
-  @ValidateNested()
-  @Type(() => AddressDto)
-  permanentAddress: AddressDto;
+  // --- Permanent Address ---
+
+  @ApiProperty({ example: 'Kathmandu-10' })
+  @IsString()
+  @IsNotEmpty()
+  permanentAddressStreet: string;
+
+  @ApiProperty({ example: 'Kathmandu' })
+  @IsString()
+  @IsNotEmpty()
+  permanentAddressCity: string;
+
+  @ApiProperty({ example: 'Kathmandu' })
+  @IsString()
+  @IsNotEmpty()
+  permanentAddressDistrict: string;
+
+  @ApiProperty({ example: 'Bagmati' })
+  @IsString()
+  @IsNotEmpty()
+  permanentAddressProvince: string;
+
+  @ApiPropertyOptional({ example: 'Nepal', default: 'Nepal' })
+  @IsOptional()
+  @IsString()
+  permanentAddressCountry?: string;
+
+  // --- Temporary Address (all optional) ---
+
+  @ApiPropertyOptional({ example: 'Lalitpur-3' })
+  @IsOptional()
+  @IsString()
+  temporaryAddressStreet?: string;
+
+  @ApiPropertyOptional({ example: 'Lalitpur' })
+  @IsOptional()
+  @IsString()
+  temporaryAddressCity?: string;
+
+  @ApiPropertyOptional({ example: 'Lalitpur' })
+  @IsOptional()
+  @IsString()
+  temporaryAddressDistrict?: string;
+
+  @ApiPropertyOptional({ example: 'Bagmati' })
+  @IsOptional()
+  @IsString()
+  temporaryAddressProvince?: string;
+
+  @ApiPropertyOptional({ example: 'Nepal' })
+  @IsOptional()
+  @IsString()
+  temporaryAddressCountry?: string;
+
+  // --- Bank Details ---
+
+  @ApiProperty({ example: 'Nepal Bank' })
+  @IsString()
+  @IsNotEmpty()
+  bankName: string;
+
+  @ApiProperty({ example: 'John Doe' })
+  @IsString()
+  @IsNotEmpty()
+  accountHolderName: string;
+
+  @ApiProperty({ example: '1234567890', description: '9–20 digit account number' })
+  @Matches(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' })
+  accountNumber: string;
+
+  @ApiProperty({ example: 'Kathmandu Branch' })
+  @IsString()
+  @IsNotEmpty()
+  branch: string;
+
+  @ApiPropertyOptional({ example: 'NBLNNPKA' })
+  @IsOptional()
+  @IsString()
+  swiftCode?: string;
+
+  // --- Document Files ---
 
   @ApiPropertyOptional({
-    description: 'Temporary address as a JSON string in multipart forms',
-    type: AddressDto,
+    type: 'string',
+    format: 'binary',
+    description: 'Required when documentType is CITIZENSHIP',
   })
   @IsOptional()
-  @Transform(({ value }) => parseJsonField(value))
-  @ValidateNested()
-  @Type(() => AddressDto)
-  temporaryAddress?: AddressDto;
+  citizenshipFront?: any;
 
-  @ApiProperty({
-    description: 'Bank details as a JSON string in multipart forms',
-    type: BankDetailDto,
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'binary',
+    description: 'Required when documentType is CITIZENSHIP',
   })
-  @Transform(({ value }) => parseJsonField(value))
-  @ValidateNested()
-  @Type(() => BankDetailDto)
-  bankDetails: BankDetailDto;
+  @IsOptional()
+  citizenshipBack?: any;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'binary',
+    description: 'Required when documentType is PASSPORT',
+  })
+  @IsOptional()
+  passport?: any;
 }

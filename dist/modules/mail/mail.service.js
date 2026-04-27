@@ -58,7 +58,7 @@ let MailService = MailService_1 = class MailService {
     constructor(configService) {
         this.configService = configService;
     }
-    onModuleInit() {
+    async onModuleInit() {
         this.transporter = nodemailer.createTransport({
             host: this.configService.getOrThrow('MAIL_HOST'),
             port: this.configService.getOrThrow('MAIL_PORT'),
@@ -67,7 +67,18 @@ let MailService = MailService_1 = class MailService {
                 user: this.configService.getOrThrow('MAIL_USER'),
                 pass: this.configService.getOrThrow('MAIL_PASSWORD'),
             },
+            tls: {
+                rejectUnauthorized: false,
+            },
         });
+        try {
+            await this.transporter.verify();
+            this.logger.log('SMTP Connection verified successfully');
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error(`SMTP Connection failed: ${message}`);
+        }
     }
     async sendVerificationEmail(to, rawToken) {
         const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');

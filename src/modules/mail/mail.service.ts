@@ -17,16 +17,29 @@ export class MailService implements OnModuleInit {
 
   constructor(private readonly configService: ConfigService) { }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     this.transporter = nodemailer.createTransport({
       host: this.configService.getOrThrow<string>('MAIL_HOST'),
       port: this.configService.getOrThrow<number>('MAIL_PORT'),
-      secure: this.configService.get<string>('MAIL_SECURE') === 'true',
+      secure: this.configService.get<string>('MAIL_SECURE') === 'true', // false for 587
       auth: {
         user: this.configService.getOrThrow<string>('MAIL_USER'),
         pass: this.configService.getOrThrow<string>('MAIL_PASSWORD'),
       },
+      tls: {
+        // Do not fail on invalid certs (common in dev)
+        rejectUnauthorized: false,
+      },
     });
+
+    // Verify connection on startup
+    try {
+      await this.transporter.verify();
+      this.logger.log('SMTP Connection verified successfully');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`SMTP Connection failed: ${message}`);
+    }
   }
 
   /**

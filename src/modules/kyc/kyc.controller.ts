@@ -45,47 +45,7 @@ export class KycController {
   @Post('submit')
   @ApiOperation({ summary: 'Submit KYC documents and details for verification' })
   @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['documentType', 'permanentAddress', 'bankDetails'],
-      properties: {
-        documentType: {
-          type: 'string',
-          enum: ['CITIZENSHIP', 'PASSPORT'],
-        },
-        permanentAddress: {
-          type: 'string',
-          description: 'JSON string: { street, city, district, province, country }',
-          example: '{"street":"Kathmandu-10","city":"Kathmandu","district":"Kathmandu","province":"Bagmati","country":"Nepal"}',
-        },
-        temporaryAddress: {
-          type: 'string',
-          description: 'Optional JSON string: { street, city, district, province, country }',
-        },
-        bankDetails: {
-          type: 'string',
-          description: 'JSON string: { bankName, accountHolderName, accountNumber, branch, swiftCode? }',
-          example: '{"bankName":"Nepal Bank","accountHolderName":"John Doe","accountNumber":"1234567890","branch":"Kathmandu"}',
-        },
-        citizenshipFront: {
-          type: 'string',
-          format: 'binary',
-          description: 'Required when documentType is CITIZENSHIP',
-        },
-        citizenshipBack: {
-          type: 'string',
-          format: 'binary',
-          description: 'Required when documentType is CITIZENSHIP',
-        },
-        passport: {
-          type: 'string',
-          format: 'binary',
-          description: 'Required when documentType is PASSPORT',
-        },
-      },
-    },
-  })
+  @ApiBody({ type: SubmitKycDto })
   @RequirePermissions(Permission.KYC_SUBMIT)
   @UseInterceptors(
     FileFieldsInterceptor(

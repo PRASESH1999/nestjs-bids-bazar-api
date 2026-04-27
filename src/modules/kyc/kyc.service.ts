@@ -95,13 +95,10 @@ export class KycService {
     }
 
     // Encrypt sensitive bank fields
-    const { bankDetails } = dto;
-    const encryptedAccountNumber = this.encryptionService.encrypt(
-      bankDetails.accountNumber,
-    );
-    const encryptedBranch = this.encryptionService.encrypt(bankDetails.branch);
-    const encryptedSwiftCode = bankDetails.swiftCode
-      ? this.encryptionService.encrypt(bankDetails.swiftCode)
+    const encryptedAccountNumber = this.encryptionService.encrypt(dto.accountNumber);
+    const encryptedBranch = this.encryptionService.encrypt(dto.branch);
+    const encryptedSwiftCode = dto.swiftCode
+      ? this.encryptionService.encrypt(dto.swiftCode)
       : null;
 
     // Save KYC record (update on resubmission, create otherwise)
@@ -112,13 +109,19 @@ export class KycService {
       citizenshipBackPath,
       passportPath,
       permanentAddress: {
-        ...dto.permanentAddress,
-        country: dto.permanentAddress.country ?? 'Nepal',
+        street: dto.permanentAddressStreet,
+        city: dto.permanentAddressCity ?? '',
+        district: dto.permanentAddressDistrict ?? '',
+        province: dto.permanentAddressProvince ?? '',
+        country: dto.permanentAddressCountry ?? 'Nepal',
       },
-      temporaryAddress: dto.temporaryAddress
+      temporaryAddress: dto.temporaryAddressStreet
         ? {
-            ...dto.temporaryAddress,
-            country: dto.temporaryAddress.country ?? 'Nepal',
+            street: dto.temporaryAddressStreet,
+            city: dto.temporaryAddressCity ?? '',
+            district: dto.temporaryAddressDistrict ?? '',
+            province: dto.temporaryAddressProvince ?? '',
+            country: dto.temporaryAddressCountry ?? 'Nepal',
           }
         : null,
       status: KycStatus.PENDING,
@@ -141,8 +144,8 @@ export class KycService {
     const existingBank = await this.kycRepository.findBankByUserId(userId);
     const bankPayload = {
       userId,
-      bankName: bankDetails.bankName,
-      accountHolderName: bankDetails.accountHolderName,
+      bankName: dto.bankName,
+      accountHolderName: dto.accountHolderName,
       accountNumber: encryptedAccountNumber,
       branch: encryptedBranch,
       swiftCode: encryptedSwiftCode,

@@ -5,6 +5,7 @@ const app_module_1 = require("./app.module");
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const swagger_1 = require("@nestjs/swagger");
+const global_exception_filter_1 = require("./common/filters/global-exception.filter");
 const cookieParser = require("cookie-parser");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
@@ -25,7 +26,19 @@ async function bootstrap() {
         whitelist: true,
         transform: true,
         forbidNonWhitelisted: true,
+        exceptionFactory: (errors) => {
+            const fields = errors.map((err) => ({
+                field: err.property,
+                message: Object.values(err.constraints || {}).join(', '),
+            }));
+            return new common_1.BadRequestException({
+                errorCode: 'VALIDATION_FAILED',
+                message: 'Request validation failed.',
+                fields,
+            });
+        },
     }));
+    app.useGlobalFilters(new global_exception_filter_1.GlobalExceptionFilter());
     const port = configService.get('PORT', 3000);
     await app.listen(port);
 }

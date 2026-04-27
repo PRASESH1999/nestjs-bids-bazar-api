@@ -98,6 +98,10 @@ let AuthService = class AuthService {
         };
     }
     async register(data) {
+        const existingUser = await this.usersService.findByEmail(data.email);
+        if (existingUser) {
+            throw new common_1.ConflictException('User with this email already exists');
+        }
         const { password, ...rest } = data;
         const hashedPassword = await bcrypt.hash(password, 12);
         const user = await this.usersService.create({

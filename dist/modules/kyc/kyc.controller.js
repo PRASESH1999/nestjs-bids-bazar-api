@@ -66,47 +66,7 @@ __decorate([
     (0, common_1.Post)('submit'),
     (0, swagger_1.ApiOperation)({ summary: 'Submit KYC documents and details for verification' }),
     (0, swagger_1.ApiConsumes)('multipart/form-data'),
-    (0, swagger_1.ApiBody)({
-        schema: {
-            type: 'object',
-            required: ['documentType', 'permanentAddress', 'bankDetails'],
-            properties: {
-                documentType: {
-                    type: 'string',
-                    enum: ['CITIZENSHIP', 'PASSPORT'],
-                },
-                permanentAddress: {
-                    type: 'string',
-                    description: 'JSON string: { street, city, district, province, country }',
-                    example: '{"street":"Kathmandu-10","city":"Kathmandu","district":"Kathmandu","province":"Bagmati","country":"Nepal"}',
-                },
-                temporaryAddress: {
-                    type: 'string',
-                    description: 'Optional JSON string: { street, city, district, province, country }',
-                },
-                bankDetails: {
-                    type: 'string',
-                    description: 'JSON string: { bankName, accountHolderName, accountNumber, branch, swiftCode? }',
-                    example: '{"bankName":"Nepal Bank","accountHolderName":"John Doe","accountNumber":"1234567890","branch":"Kathmandu"}',
-                },
-                citizenshipFront: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'Required when documentType is CITIZENSHIP',
-                },
-                citizenshipBack: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'Required when documentType is CITIZENSHIP',
-                },
-                passport: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'Required when documentType is PASSPORT',
-                },
-            },
-        },
-    }),
+    (0, swagger_1.ApiBody)({ type: submit_kyc_dto_1.SubmitKycDto }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.KYC_SUBMIT),
     (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
         { name: 'citizenshipFront', maxCount: 1 },

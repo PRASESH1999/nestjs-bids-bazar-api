@@ -5,7 +5,7 @@ export declare class MailService implements OnModuleInit {
     private readonly logger;
     private transporter;
     constructor(configService: ConfigService);
-    onModuleInit(): void;
+    onModuleInit(): Promise<void>;
     sendVerificationEmail(to: string, rawToken: string): Promise<void>;
     sendKycReceived(to: string, name: string): Promise<void>;
     sendKycApproved(to: string, name: string): Promise<void>;

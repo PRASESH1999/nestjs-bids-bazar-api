@@ -11,27 +11,28 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SubmitKycDto = void 0;
 const swagger_1 = require("@nestjs/swagger");
-const class_transformer_1 = require("class-transformer");
 const class_validator_1 = require("class-validator");
 const document_type_enum_1 = require("../../../common/enums/document-type.enum");
-const address_dto_1 = require("./address.dto");
-const bank_detail_dto_1 = require("./bank-detail.dto");
-function parseJsonField(value) {
-    if (typeof value === 'string') {
-        try {
-            return JSON.parse(value);
-        }
-        catch {
-            return value;
-        }
-    }
-    return value;
-}
 class SubmitKycDto {
     documentType;
-    permanentAddress;
-    temporaryAddress;
-    bankDetails;
+    permanentAddressStreet;
+    permanentAddressCity;
+    permanentAddressDistrict;
+    permanentAddressProvince;
+    permanentAddressCountry;
+    temporaryAddressStreet;
+    temporaryAddressCity;
+    temporaryAddressDistrict;
+    temporaryAddressProvince;
+    temporaryAddressCountry;
+    bankName;
+    accountHolderName;
+    accountNumber;
+    branch;
+    swiftCode;
+    citizenshipFront;
+    citizenshipBack;
+    passport;
 }
 exports.SubmitKycDto = SubmitKycDto;
 __decorate([
@@ -41,34 +42,119 @@ __decorate([
     __metadata("design:type", String)
 ], SubmitKycDto.prototype, "documentType", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({
-        description: 'Permanent address as a JSON string in multipart forms',
-        type: address_dto_1.AddressDto,
-    }),
-    (0, class_transformer_1.Transform)(({ value }) => parseJsonField(value)),
-    (0, class_validator_1.ValidateNested)(),
-    (0, class_transformer_1.Type)(() => address_dto_1.AddressDto),
-    __metadata("design:type", address_dto_1.AddressDto)
-], SubmitKycDto.prototype, "permanentAddress", void 0);
+    (0, swagger_1.ApiProperty)({ example: 'Kathmandu-10' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "permanentAddressStreet", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 'Kathmandu' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "permanentAddressCity", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 'Kathmandu' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "permanentAddressDistrict", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 'Bagmati' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "permanentAddressProvince", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Nepal', default: 'Nepal' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "permanentAddressCountry", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Lalitpur-3' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "temporaryAddressStreet", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Lalitpur' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "temporaryAddressCity", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Lalitpur' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "temporaryAddressDistrict", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Bagmati' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "temporaryAddressProvince", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Nepal' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "temporaryAddressCountry", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 'Nepal Bank' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "bankName", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 'John Doe' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "accountHolderName", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: '1234567890', description: '9–20 digit account number' }),
+    (0, class_validator_1.Matches)(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' }),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "accountNumber", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 'Kathmandu Branch' }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "branch", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'NBLNNPKA' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SubmitKycDto.prototype, "swiftCode", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({
-        description: 'Temporary address as a JSON string in multipart forms',
-        type: address_dto_1.AddressDto,
+        type: 'string',
+        format: 'binary',
+        description: 'Required when documentType is CITIZENSHIP',
     }),
     (0, class_validator_1.IsOptional)(),
-    (0, class_transformer_1.Transform)(({ value }) => parseJsonField(value)),
-    (0, class_validator_1.ValidateNested)(),
-    (0, class_transformer_1.Type)(() => address_dto_1.AddressDto),
-    __metadata("design:type", address_dto_1.AddressDto)
-], SubmitKycDto.prototype, "temporaryAddress", void 0);
+    __metadata("design:type", Object)
+], SubmitKycDto.prototype, "citizenshipFront", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({
-        description: 'Bank details as a JSON string in multipart forms',
-        type: bank_detail_dto_1.BankDetailDto,
+    (0, swagger_1.ApiPropertyOptional)({
+        type: 'string',
+        format: 'binary',
+        description: 'Required when documentType is CITIZENSHIP',
     }),
-    (0, class_transformer_1.Transform)(({ value }) => parseJsonField(value)),
-    (0, class_validator_1.ValidateNested)(),
-    (0, class_transformer_1.Type)(() => bank_detail_dto_1.BankDetailDto),
-    __metadata("design:type", bank_detail_dto_1.BankDetailDto)
-], SubmitKycDto.prototype, "bankDetails", void 0);
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", Object)
+], SubmitKycDto.prototype, "citizenshipBack", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({
+        type: 'string',
+        format: 'binary',
+        description: 'Required when documentType is PASSPORT',
+    }),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", Object)
+], SubmitKycDto.prototype, "passport", void 0);
 //# sourceMappingURL=submit-kyc.dto.js.map

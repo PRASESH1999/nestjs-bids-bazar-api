@@ -1,8 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { GlobalExceptionFilter } from '@common/filters/global-exception.filter';
 import cookieParser = require('cookie-parser');
 
 async function bootstrap() {
@@ -31,8 +32,21 @@ async function bootstrap() {
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: true,
+      exceptionFactory: (errors) => {
+        const fields = errors.map((err) => ({
+          field: err.property,
+          message: Object.values(err.constraints || {}).join(', '),
+        }));
+        return new BadRequestException({
+          errorCode: 'VALIDATION_FAILED',
+          message: 'Request validation failed.',
+          fields,
+        });
+      },
     }),
   );
+
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   const port = configService.get<number>('PORT', 3000);
   await app.listen(port);
