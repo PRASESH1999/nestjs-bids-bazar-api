@@ -1,6 +1,8 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { config } from 'dotenv';
 import { User } from '../modules/users/entities/user.entity';
+import { Category } from '../modules/categories/entities/category.entity';
+import { Subcategory } from '../modules/categories/entities/subcategory.entity';
 
 config({ path: '.env.development' });
 
@@ -12,7 +14,7 @@ export const dataSourceOptions: DataSourceOptions = {
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   ssl: process.env.DB_SSL === 'true',
-  entities: [User],
+  entities: [User, Category, Subcategory],
   migrations: ['src/migrations/*.ts'],
   synchronize: true,
 };

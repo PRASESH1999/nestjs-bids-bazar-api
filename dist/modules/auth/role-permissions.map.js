@@ -18,6 +18,7 @@ exports.RolePermissionsMap = {
         permission_enum_1.Permission.USER_VIEW,
         permission_enum_1.Permission.USER_MANAGE,
         permission_enum_1.Permission.CONTENT_MODERATE,
+        permission_enum_1.Permission.CATEGORY_MANAGE,
         permission_enum_1.Permission.ITEM_VIEW,
         permission_enum_1.Permission.PROFILE_VIEW,
         permission_enum_1.Permission.KYC_VIEW_ALL,

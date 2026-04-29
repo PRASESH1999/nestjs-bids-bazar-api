@@ -4,6 +4,8 @@ exports.dataSourceOptions = void 0;
 const typeorm_1 = require("typeorm");
 const dotenv_1 = require("dotenv");
 const user_entity_1 = require("../modules/users/entities/user.entity");
+const category_entity_1 = require("../modules/categories/entities/category.entity");
+const subcategory_entity_1 = require("../modules/categories/entities/subcategory.entity");
 (0, dotenv_1.config)({ path: '.env.development' });
 exports.dataSourceOptions = {
     type: 'postgres',
@@ -13,7 +15,7 @@ exports.dataSourceOptions = {
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     ssl: process.env.DB_SSL === 'true',
-    entities: [user_entity_1.User],
+    entities: [user_entity_1.User, category_entity_1.Category, subcategory_entity_1.Subcategory],
     migrations: ['src/migrations/*.ts'],
     synchronize: true,
 };

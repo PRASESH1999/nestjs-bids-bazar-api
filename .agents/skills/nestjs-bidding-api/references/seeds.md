@@ -9,24 +9,29 @@
 
 ## Seed File Locations
 src/database/seeds/
-├── index.ts                # Seed runner — imports and runs all seeds in order
-├── admin.seed.ts           # Default admin user
-├── roles.seed.ts           # Default role assignments
-├── users.seed.ts           # Test bidders and auctioneers
-├── auctions.seed.ts        # Sample auctions in various states
-└── bids.seed.ts            # Sample bids on seeded auctions
+├── index.ts                # Unified runner — imports and runs all feature seeds
+├── categories/             # Category seed logic, data, and runner
+│   ├── categories.data.ts
+│   ├── categories.seed.ts
+│   └── categories-runner.ts
+└── users/                  # User seed logic, data, and runner
+    ├── users.data.ts
+    ├── users.seed.ts
+    └── users-runner.ts
 
 ---
 
 ## Core Seed Rules
 
 - Seeds are always idempotent — running twice must produce the same result.
+- Data and logic live together in the same feature folder (e.g. `categories/categories.data.ts` and `categories/categories.seed.ts`).
 - Never hard-delete existing seed data — check before inserting.
 - Never run seeds in production without explicit user approval.
 - Seeds use real bcrypt hashing — never store plain text passwords.
 - Seed data references must be consistent — bids reference seeded auctions.
 - Always run seeds in correct order — dependencies first.
-- All seed files export a single async function: seed<Name>(dataSource).
+- All seed logic files export a single async function: `seed<Name>(dataSource)`.
+- Each feature module has a dedicated runner (`*-runner.ts`) for individual execution.
 
 ---
 
@@ -37,10 +42,8 @@ src/database/seeds/
 import { DataSource } from 'typeorm';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { seedAdmin } from './admin.seed';
-import { seedUsers } from './users.seed';
-import { seedAuctions } from './auctions.seed';
-import { seedBids } from './bids.seed';
+import { seedUsers } from './users/users.seed';
+import { seedCategories } from './categories/categories.seed';
 
 // Load correct .env file based on NODE_ENV
 dotenv.config({

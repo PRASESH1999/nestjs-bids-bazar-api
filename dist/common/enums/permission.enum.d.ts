@@ -8,6 +8,7 @@ export declare enum Permission {
     USER_VIEW = "user:view",
     USER_MANAGE = "user:manage",
     CONTENT_MODERATE = "content:moderate",
+    CATEGORY_MANAGE = "category:manage",
     KYC_SUBMIT = "kyc:submit",
     KYC_VIEW_OWN = "kyc:view_own",
     KYC_VIEW_ALL = "kyc:view_all",

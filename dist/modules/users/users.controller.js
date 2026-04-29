@@ -20,6 +20,7 @@ const hierarchy_guard_1 = require("../../common/guards/hierarchy.guard");
 const permissions_guard_1 = require("../../common/guards/permissions.guard");
 const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
+const api_responses_1 = require("../../common/swagger/api-responses");
 const assign_role_dto_1 = require("./dto/assign-role.dto");
 const create_admin_dto_1 = require("./dto/create-admin.dto");
 const update_user_dto_1 = require("./dto/update-user.dto");
@@ -85,6 +86,11 @@ __decorate([
     (0, swagger_1.ApiOperation)({
         summary: 'Create a new Admin or SuperAdmin (SuperAdmin only)',
     }),
+    (0, swagger_1.ApiResponse)({ status: 201, description: 'Admin/SuperAdmin account created.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R409),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.ROLE_ASSIGN),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -94,6 +100,9 @@ __decorate([
 __decorate([
     (0, common_1.Get)('me'),
     (0, swagger_1.ApiOperation)({ summary: 'Get current user profile' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Current authenticated user object.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PROFILE_VIEW),
     __param(0, (0, common_1.Request)()),
     __metadata("design:type", Function),
@@ -103,6 +112,10 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('me'),
     (0, swagger_1.ApiOperation)({ summary: 'Update current user profile' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Updated user object.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PROFILE_EDIT),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Body)()),
@@ -113,6 +126,26 @@ __decorate([
 __decorate([
     (0, common_1.Get)(),
     (0, swagger_1.ApiOperation)({ summary: 'List all users (Admin/SuperAdmin only)' }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Paginated list of users.',
+        schema: {
+            type: 'object',
+            properties: {
+                data: { type: 'array', items: api_responses_1.UserSchema },
+                meta: {
+                    type: 'object',
+                    properties: {
+                        page: { type: 'number', example: 1 },
+                        limit: { type: 'number', example: 20 },
+                        total: { type: 'number', example: 100 },
+                    },
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.USER_VIEW),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Query)()),
@@ -123,6 +156,10 @@ __decorate([
 __decorate([
     (0, common_1.Patch)(':id/suspend'),
     (0, swagger_1.ApiOperation)({ summary: 'Suspend a user account' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Suspended user object (isActive: false).', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R404),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.USER_MANAGE),
     (0, common_1.UseGuards)(hierarchy_guard_1.HierarchyGuard),
     __param(0, (0, common_1.Param)('id')),
@@ -133,6 +170,10 @@ __decorate([
 __decorate([
     (0, common_1.Delete)(':id'),
     (0, swagger_1.ApiOperation)({ summary: 'Soft delete a user account' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'User soft-deleted (deletedAt is set, record still exists in DB).', ...api_responses_1.SuccessResponse }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R404),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.USER_MANAGE),
     (0, common_1.UseGuards)(hierarchy_guard_1.HierarchyGuard),
     __param(0, (0, common_1.Param)('id')),
@@ -143,6 +184,11 @@ __decorate([
 __decorate([
     (0, common_1.Post)(':id/role'),
     (0, swagger_1.ApiOperation)({ summary: 'Assign a new role to a user' }),
+    (0, swagger_1.ApiResponse)({ status: 201, description: 'Updated user object with new role.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R404),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.ROLE_ASSIGN),
     (0, common_1.UseGuards)(hierarchy_guard_1.HierarchyGuard),
     __param(0, (0, common_1.Param)('id')),

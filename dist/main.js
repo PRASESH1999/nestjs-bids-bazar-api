@@ -6,6 +6,7 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const swagger_1 = require("@nestjs/swagger");
 const global_exception_filter_1 = require("./common/filters/global-exception.filter");
+const path_1 = require("path");
 const cookieParser = require("cookie-parser");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
@@ -13,6 +14,7 @@ async function bootstrap() {
     const prefix = configService.get('API_PREFIX', 'api');
     const version = configService.get('API_VERSION', 'v1');
     app.setGlobalPrefix(`${prefix}/${version}`);
+    app.useStaticAssets((0, path_1.join)(__dirname, '..', 'public'), { prefix: '/' });
     const config = new swagger_1.DocumentBuilder()
         .setTitle('Bids Bazar API')
         .setDescription('The Bids Bazar Auction API description')

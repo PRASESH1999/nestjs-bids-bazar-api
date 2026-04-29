@@ -1,19 +1,24 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from '@common/filters/global-exception.filter';
+import { join } from 'path';
 import cookieParser = require('cookie-parser');
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
   const prefix = configService.get<string>('API_PREFIX', 'api');
   const version = configService.get<string>('API_VERSION', 'v1');
 
   app.setGlobalPrefix(`${prefix}/${version}`);
+
+  // Serve public/ folder as static assets (category icons, etc.)
+  app.useStaticAssets(join(__dirname, '..', 'public'), { prefix: '/' });
 
   // Swagger setup
   const config = new DocumentBuilder()

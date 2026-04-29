@@ -94,7 +94,7 @@ Never place code in the wrong layer — this is enforced by Rule 1.
 | Role/permission definitions       | `common/enums/`                            |
 | Environment config                | `config/`                                  |
 | Database migrations               | `database/migrations/`                     |
-| Database seed files               | `database/seeds/`                          |
+| Database seed files               | `database/seeds/` (Logic, Data, Runners) |
 | Event name constants              | `common/events/event-names.ts`             |
 | Event handlers                    | `modules/<name>/handlers/`                 |
 | Queue job processors              | `modules/<name>/processors/`               |

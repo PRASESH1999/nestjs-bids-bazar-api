@@ -12,6 +12,7 @@ var Permission;
     Permission["USER_VIEW"] = "user:view";
     Permission["USER_MANAGE"] = "user:manage";
     Permission["CONTENT_MODERATE"] = "content:moderate";
+    Permission["CATEGORY_MANAGE"] = "category:manage";
     Permission["KYC_SUBMIT"] = "kyc:submit";
     Permission["KYC_VIEW_OWN"] = "kyc:view_own";
     Permission["KYC_VIEW_ALL"] = "kyc:view_all";

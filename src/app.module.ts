@@ -9,6 +9,7 @@ import { UsersModule } from '@modules/users/users.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { KycModule } from '@modules/kyc/kyc.module';
 import { MailModule } from '@modules/mail/mail.module';
+import { CategoriesModule } from '@modules/categories/categories.module';
 import { CommonModule } from '@common/common.module';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
@@ -53,6 +54,7 @@ import { envValidationSchema } from './config/env.validation';
     AuthModule,
     KycModule,
     MailModule,
+    CategoriesModule,
   ],
   controllers: [AppController],
   providers: [

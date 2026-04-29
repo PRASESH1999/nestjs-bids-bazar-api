@@ -16,6 +16,7 @@ export const RolePermissionsMap: Record<Role, Permission[]> = {
     Permission.USER_VIEW,
     Permission.USER_MANAGE,
     Permission.CONTENT_MODERATE,
+    Permission.CATEGORY_MANAGE,
     Permission.ITEM_VIEW,
     Permission.PROFILE_VIEW,
     Permission.KYC_VIEW_ALL,

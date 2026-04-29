@@ -21,6 +21,9 @@ src/
 │   ├── pipes/
 │   └── utils/
 ├── config/                   # Config module, env validation (e.g. Joi / Zod)
+├── database/                 # Database migrations and seeds
+│   ├── migrations/
+│   └── seeds/                # Seed logic, data, and runners
 └── modules/
     └── bids/                 # Example feature module
         ├── bids.module.ts

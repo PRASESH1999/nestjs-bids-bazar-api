@@ -56,3 +56,6 @@ pnpm-lock.yaml
 
 # uploaded KYC documents — never commit user files
 /uploads/
+
+# uploaded category icons — never commit user files
+/public/category-icons/

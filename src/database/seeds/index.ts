@@ -1,5 +1,6 @@
 import dataSource from '../../config/typeorm.config';
-import { seedUsers } from './users.seed';
+import { seedUsers } from './users/users.seed';
+import { seedCategories } from './categories/categories.seed';
 
 async function runSeeds() {
   console.log('Starting database seeding...');
@@ -12,6 +13,7 @@ async function runSeeds() {
 
     // Run seeds in dependency order
     await seedUsers(dataSource);
+    await seedCategories(dataSource);
 
     console.log('Seeding completed successfully.');
   } catch (error) {

@@ -106,9 +106,9 @@ bids-bazar-api/
 │   │   ├── migrations/                       # All TypeORM migration files
 │   │   │   └── <timestamp>-<name>.ts
 │   │   └── seeds/                            # Seed files for staging + test data
-│   │       ├── index.ts                      # Seed runner — imports and runs all seeds
-│   │       ├── users.seed.ts                 # User seed data
-│   │       └── auctions.seed.ts              # Auction seed data
+│   │       ├── index.ts                      # Unified runner
+│   │       ├── categories/                   # Category data, seed logic + runner
+│   │       └── users/                        # User data, seed logic + runner
 │   │
 │   └── modules/
 │       ├── auth/                             # Authentication module
@@ -278,7 +278,9 @@ Every feature module must follow this exact internal structure:
 | Handler files | `<event>.handler.ts` | `auction-closed.handler.ts` |
 | Processor files | `<job>.processor.ts` | `auction-close.processor.ts` |
 | Migration files | `<timestamp>-<PascalName>.ts` | `1714000000000-CreateBidsTable.ts` |
-| Seed files | `<name>.seed.ts` | `auctions.seed.ts` |
+| Seed logic files | `<name>.seed.ts` | `categories.seed.ts` |
+| Seed data files | `<name>.data.ts` | `categories.data.ts` |
+| Seed runner files | `<name>-runner.ts` | `categories-runner.ts` |
 | Factory files | `<name>.factory.ts` | `bid.factory.ts` |
 
 ---
