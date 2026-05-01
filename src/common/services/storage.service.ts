@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { extname, join, resolve } from 'path';
+import { extname, resolve } from 'path';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -21,7 +21,10 @@ export class StorageService {
   private readonly baseDir: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.baseDir = this.configService.get<string>('UPLOAD_BASE_DIR', './uploads');
+    this.baseDir = this.configService.get<string>(
+      'UPLOAD_BASE_DIR',
+      './uploads',
+    );
   }
 
   async saveFile(

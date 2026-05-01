@@ -30,7 +30,12 @@ export class AdminCategoriesController {
       'List all categories including inactive (Admin/SuperAdmin only). Use ?includeInactive=true.',
   })
   @ApiQuery({ name: 'includeInactive', required: false, type: Boolean })
-  @ApiResponse({ status: 200, description: 'All categories (active + inactive when includeInactive=true).', schema: { type: 'array', items: CategorySchema } })
+  @ApiResponse({
+    status: 200,
+    description:
+      'All categories (active + inactive when includeInactive=true).',
+    schema: { type: 'array', items: CategorySchema },
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @RequirePermissions(Permission.CATEGORY_MANAGE)
@@ -45,7 +50,12 @@ export class AdminCategoriesController {
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'includeInactive', required: false, type: Boolean })
-  @ApiResponse({ status: 200, description: 'All subcategories (active + inactive when includeInactive=true). Filter by categoryId to get subcategories for a specific parent.', schema: { type: 'array', items: SubcategorySchema } })
+  @ApiResponse({
+    status: 200,
+    description:
+      'All subcategories (active + inactive when includeInactive=true). Filter by categoryId to get subcategories for a specific parent.',
+    schema: { type: 'array', items: SubcategorySchema },
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @RequirePermissions(Permission.CATEGORY_MANAGE)

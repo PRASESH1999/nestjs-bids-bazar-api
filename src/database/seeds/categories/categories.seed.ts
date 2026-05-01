@@ -34,11 +34,7 @@ export async function seedCategories(dataSource: DataSource): Promise<void> {
         skipped++;
       }
 
-      for (
-        let subOrder = 0;
-        subOrder < subcategories.length;
-        subOrder++
-      ) {
+      for (let subOrder = 0; subOrder < subcategories.length; subOrder++) {
         const subName = subcategories[subOrder];
 
         const existingSub = await subRepo.findOne({

@@ -43,7 +43,9 @@ export class KycController {
   constructor(private readonly kycService: KycService) {}
 
   @Post('submit')
-  @ApiOperation({ summary: 'Submit KYC documents and details for verification' })
+  @ApiOperation({
+    summary: 'Submit KYC documents and details for verification',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: SubmitKycDto })
   @RequirePermissions(Permission.KYC_SUBMIT)
@@ -78,7 +80,10 @@ export class KycController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all KYC submissions with optional status filter (Admin/SuperAdmin)' })
+  @ApiOperation({
+    summary:
+      'List all KYC submissions with optional status filter (Admin/SuperAdmin)',
+  })
   @RequirePermissions(Permission.KYC_VIEW_ALL)
   async getAllKyc(
     @Query() pagination: PaginationDto,
@@ -95,7 +100,9 @@ export class KycController {
   }
 
   @Patch(':id/review')
-  @ApiOperation({ summary: 'Approve or reject a KYC submission (Admin/SuperAdmin)' })
+  @ApiOperation({
+    summary: 'Approve or reject a KYC submission (Admin/SuperAdmin)',
+  })
   @RequirePermissions(Permission.KYC_REVIEW)
   async reviewKyc(
     @Param('id') id: string,
@@ -106,14 +113,18 @@ export class KycController {
   }
 
   @Get(':id/bank')
-  @ApiOperation({ summary: 'Get decrypted bank details for a KYC record (SuperAdmin only)' })
+  @ApiOperation({
+    summary: 'Get decrypted bank details for a KYC record (SuperAdmin only)',
+  })
   @RequirePermissions(Permission.BANK_VIEW_DECRYPTED)
   async getDecryptedBankDetails(@Param('id') id: string) {
     return this.kycService.getDecryptedBankDetails(id);
   }
 
   @Get(':id/documents/:fileKey')
-  @ApiOperation({ summary: 'Stream a KYC document file (Admin/SuperAdmin only)' })
+  @ApiOperation({
+    summary: 'Stream a KYC document file (Admin/SuperAdmin only)',
+  })
   @RequirePermissions(Permission.KYC_VIEW_ALL)
   async getDocument(
     @Param('id') id: string,

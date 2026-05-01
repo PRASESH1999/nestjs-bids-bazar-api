@@ -86,7 +86,11 @@ __decorate([
     (0, swagger_1.ApiOperation)({
         summary: 'Create a new Admin or SuperAdmin (SuperAdmin only)',
     }),
-    (0, swagger_1.ApiResponse)({ status: 201, description: 'Admin/SuperAdmin account created.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: 'Admin/SuperAdmin account created.',
+        schema: api_responses_1.UserSchema,
+    }),
     (0, swagger_1.ApiResponse)(api_responses_1.R400),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),
@@ -100,7 +104,11 @@ __decorate([
 __decorate([
     (0, common_1.Get)('me'),
     (0, swagger_1.ApiOperation)({ summary: 'Get current user profile' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'Current authenticated user object.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Current authenticated user object.',
+        schema: api_responses_1.UserSchema,
+    }),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PROFILE_VIEW),
@@ -112,7 +120,11 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('me'),
     (0, swagger_1.ApiOperation)({ summary: 'Update current user profile' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'Updated user object.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Updated user object.',
+        schema: api_responses_1.UserSchema,
+    }),
     (0, swagger_1.ApiResponse)(api_responses_1.R400),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),
@@ -156,7 +168,11 @@ __decorate([
 __decorate([
     (0, common_1.Patch)(':id/suspend'),
     (0, swagger_1.ApiOperation)({ summary: 'Suspend a user account' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'Suspended user object (isActive: false).', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Suspended user object (isActive: false).',
+        schema: api_responses_1.UserSchema,
+    }),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),
     (0, swagger_1.ApiResponse)(api_responses_1.R404),
@@ -170,7 +186,11 @@ __decorate([
 __decorate([
     (0, common_1.Delete)(':id'),
     (0, swagger_1.ApiOperation)({ summary: 'Soft delete a user account' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'User soft-deleted (deletedAt is set, record still exists in DB).', ...api_responses_1.SuccessResponse }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'User soft-deleted (deletedAt is set, record still exists in DB).',
+        ...api_responses_1.SuccessResponse,
+    }),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),
     (0, swagger_1.ApiResponse)(api_responses_1.R404),
@@ -184,7 +204,11 @@ __decorate([
 __decorate([
     (0, common_1.Post)(':id/role'),
     (0, swagger_1.ApiOperation)({ summary: 'Assign a new role to a user' }),
-    (0, swagger_1.ApiResponse)({ status: 201, description: 'Updated user object with new role.', schema: api_responses_1.UserSchema }),
+    (0, swagger_1.ApiResponse)({
+        status: 201,
+        description: 'Updated user object with new role.',
+        schema: api_responses_1.UserSchema,
+    }),
     (0, swagger_1.ApiResponse)(api_responses_1.R400),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),

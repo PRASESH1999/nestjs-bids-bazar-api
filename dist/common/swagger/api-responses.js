@@ -77,7 +77,11 @@ exports.CategorySchema = {
             example: '11000000-0000-0000-0000-000000000001',
         },
         name: { type: 'string', example: 'Electronics' },
-        iconPath: { type: 'string', nullable: true, example: '/category-icons/electronics.png' },
+        iconPath: {
+            type: 'string',
+            nullable: true,
+            example: '/category-icons/electronics.png',
+        },
         displayOrder: { type: 'number', example: 0 },
         isActive: { type: 'boolean', example: true },
         createdAt: {
@@ -106,7 +110,11 @@ exports.SubcategorySchema = {
             example: '11000000-0000-0000-0000-000000000001',
         },
         name: { type: 'string', example: 'Mobile Phones' },
-        iconPath: { type: 'string', nullable: true, example: '/category-icons/mobile.png' },
+        iconPath: {
+            type: 'string',
+            nullable: true,
+            example: '/category-icons/mobile.png',
+        },
         displayOrder: { type: 'number', example: 0 },
         isActive: { type: 'boolean', example: true },
         createdAt: {

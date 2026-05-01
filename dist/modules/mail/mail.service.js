@@ -51,6 +51,9 @@ const kyc_approved_template_1 = require("./templates/kyc-approved.template");
 const kyc_received_template_1 = require("./templates/kyc-received.template");
 const kyc_rejected_template_1 = require("./templates/kyc-rejected.template");
 const verify_email_template_1 = require("./templates/verify-email.template");
+const product_submitted_template_1 = require("./templates/product-submitted.template");
+const product_approved_template_1 = require("./templates/product-approved.template");
+const product_rejected_template_1 = require("./templates/product-rejected.template");
 let MailService = MailService_1 = class MailService {
     configService;
     logger = new common_1.Logger(MailService_1.name);
@@ -106,6 +109,25 @@ let MailService = MailService_1 = class MailService {
         await this.send(to, subject, html);
         this.logger.log('KYC rejected email dispatched', { to });
     }
+    async sendProductSubmitted(to, name, productTitle) {
+        const { subject, html } = (0, product_submitted_template_1.productSubmittedTemplate)(name, productTitle);
+        await this.send(to, subject, html);
+        this.logger.log('Product submitted email dispatched', { to });
+    }
+    async sendProductApproved(to, name, productTitle) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const listingUrl = `${frontendUrl}/products`;
+        const { subject, html } = (0, product_approved_template_1.productApprovedTemplate)(name, productTitle, listingUrl);
+        await this.send(to, subject, html);
+        this.logger.log('Product approved email dispatched', { to });
+    }
+    async sendProductRejected(to, name, productTitle, reason) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const resubmitUrl = `${frontendUrl}/products/me`;
+        const { subject, html } = (0, product_rejected_template_1.productRejectedTemplate)(name, productTitle, reason, resubmitUrl);
+        await this.send(to, subject, html);
+        this.logger.log('Product rejected email dispatched', { to });
+    }
     async send(to, subject, html) {
         const from = this.configService.getOrThrow('MAIL_FROM');
         try {
@@ -113,7 +135,11 @@ let MailService = MailService_1 = class MailService {
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            this.logger.error('Failed to send email', { to, subject, error: message });
+            this.logger.error('Failed to send email', {
+                to,
+                subject,
+                error: message,
+            });
         }
     }
 };

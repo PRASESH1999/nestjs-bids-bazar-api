@@ -114,7 +114,10 @@ __decorate([
     __metadata("design:type", String)
 ], SubmitKycDto.prototype, "accountHolderName", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: '1234567890', description: '9–20 digit account number' }),
+    (0, swagger_1.ApiProperty)({
+        example: '1234567890',
+        description: '9–20 digit account number',
+    }),
     (0, class_validator_1.Matches)(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' }),
     __metadata("design:type", String)
 ], SubmitKycDto.prototype, "accountNumber", void 0);

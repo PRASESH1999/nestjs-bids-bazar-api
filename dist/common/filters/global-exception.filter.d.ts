@@ -1,6 +1,6 @@
 import { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
-export declare class GlobalExceptionFilter implements ExceptionFilter {
+export declare class GlobalExceptionFilter implements ExceptionFilter<unknown> {
     private readonly logger;
-    catch(exception: any, host: ArgumentsHost): void;
+    catch(exception: unknown, host: ArgumentsHost): void;
     private getErrorCodeFromStatus;
 }

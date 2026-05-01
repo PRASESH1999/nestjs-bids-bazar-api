@@ -25,5 +25,5 @@ async function run() {
         }
     }
 }
-run();
+void run();
 //# sourceMappingURL=users-runner.js.map

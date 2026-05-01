@@ -27,11 +27,15 @@ let HierarchyGuard = class HierarchyGuard {
         if (currentUser.role === role_enum_1.Role.SUPERADMIN) {
             return true;
         }
-        const targetUserId = request.params.id || request.body.userId;
+        const rawBody = request.body;
+        const bodyUserId = typeof rawBody.userId === 'string' ? rawBody.userId : undefined;
+        const rawParamId = request.params.id;
+        const paramId = Array.isArray(rawParamId) ? rawParamId[0] : rawParamId;
+        const targetUserId = paramId || bodyUserId;
         if (!targetUserId) {
             throw new common_1.ForbiddenException('Target user ID not provided');
         }
-        if (currentUser.id === targetUserId) {
+        if (currentUser.sub === targetUserId) {
             return true;
         }
         const targetUser = await this.usersService.findById(targetUserId);

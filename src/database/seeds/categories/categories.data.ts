@@ -112,11 +112,6 @@ export const CATEGORIES_SEED: CategorySeed[] = [
   },
   {
     name: 'Hobbies & Collectibles',
-    subcategories: [
-      'Musical Instruments',
-      'Art',
-      'Antiques',
-      'Toys & Games',
-    ],
+    subcategories: ['Musical Instruments', 'Art', 'Antiques', 'Toys & Games'],
   },
 ];

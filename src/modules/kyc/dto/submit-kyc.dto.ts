@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 import { DocumentType } from '@common/enums/document-type.enum';
 
 export class SubmitKycDto {
@@ -74,7 +80,10 @@ export class SubmitKycDto {
   @IsNotEmpty()
   accountHolderName: string;
 
-  @ApiProperty({ example: '1234567890', description: '9–20 digit account number' })
+  @ApiProperty({
+    example: '1234567890',
+    description: '9–20 digit account number',
+  })
   @Matches(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' })
   accountNumber: string;
 

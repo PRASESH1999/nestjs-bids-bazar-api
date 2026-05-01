@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { Permission } from '../enums/permission.enum';
 import { Role } from '../enums/role.enum';
 import { PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
+import type { RequestWithUser } from '../interfaces/request-with-user.interface';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -23,19 +24,18 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
-    const { user } = context.switchToHttp().getRequest();
+    const { user } = context.switchToHttp().getRequest<RequestWithUser>();
     if (!user) {
       throw new ForbiddenException('No user attached to request');
     }
 
-    // SUPERADMIN bypasses all permission checks
     if (user.role === Role.SUPERADMIN) {
       return true;
     }
 
     const hasPermission = () =>
       requiredPermissions.some((permission) =>
-        user.permissions?.includes(permission),
+        user.permissions.includes(permission),
       );
 
     if (!hasPermission()) {

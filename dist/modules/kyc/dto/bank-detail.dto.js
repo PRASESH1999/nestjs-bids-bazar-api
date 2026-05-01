@@ -33,7 +33,10 @@ __decorate([
     __metadata("design:type", String)
 ], BankDetailDto.prototype, "accountHolderName", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: '0123456789', description: '9–20 digit account number' }),
+    (0, swagger_1.ApiProperty)({
+        example: '0123456789',
+        description: '9–20 digit account number',
+    }),
     (0, class_validator_1.IsNotEmpty)(),
     (0, class_validator_1.Matches)(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' }),
     __metadata("design:type", String)

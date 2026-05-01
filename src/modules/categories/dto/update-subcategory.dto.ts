@@ -9,7 +9,7 @@ export class UpdateSubcategoryDto extends PartialType(CreateSubcategoryDto) {
     description: 'Set active or inactive status',
   })
   @IsOptional()
-  @Transform(({ value }) => {
+  @Transform(({ value }: { value: unknown }) => {
     if (value === 'true') return true;
     if (value === 'false') return false;
     return value;

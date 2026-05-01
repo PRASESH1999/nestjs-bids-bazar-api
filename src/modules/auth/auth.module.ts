@@ -27,7 +27,7 @@ import { AuthRepository } from './auth.repository';
           .get<string>('JWT_PUBLIC_KEY')
           ?.replace(/\\n/g, '\n'),
         signOptions: {
-          expiresIn: configService.get<string>('JWT_EXPIRES_IN', '15m') as any,
+          expiresIn: configService.get('JWT_EXPIRES_IN', '15m'),
           algorithm: 'RS256',
         },
       }),

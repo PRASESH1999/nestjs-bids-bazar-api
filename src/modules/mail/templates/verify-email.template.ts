@@ -1,7 +1,8 @@
 /** Returns the subject and HTML body for the email verification email. */
-export function verifyEmailTemplate(
-  verificationUrl: string,
-): { subject: string; html: string } {
+export function verifyEmailTemplate(verificationUrl: string): {
+  subject: string;
+  html: string;
+} {
   return {
     subject: 'Verify your email — BidsBazar',
     html: `

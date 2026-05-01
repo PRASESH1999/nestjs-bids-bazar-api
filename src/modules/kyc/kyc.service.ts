@@ -95,7 +95,9 @@ export class KycService {
     }
 
     // Encrypt sensitive bank fields
-    const encryptedAccountNumber = this.encryptionService.encrypt(dto.accountNumber);
+    const encryptedAccountNumber = this.encryptionService.encrypt(
+      dto.accountNumber,
+    );
     const encryptedBranch = this.encryptionService.encrypt(dto.branch);
     const encryptedSwiftCode = dto.swiftCode
       ? this.encryptionService.encrypt(dto.swiftCode)

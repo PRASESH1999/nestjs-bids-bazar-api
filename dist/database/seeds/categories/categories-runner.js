@@ -25,5 +25,5 @@ async function run() {
         }
     }
 }
-run();
+void run();
 //# sourceMappingURL=categories-runner.js.map

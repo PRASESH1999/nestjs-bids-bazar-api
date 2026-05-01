@@ -22,6 +22,13 @@ export enum Permission {
   KYC_REVIEW = 'kyc:review',
   BANK_VIEW_DECRYPTED = 'bank:view_decrypted',
 
+  // Product permissions
+  PRODUCT_CREATE = 'product:create',
+  PRODUCT_MANAGE_OWN = 'product:manage_own',
+  PRODUCT_VIEW_OWN = 'product:view_own',
+  PRODUCT_MODERATE = 'product:moderate',
+  PRODUCT_VIEW_ALL = 'product:view_all',
+
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',
   ADMIN_MANAGE = 'admin:manage',

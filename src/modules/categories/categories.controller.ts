@@ -50,7 +50,12 @@ export class CategoriesController {
   @Get()
   @Public()
   @ApiOperation({ summary: 'List all active categories (public)' })
-  @ApiResponse({ status: 200, description: 'Array of active categories, ordered by displayOrder then name.', schema: { type: 'array', items: CategorySchema } })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Array of active categories, ordered by displayOrder then name.',
+    schema: { type: 'array', items: CategorySchema },
+  })
   async listCategories() {
     return this.categoriesService.listCategories(false);
   }
@@ -58,7 +63,11 @@ export class CategoriesController {
   @Get(':id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get category by ID (Admin/SuperAdmin only)' })
-  @ApiResponse({ status: 200, description: 'Category object.', schema: CategorySchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Category object.',
+    schema: CategorySchema,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @ApiResponse(R404)
@@ -82,7 +91,11 @@ export class CategoriesController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Category created.', schema: CategorySchema })
+  @ApiResponse({
+    status: 201,
+    description: 'Category created.',
+    schema: CategorySchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)
@@ -112,7 +125,11 @@ export class CategoriesController {
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'Updated category object.', schema: CategorySchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated category object.',
+    schema: CategorySchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)
@@ -133,8 +150,18 @@ export class CategoriesController {
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Soft-delete a category (Admin/SuperAdmin only)' })
-  @ApiResponse({ status: 200, description: 'Category deactivated (isActive set to false). Hard delete is not performed.', ...SuccessResponse })
-  @ApiResponse({ status: 409, description: 'Cannot deactivate — category has active subcategories. Deactivate subcategories first.', ...R409 })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Category deactivated (isActive set to false). Hard delete is not performed.',
+    ...SuccessResponse,
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Cannot deactivate — category has active subcategories. Deactivate subcategories first.',
+    ...R409,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @ApiResponse(R404)

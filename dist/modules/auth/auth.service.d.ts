@@ -13,7 +13,7 @@ export declare class AuthService {
     private authRepository;
     constructor(usersService: UsersService, jwtService: JwtService, configService: ConfigService, mailService: MailService, authRepository: AuthRepository);
     validateUser(email: string, pass: string): Promise<Partial<User> | null>;
-    login(user: User): Promise<{
+    login(user: Pick<User, 'id' | 'email' | 'role' | 'isEmailVerified'>): Promise<{
         accessToken: string;
         refreshToken: string;
     }>;

@@ -12,7 +12,10 @@ export class BankDetailDto {
   @IsString()
   accountHolderName: string;
 
-  @ApiProperty({ example: '0123456789', description: '9–20 digit account number' })
+  @ApiProperty({
+    example: '0123456789',
+    description: '9–20 digit account number',
+  })
   @IsNotEmpty()
   @Matches(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' })
   accountNumber: string;

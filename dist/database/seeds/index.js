@@ -27,5 +27,5 @@ async function runSeeds() {
         }
     }
 }
-runSeeds();
+void runSeeds();
 //# sourceMappingURL=index.js.map

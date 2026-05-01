@@ -11,6 +11,9 @@ export const RolePermissionsMap: Record<Role, Permission[]> = {
     Permission.PROFILE_EDIT,
     Permission.KYC_SUBMIT,
     Permission.KYC_VIEW_OWN,
+    Permission.PRODUCT_CREATE,
+    Permission.PRODUCT_MANAGE_OWN,
+    Permission.PRODUCT_VIEW_OWN,
   ],
   [Role.ADMIN]: [
     Permission.USER_VIEW,
@@ -21,6 +24,8 @@ export const RolePermissionsMap: Record<Role, Permission[]> = {
     Permission.PROFILE_VIEW,
     Permission.KYC_VIEW_ALL,
     Permission.KYC_REVIEW,
+    Permission.PRODUCT_MODERATE,
+    Permission.PRODUCT_VIEW_ALL,
   ],
   [Role.SUPERADMIN]: Object.values(Permission), // SUPERADMIN bypasses checks, but this explicitly maps all for completeness
 };

@@ -37,7 +37,9 @@ export class AuthRepository {
   /**
    * Find a token record by its SHA-256 hash.
    */
-  async findByTokenHash(tokenHash: string): Promise<EmailVerificationToken | null> {
+  async findByTokenHash(
+    tokenHash: string,
+  ): Promise<EmailVerificationToken | null> {
     return this.repo.findOneBy({ tokenHash });
   }
 

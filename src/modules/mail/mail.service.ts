@@ -5,6 +5,9 @@ import { kycApprovedTemplate } from './templates/kyc-approved.template';
 import { kycReceivedTemplate } from './templates/kyc-received.template';
 import { kycRejectedTemplate } from './templates/kyc-rejected.template';
 import { verifyEmailTemplate } from './templates/verify-email.template';
+import { productSubmittedTemplate } from './templates/product-submitted.template';
+import { productApprovedTemplate } from './templates/product-approved.template';
+import { productRejectedTemplate } from './templates/product-rejected.template';
 
 /**
  * Global mail service that wraps nodemailer for all transactional emails.
@@ -15,7 +18,7 @@ export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
 
-  constructor(private readonly configService: ConfigService) { }
+  constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
     this.transporter = nodemailer.createTransport({
@@ -47,7 +50,8 @@ export class MailService implements OnModuleInit {
    * The raw token is embedded in the link — never logged.
    */
   async sendVerificationEmail(to: string, rawToken: string): Promise<void> {
-    const frontendUrl = this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
     const verificationUrl = `${frontendUrl}/auth/verify-email?token=${rawToken}`;
     const { subject, html } = verifyEmailTemplate(verificationUrl);
     await this.send(to, subject, html);
@@ -67,7 +71,8 @@ export class MailService implements OnModuleInit {
    * Notify a user that their KYC has been approved and they can now sell.
    */
   async sendKycApproved(to: string, name: string): Promise<void> {
-    const frontendUrl = this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
     const sellingUrl = `${frontendUrl}/sell`;
     const { subject, html } = kycApprovedTemplate(name, sellingUrl);
     await this.send(to, subject, html);
@@ -77,12 +82,66 @@ export class MailService implements OnModuleInit {
   /**
    * Notify a user that their KYC has been rejected with the reason.
    */
-  async sendKycRejected(to: string, name: string, reason: string): Promise<void> {
-    const frontendUrl = this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+  async sendKycRejected(
+    to: string,
+    name: string,
+    reason: string,
+  ): Promise<void> {
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
     const resubmitUrl = `${frontendUrl}/kyc/submit`;
     const { subject, html } = kycRejectedTemplate(name, reason, resubmitUrl);
     await this.send(to, subject, html);
     this.logger.log('KYC rejected email dispatched', { to });
+  }
+
+  /** Notify the product owner that their listing is under admin review. */
+  async sendProductSubmitted(
+    to: string,
+    name: string,
+    productTitle: string,
+  ): Promise<void> {
+    const { subject, html } = productSubmittedTemplate(name, productTitle);
+    await this.send(to, subject, html);
+    this.logger.log('Product submitted email dispatched', { to });
+  }
+
+  /** Notify the product owner that their listing has been approved and is live. */
+  async sendProductApproved(
+    to: string,
+    name: string,
+    productTitle: string,
+  ): Promise<void> {
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+    const listingUrl = `${frontendUrl}/products`;
+    const { subject, html } = productApprovedTemplate(
+      name,
+      productTitle,
+      listingUrl,
+    );
+    await this.send(to, subject, html);
+    this.logger.log('Product approved email dispatched', { to });
+  }
+
+  /** Notify the product owner that their listing was rejected, with the reason. */
+  async sendProductRejected(
+    to: string,
+    name: string,
+    productTitle: string,
+    reason: string,
+  ): Promise<void> {
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+    const resubmitUrl = `${frontendUrl}/products/me`;
+    const { subject, html } = productRejectedTemplate(
+      name,
+      productTitle,
+      reason,
+      resubmitUrl,
+    );
+    await this.send(to, subject, html);
+    this.logger.log('Product rejected email dispatched', { to });
   }
 
   /** Internal send helper — centralises the from address and error handling. */
@@ -92,7 +151,11 @@ export class MailService implements OnModuleInit {
       await this.transporter.sendMail({ from, to, subject, html });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error('Failed to send email', { to, subject, error: message });
+      this.logger.error('Failed to send email', {
+        to,
+        subject,
+        error: message,
+      });
       // Do not rethrow — mail failures must not break the HTTP response
     }
   }

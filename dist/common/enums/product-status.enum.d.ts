@@ -1,0 +1,16 @@
+export declare enum ProductStatus {
+    DRAFT = "DRAFT",
+    SUBMITTED = "SUBMITTED",
+    REJECTED = "REJECTED",
+    APPROVED = "APPROVED",
+    PENDING = "PENDING",
+    ACTIVE = "ACTIVE",
+    CLOSED = "CLOSED",
+    AWAITING_PAYMENT = "AWAITING_PAYMENT",
+    SETTLED = "SETTLED",
+    PAYMENT_FAILED = "PAYMENT_FAILED",
+    ABANDONED = "ABANDONED",
+    WITHDRAWN = "WITHDRAWN"
+}
+export declare const PUBLICLY_VISIBLE_STATUSES: ProductStatus[];
+export declare const OWNER_EDITABLE_STATUSES: ProductStatus[];

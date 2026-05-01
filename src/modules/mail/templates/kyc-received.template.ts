@@ -1,7 +1,8 @@
 /** Returns the subject and HTML body for the KYC submission received notification. */
-export function kycReceivedTemplate(
-  name: string,
-): { subject: string; html: string } {
+export function kycReceivedTemplate(name: string): {
+  subject: string;
+  html: string;
+} {
   return {
     subject: 'KYC Submission Received — BidsBazar',
     html: `

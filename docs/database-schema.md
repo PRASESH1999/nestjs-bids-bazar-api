@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-04-29 by agent_
+_Last updated: 2026-04-29 by agent (Products module added)_
 
 ---
 
@@ -14,7 +14,11 @@ erDiagram
     USER ||--o| KYCVERIFICATION : "has KYC"
     USER ||--o| BANKDETAIL : "has bank"
     USER ||--o{ EMAILVERIFICATIONTOKEN : "has tokens"
+    USER ||--o{ PRODUCT : "lists"
     CATEGORY ||--o{ SUBCATEGORY : "contains"
+    CATEGORY ||--o{ PRODUCT : "categorises"
+    SUBCATEGORY ||--o{ PRODUCT : "categorises"
+    PRODUCT ||--|{ PRODUCTIMAGE : "has images"
 ```
 
 ---
@@ -101,10 +105,55 @@ erDiagram
         timestamp deletedAt
     }
 
+    PRODUCT {
+        uuid id PK
+        uuid ownerId FK
+        string title
+        text description
+        uuid categoryId FK
+        uuid subcategoryId FK
+        enum condition
+        enum status
+        decimal basePrice
+        decimal biddingStartPrice
+        string currency
+        int biddingDurationHours
+        decimal currentHighestBid
+        uuid currentHighestBidderId
+        timestamp biddingStartedAt
+        timestamp biddingEndsAt
+        timestamp submittedAt
+        uuid reviewedById
+        timestamp reviewedAt
+        string rejectionReason
+        string locationProvince
+        string locationDistrict
+        string locationArea
+        timestamp withdrawnAt
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp deletedAt
+    }
+
+    PRODUCTIMAGE {
+        uuid id PK
+        uuid productId FK
+        string filePath
+        string originalFilename
+        string mimeType
+        int sizeBytes
+        int displayOrder
+        timestamp createdAt
+    }
+
     USER ||--o| KYCVERIFICATION : "has KYC"
     USER ||--o| BANKDETAIL : "has bank"
     USER ||--o{ EMAILVERIFICATIONTOKEN : "has tokens"
+    USER ||--o{ PRODUCT : "lists"
     CATEGORY ||--o{ SUBCATEGORY : "contains"
+    CATEGORY ||--o{ PRODUCT : "categorises"
+    SUBCATEGORY ||--o{ PRODUCT : "categorises"
+    PRODUCT ||--|{ PRODUCTIMAGE : "has images"
 ```
 
 ---
@@ -153,3 +202,22 @@ erDiagram
 - `displayOrder` controls sort order within the parent category.
 - `isActive` soft-disables the subcategory without deletion.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
+
+### PRODUCT
+- `ownerId` references `users.id` — stored as a plain UUID column (no TypeORM `@ManyToOne` relation defined to avoid joins on every load).
+- `condition` enum values: `NEW`, `LIKE_NEW`, `USED_GOOD`, `USED_FAIR`, `FOR_PARTS`.
+- `status` enum values: `DRAFT`, `SUBMITTED`, `REJECTED`, `APPROVED`, `PENDING`, `ACTIVE`, `CLOSED`, `AWAITING_PAYMENT`, `SETTLED`, `PAYMENT_FAILED`, `ABANDONED`, `WITHDRAWN`. Default: `DRAFT`. See Rule 13 for full state machine.
+- `basePrice` is the user-entered desired price. `biddingStartPrice` is auto-computed as `basePrice * 1.10` and stored so the bidding module never recomputes it.
+- `biddingDurationHours` — countdown duration (hours) after the first bid is placed; configurable per product, default 72.
+- `currentHighestBid`, `currentHighestBidderId`, `biddingStartedAt`, `biddingEndsAt` — reserved for the future Bidding module; null until bidding begins.
+- `reviewedById` references `users.id` (the admin who reviewed) — plain UUID column, no TypeORM relation.
+- `locationProvince`, `locationDistrict`, `locationArea` — nullable, reserved for future location-based filtering.
+- Composite indexes: `(status, createdAt)` for public listing, `(ownerId, status)` for "my products" queries, `(categoryId, subcategoryId)` for filters.
+- `deletedAt` soft-delete inherited from `BaseEntity`.
+
+### PRODUCTIMAGE
+- `productId` is a foreign key with `ON DELETE CASCADE` — images are hard-deleted when their product is hard-deleted.
+- `(productId, displayOrder)` has a **composite unique constraint** — each display position is unique per product.
+- `displayOrder: 0` designates the primary/thumbnail image.
+- `filePath` stores the relative path on disk under `UPLOAD_BASE_DIR/products/:productId/`.
+- Does **not** extend `BaseEntity` — has its own minimal schema (no `updatedAt`, no `deletedAt`).

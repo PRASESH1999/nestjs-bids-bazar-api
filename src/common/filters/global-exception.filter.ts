@@ -9,16 +9,21 @@ import {
 import { Request, Response } from 'express';
 import { QueryFailedError } from 'typeorm';
 
-/**
- * Centralized error handler.
- * Ensures all errors follow the standard response envelope:
- * { data: null, meta: null, error: { code, message, statusCode } }
- */
+interface HttpExceptionResponseBody {
+  message?: string;
+  errorCode?: string;
+  fields?: { field: string; message: string }[];
+}
+
+interface PostgresQueryError extends QueryFailedError {
+  code: string;
+}
+
 @Catch()
-export class GlobalExceptionFilter implements ExceptionFilter {
+export class GlobalExceptionFilter implements ExceptionFilter<unknown> {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
-  catch(exception: any, host: ArgumentsHost) {
+  catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
@@ -26,19 +31,22 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
     let code = 'INTERNAL_SERVER_ERROR';
-    let fields: any[] | undefined;
+    let fields: { field: string; message: string }[] | undefined;
 
-    // Handle NestJS Built-in HttpExceptions
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
-      const res: any = exception.getResponse();
-      message = res.message || exception.message;
-      code = res.errorCode || this.getErrorCodeFromStatus(statusCode);
-      fields = res.fields; // For validation errors
-    }
-    // Handle TypeORM Query Errors (Unique Constraints, etc.)
-    else if (exception instanceof QueryFailedError) {
-      const dbError = exception as any;
+      const rawRes = exception.getResponse();
+      if (typeof rawRes === 'object' && rawRes !== null) {
+        const res = rawRes as HttpExceptionResponseBody;
+        message = res.message ?? exception.message;
+        code = res.errorCode ?? this.getErrorCodeFromStatus(statusCode);
+        fields = res.fields;
+      } else {
+        message = String(rawRes);
+        code = this.getErrorCodeFromStatus(statusCode);
+      }
+    } else if (exception instanceof QueryFailedError) {
+      const dbError = exception as PostgresQueryError;
       if (dbError.code === '23505') {
         statusCode = HttpStatus.CONFLICT;
         code = 'DUPLICATE_RESOURCE';
@@ -50,17 +58,17 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
     }
 
-    // Log the error
-    if (statusCode >= 500) {
+    const errorStack = exception instanceof Error ? exception.stack : undefined;
+
+    if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
         `${request.method} ${request.url} - ${statusCode}`,
-        exception.stack,
+        errorStack,
       );
     } else {
       this.logger.warn(`${request.method} ${request.url} - ${statusCode}`);
     }
 
-    // Standard Response Envelope
     response.status(statusCode).json({
       data: null,
       meta: null,
@@ -69,21 +77,31 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message,
         statusCode,
         ...(fields ? { fields } : {}),
-        ...(process.env.NODE_ENV === 'development' ? { stack: exception.stack } : {}),
+        ...(process.env.NODE_ENV === 'development'
+          ? { stack: errorStack }
+          : {}),
       },
     });
   }
 
   private getErrorCodeFromStatus(status: number): string {
     switch (status) {
-      case 400: return 'BAD_REQUEST';
-      case 401: return 'UNAUTHORIZED';
-      case 403: return 'FORBIDDEN';
-      case 404: return 'NOT_FOUND';
-      case 409: return 'CONFLICT';
-      case 422: return 'UNPROCESSABLE_ENTITY';
-      case 429: return 'TOO_MANY_REQUESTS';
-      default: return 'INTERNAL_SERVER_ERROR';
+      case 400:
+        return 'BAD_REQUEST';
+      case 401:
+        return 'UNAUTHORIZED';
+      case 403:
+        return 'FORBIDDEN';
+      case 404:
+        return 'NOT_FOUND';
+      case 409:
+        return 'CONFLICT';
+      case 422:
+        return 'UNPROCESSABLE_ENTITY';
+      case 429:
+        return 'TOO_MANY_REQUESTS';
+      default:
+        return 'INTERNAL_SERVER_ERROR';
     }
   }
 }

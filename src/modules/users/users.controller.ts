@@ -16,7 +16,12 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import {
   R400,
   R401,
@@ -42,7 +47,11 @@ export class UsersController {
   @ApiOperation({
     summary: 'Create a new Admin or SuperAdmin (SuperAdmin only)',
   })
-  @ApiResponse({ status: 201, description: 'Admin/SuperAdmin account created.', schema: UserSchema })
+  @ApiResponse({
+    status: 201,
+    description: 'Admin/SuperAdmin account created.',
+    schema: UserSchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)
@@ -56,7 +65,11 @@ export class UsersController {
 
   @Get('me')
   @ApiOperation({ summary: 'Get current user profile' })
-  @ApiResponse({ status: 200, description: 'Current authenticated user object.', schema: UserSchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Current authenticated user object.',
+    schema: UserSchema,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @RequirePermissions(Permission.PROFILE_VIEW)
@@ -71,7 +84,11 @@ export class UsersController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Update current user profile' })
-  @ApiResponse({ status: 200, description: 'Updated user object.', schema: UserSchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated user object.',
+    schema: UserSchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)
@@ -136,7 +153,11 @@ export class UsersController {
 
   @Patch(':id/suspend')
   @ApiOperation({ summary: 'Suspend a user account' })
-  @ApiResponse({ status: 200, description: 'Suspended user object (isActive: false).', schema: UserSchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Suspended user object (isActive: false).',
+    schema: UserSchema,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @ApiResponse(R404)
@@ -150,7 +171,12 @@ export class UsersController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Soft delete a user account' })
-  @ApiResponse({ status: 200, description: 'User soft-deleted (deletedAt is set, record still exists in DB).', ...SuccessResponse })
+  @ApiResponse({
+    status: 200,
+    description:
+      'User soft-deleted (deletedAt is set, record still exists in DB).',
+    ...SuccessResponse,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @ApiResponse(R404)
@@ -163,7 +189,11 @@ export class UsersController {
 
   @Post(':id/role')
   @ApiOperation({ summary: 'Assign a new role to a user' })
-  @ApiResponse({ status: 201, description: 'Updated user object with new role.', schema: UserSchema })
+  @ApiResponse({
+    status: 201,
+    description: 'Updated user object with new role.',
+    schema: UserSchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)

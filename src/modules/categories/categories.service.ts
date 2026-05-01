@@ -92,7 +92,8 @@ export class CategoriesService {
       category.name = dto.name;
     }
 
-    if (dto.displayOrder !== undefined) category.displayOrder = dto.displayOrder;
+    if (dto.displayOrder !== undefined)
+      category.displayOrder = dto.displayOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;
 
     if (iconFile) {
@@ -162,17 +163,24 @@ export class CategoriesService {
         where: { id: dto.categoryId, isActive: true },
       });
       if (!parent) {
-        throw new NotFoundException('New parent category not found or inactive');
+        throw new NotFoundException(
+          'New parent category not found or inactive',
+        );
       }
       subcategory.categoryId = dto.categoryId;
     }
 
     if (dto.name !== undefined && dto.name !== subcategory.name) {
-      await this.assertSubcategoryNameUnique(subcategory.categoryId, dto.name, id);
+      await this.assertSubcategoryNameUnique(
+        subcategory.categoryId,
+        dto.name,
+        id,
+      );
       subcategory.name = dto.name;
     }
 
-    if (dto.displayOrder !== undefined) subcategory.displayOrder = dto.displayOrder;
+    if (dto.displayOrder !== undefined)
+      subcategory.displayOrder = dto.displayOrder;
     if (dto.isActive !== undefined) subcategory.isActive = dto.isActive;
 
     if (iconFile) {

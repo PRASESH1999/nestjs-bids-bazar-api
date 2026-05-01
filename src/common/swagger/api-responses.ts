@@ -87,7 +87,11 @@ export const CategorySchema = {
       example: '11000000-0000-0000-0000-000000000001',
     },
     name: { type: 'string', example: 'Electronics' },
-    iconPath: { type: 'string', nullable: true, example: '/category-icons/electronics.png' },
+    iconPath: {
+      type: 'string',
+      nullable: true,
+      example: '/category-icons/electronics.png',
+    },
     displayOrder: { type: 'number', example: 0 },
     isActive: { type: 'boolean', example: true },
     createdAt: {
@@ -117,7 +121,11 @@ export const SubcategorySchema = {
       example: '11000000-0000-0000-0000-000000000001',
     },
     name: { type: 'string', example: 'Mobile Phones' },
-    iconPath: { type: 'string', nullable: true, example: '/category-icons/mobile.png' },
+    iconPath: {
+      type: 'string',
+      nullable: true,
+      example: '/category-icons/mobile.png',
+    },
     displayOrder: { type: 'number', example: 0 },
     isActive: { type: 'boolean', example: true },
     createdAt: {
@@ -161,20 +169,31 @@ export const R404: ApiResponseOptions = {
 
 export const R409: ApiResponseOptions = {
   status: 409,
-  description: 'Conflict — a resource with the same unique value already exists.',
+  description:
+    'Conflict — a resource with the same unique value already exists.',
   schema: err('CONFLICT', 'Resource already exists', 409),
 };
 
 export const R410: ApiResponseOptions = {
   status: 410,
-  description: 'Gone — the resource existed but is no longer available (e.g. expired token).',
-  schema: err('GONE', 'Verification link has expired. Please request a new one.', 410),
+  description:
+    'Gone — the resource existed but is no longer available (e.g. expired token).',
+  schema: err(
+    'GONE',
+    'Verification link has expired. Please request a new one.',
+    410,
+  ),
 };
 
 export const R429: ApiResponseOptions = {
   status: 429,
-  description: 'Too many requests — rate limit exceeded. Retry after some time.',
-  schema: err('TOO_MANY_REQUESTS', 'Too many requests. Please try again later.', 429),
+  description:
+    'Too many requests — rate limit exceeded. Retry after some time.',
+  schema: err(
+    'TOO_MANY_REQUESTS',
+    'Too many requests. Please try again later.',
+    429,
+  ),
 };
 
 // ─── Shared Success Responses ─────────────────────────────────────────────────

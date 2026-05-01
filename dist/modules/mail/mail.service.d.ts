@@ -10,5 +10,8 @@ export declare class MailService implements OnModuleInit {
     sendKycReceived(to: string, name: string): Promise<void>;
     sendKycApproved(to: string, name: string): Promise<void>;
     sendKycRejected(to: string, name: string, reason: string): Promise<void>;
+    sendProductSubmitted(to: string, name: string, productTitle: string): Promise<void>;
+    sendProductApproved(to: string, name: string, productTitle: string): Promise<void>;
+    sendProductRejected(to: string, name: string, productTitle: string, reason: string): Promise<void>;
     private send;
 }

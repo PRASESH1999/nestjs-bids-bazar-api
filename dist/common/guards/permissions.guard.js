@@ -31,7 +31,7 @@ let PermissionsGuard = class PermissionsGuard {
         if (user.role === role_enum_1.Role.SUPERADMIN) {
             return true;
         }
-        const hasPermission = () => requiredPermissions.some((permission) => user.permissions?.includes(permission));
+        const hasPermission = () => requiredPermissions.some((permission) => user.permissions.includes(permission));
         if (!hasPermission()) {
             throw new common_1.ForbiddenException('Insufficient permissions');
         }

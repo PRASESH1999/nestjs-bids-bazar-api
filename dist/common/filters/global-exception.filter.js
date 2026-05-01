@@ -22,10 +22,17 @@ let GlobalExceptionFilter = GlobalExceptionFilter_1 = class GlobalExceptionFilte
         let fields;
         if (exception instanceof common_1.HttpException) {
             statusCode = exception.getStatus();
-            const res = exception.getResponse();
-            message = res.message || exception.message;
-            code = res.errorCode || this.getErrorCodeFromStatus(statusCode);
-            fields = res.fields;
+            const rawRes = exception.getResponse();
+            if (typeof rawRes === 'object' && rawRes !== null) {
+                const res = rawRes;
+                message = res.message ?? exception.message;
+                code = res.errorCode ?? this.getErrorCodeFromStatus(statusCode);
+                fields = res.fields;
+            }
+            else {
+                message = String(rawRes);
+                code = this.getErrorCodeFromStatus(statusCode);
+            }
         }
         else if (exception instanceof typeorm_1.QueryFailedError) {
             const dbError = exception;
@@ -40,8 +47,9 @@ let GlobalExceptionFilter = GlobalExceptionFilter_1 = class GlobalExceptionFilte
                 message = 'This operation violates a foreign key constraint.';
             }
         }
-        if (statusCode >= 500) {
-            this.logger.error(`${request.method} ${request.url} - ${statusCode}`, exception.stack);
+        const errorStack = exception instanceof Error ? exception.stack : undefined;
+        if (statusCode >= common_1.HttpStatus.INTERNAL_SERVER_ERROR) {
+            this.logger.error(`${request.method} ${request.url} - ${statusCode}`, errorStack);
         }
         else {
             this.logger.warn(`${request.method} ${request.url} - ${statusCode}`);
@@ -54,20 +62,30 @@ let GlobalExceptionFilter = GlobalExceptionFilter_1 = class GlobalExceptionFilte
                 message,
                 statusCode,
                 ...(fields ? { fields } : {}),
-                ...(process.env.NODE_ENV === 'development' ? { stack: exception.stack } : {}),
+                ...(process.env.NODE_ENV === 'development'
+                    ? { stack: errorStack }
+                    : {}),
             },
         });
     }
     getErrorCodeFromStatus(status) {
         switch (status) {
-            case 400: return 'BAD_REQUEST';
-            case 401: return 'UNAUTHORIZED';
-            case 403: return 'FORBIDDEN';
-            case 404: return 'NOT_FOUND';
-            case 409: return 'CONFLICT';
-            case 422: return 'UNPROCESSABLE_ENTITY';
-            case 429: return 'TOO_MANY_REQUESTS';
-            default: return 'INTERNAL_SERVER_ERROR';
+            case 400:
+                return 'BAD_REQUEST';
+            case 401:
+                return 'UNAUTHORIZED';
+            case 403:
+                return 'FORBIDDEN';
+            case 404:
+                return 'NOT_FOUND';
+            case 409:
+                return 'CONFLICT';
+            case 422:
+                return 'UNPROCESSABLE_ENTITY';
+            case 429:
+                return 'TOO_MANY_REQUESTS';
+            default:
+                return 'INTERNAL_SERVER_ERROR';
         }
     }
 };

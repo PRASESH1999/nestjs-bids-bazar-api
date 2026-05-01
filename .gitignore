@@ -54,7 +54,7 @@ build/config\.gypi
 pnpm-lock.yaml
 /.history
 
-# uploaded KYC documents — never commit user files
+# uploaded user files (KYC documents, product images) — never commit
 /uploads/
 
 # uploaded category icons — never commit user files

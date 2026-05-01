@@ -1,11 +1,15 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { RequestWithUser } from "../../common/interfaces/request-with-user.interface";
-import type { Response } from 'express';
+import type { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
+import type { User } from '../users/entities/user.entity';
+interface RefreshRequest extends ExpressRequest {
+    cookies: Record<string, string | undefined>;
+}
 export declare class AuthController {
     private authService;
     private jwtService;
@@ -14,7 +18,9 @@ export declare class AuthController {
     register(registerDto: RegisterDto): Promise<{
         message: string;
     }>;
-    login(req: RequestWithUser, res: Response): Promise<{
+    login(req: ExpressRequest & {
+        user: Pick<User, 'id' | 'email' | 'role' | 'isEmailVerified'>;
+    }, res: Response): Promise<{
         accessToken: string;
     }>;
     verifyEmail(query: VerifyEmailQueryDto): Promise<{
@@ -23,7 +29,7 @@ export declare class AuthController {
     resendVerification(dto: ResendVerificationDto): Promise<{
         message: string;
     }>;
-    refresh(req: any, res: Response): Promise<{
+    refresh(req: RefreshRequest, res: Response): Promise<{
         accessToken: string;
     }>;
     logout(req: RequestWithUser, res: Response): Promise<{
@@ -31,3 +37,4 @@ export declare class AuthController {
     }>;
     private setRefreshTokenCookie;
 }
+export {};

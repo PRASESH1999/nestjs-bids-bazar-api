@@ -60,7 +60,12 @@ export class SubcategoriesController {
     required: false,
     description: 'Filter by parent category UUID',
   })
-  @ApiResponse({ status: 200, description: 'Array of active subcategories, ordered by displayOrder then name. Pass ?categoryId to filter by parent.', schema: { type: 'array', items: SubcategorySchema } })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Array of active subcategories, ordered by displayOrder then name. Pass ?categoryId to filter by parent.',
+    schema: { type: 'array', items: SubcategorySchema },
+  })
   async listSubcategories(@Query('categoryId') categoryId?: string) {
     return this.categoriesService.listSubcategories({
       categoryId,
@@ -71,7 +76,11 @@ export class SubcategoriesController {
   @Get(':id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get subcategory by ID (Admin/SuperAdmin only)' })
-  @ApiResponse({ status: 200, description: 'Subcategory object.', schema: SubcategorySchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Subcategory object.',
+    schema: SubcategorySchema,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @ApiResponse(R404)
@@ -96,11 +105,19 @@ export class SubcategoriesController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Subcategory created.', schema: SubcategorySchema })
+  @ApiResponse({
+    status: 201,
+    description: 'Subcategory created.',
+    schema: SubcategorySchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)
-  @ApiResponse({ status: 404, description: 'Parent category not found or inactive.', ...R404 })
+  @ApiResponse({
+    status: 404,
+    description: 'Parent category not found or inactive.',
+    ...R404,
+  })
   @ApiResponse(R409)
   @RequirePermissions(Permission.CATEGORY_MANAGE)
   @UseInterceptors(FileInterceptor('icon', { storage: memoryStorage() }))
@@ -128,7 +145,11 @@ export class SubcategoriesController {
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'Updated subcategory object.', schema: SubcategorySchema })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated subcategory object.',
+    schema: SubcategorySchema,
+  })
   @ApiResponse(R400)
   @ApiResponse(R401)
   @ApiResponse(R403)
@@ -148,8 +169,14 @@ export class SubcategoriesController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Soft-delete a subcategory (Admin/SuperAdmin only)' })
-  @ApiResponse({ status: 200, description: 'Subcategory deactivated (isActive set to false).', ...SuccessResponse })
+  @ApiOperation({
+    summary: 'Soft-delete a subcategory (Admin/SuperAdmin only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Subcategory deactivated (isActive set to false).',
+    ...SuccessResponse,
+  })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @ApiResponse(R404)

@@ -30,9 +30,9 @@ let JwtAuthGuard = class JwtAuthGuard extends (0, passport_1.AuthGuard)('jwt') {
         }
         return super.canActivate(context);
     }
-    handleRequest(err, user, info) {
+    handleRequest(err, user) {
         if (err || !user) {
-            throw err || new common_1.UnauthorizedException();
+            throw err ?? new common_1.UnauthorizedException();
         }
         return user;
     }

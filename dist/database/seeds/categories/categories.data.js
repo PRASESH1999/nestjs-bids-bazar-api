@@ -113,12 +113,7 @@ exports.CATEGORIES_SEED = [
     },
     {
         name: 'Hobbies & Collectibles',
-        subcategories: [
-            'Musical Instruments',
-            'Art',
-            'Antiques',
-            'Toys & Games',
-        ],
+        subcategories: ['Musical Instruments', 'Art', 'Antiques', 'Toys & Games'],
     },
 ];
 //# sourceMappingURL=categories.data.js.map

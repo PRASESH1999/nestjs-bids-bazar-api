@@ -64,7 +64,9 @@ let KycController = class KycController {
 exports.KycController = KycController;
 __decorate([
     (0, common_1.Post)('submit'),
-    (0, swagger_1.ApiOperation)({ summary: 'Submit KYC documents and details for verification' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Submit KYC documents and details for verification',
+    }),
     (0, swagger_1.ApiConsumes)('multipart/form-data'),
     (0, swagger_1.ApiBody)({ type: submit_kyc_dto_1.SubmitKycDto }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.KYC_SUBMIT),
@@ -91,7 +93,9 @@ __decorate([
 ], KycController.prototype, "getMyKyc", null);
 __decorate([
     (0, common_1.Get)(),
-    (0, swagger_1.ApiOperation)({ summary: 'List all KYC submissions with optional status filter (Admin/SuperAdmin)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'List all KYC submissions with optional status filter (Admin/SuperAdmin)',
+    }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.KYC_VIEW_ALL),
     __param(0, (0, common_1.Query)()),
     __param(1, (0, common_1.Query)('status')),
@@ -110,7 +114,9 @@ __decorate([
 ], KycController.prototype, "getKycById", null);
 __decorate([
     (0, common_1.Patch)(':id/review'),
-    (0, swagger_1.ApiOperation)({ summary: 'Approve or reject a KYC submission (Admin/SuperAdmin)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Approve or reject a KYC submission (Admin/SuperAdmin)',
+    }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.KYC_REVIEW),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)()),
@@ -121,7 +127,9 @@ __decorate([
 ], KycController.prototype, "reviewKyc", null);
 __decorate([
     (0, common_1.Get)(':id/bank'),
-    (0, swagger_1.ApiOperation)({ summary: 'Get decrypted bank details for a KYC record (SuperAdmin only)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Get decrypted bank details for a KYC record (SuperAdmin only)',
+    }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.BANK_VIEW_DECRYPTED),
     __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -130,7 +138,9 @@ __decorate([
 ], KycController.prototype, "getDecryptedBankDetails", null);
 __decorate([
     (0, common_1.Get)(':id/documents/:fileKey'),
-    (0, swagger_1.ApiOperation)({ summary: 'Stream a KYC document file (Admin/SuperAdmin only)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Stream a KYC document file (Admin/SuperAdmin only)',
+    }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.KYC_VIEW_ALL),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Param)('fileKey')),

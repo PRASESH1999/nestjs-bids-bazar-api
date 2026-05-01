@@ -117,14 +117,20 @@ let AuthService = class AuthService {
     async sendVerificationEmail(userId, email) {
         await this.authRepository.deleteTokensByUserId(userId);
         const rawToken = crypto.randomBytes(32).toString('hex');
-        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const tokenHash = crypto
+            .createHash('sha256')
+            .update(rawToken)
+            .digest('hex');
         const expiresAt = new Date();
         expiresAt.setHours(expiresAt.getHours() + 24);
         await this.authRepository.saveToken(userId, tokenHash, expiresAt);
         await this.mailService.sendVerificationEmail(email, rawToken);
     }
     async verifyEmail(rawToken) {
-        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const tokenHash = crypto
+            .createHash('sha256')
+            .update(rawToken)
+            .digest('hex');
         const tokenRecord = await this.authRepository.findByTokenHash(tokenHash);
         if (!tokenRecord) {
             throw new common_1.NotFoundException('Invalid verification link');

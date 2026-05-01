@@ -1,0 +1,30 @@
+import { BaseEntity } from "../../../common/entities/base.entity";
+import { ItemCondition } from "../../../common/enums/item-condition.enum";
+import { ProductStatus } from "../../../common/enums/product-status.enum";
+import { ProductImage } from './product-image.entity';
+export declare class Product extends BaseEntity {
+    ownerId: string;
+    title: string;
+    description: string;
+    categoryId: string;
+    subcategoryId: string;
+    condition: ItemCondition;
+    status: ProductStatus;
+    basePrice: number;
+    biddingStartPrice: number;
+    currency: string;
+    biddingDurationHours: number;
+    currentHighestBid: number | null;
+    currentHighestBidderId: string | null;
+    biddingStartedAt: Date | null;
+    biddingEndsAt: Date | null;
+    submittedAt: Date | null;
+    reviewedById: string | null;
+    reviewedAt: Date | null;
+    rejectionReason: string | null;
+    locationProvince: string | null;
+    locationDistrict: string | null;
+    locationArea: string | null;
+    withdrawnAt: Date | null;
+    images: ProductImage[];
+}

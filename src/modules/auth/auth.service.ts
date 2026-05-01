@@ -41,7 +41,7 @@ export class AuthService {
     return null;
   }
 
-  async login(user: User) {
+  async login(user: Pick<User, 'id' | 'email' | 'role' | 'isEmailVerified'>) {
     if (!user.isEmailVerified) {
       throw new ForbiddenException({
         statusCode: 403,
@@ -101,7 +101,10 @@ export class AuthService {
     const rawToken = crypto.randomBytes(32).toString('hex');
 
     // Hash it for DB storage
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
 
     // Set expiry (24 hours)
     const expiresAt = new Date();
@@ -115,7 +118,10 @@ export class AuthService {
   }
 
   async verifyEmail(rawToken: string): Promise<void> {
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
     const tokenRecord = await this.authRepository.findByTokenHash(tokenHash);
 
     if (!tokenRecord) {
@@ -150,7 +156,10 @@ export class AuthService {
     // Rate limit: max 3 attempts per hour per user
     const oneHourAgo = new Date();
     oneHourAgo.setHours(oneHourAgo.getHours() - 1);
-    const count = await this.authRepository.countTokensSince(user.id, oneHourAgo);
+    const count = await this.authRepository.countTokensSince(
+      user.id,
+      oneHourAgo,
+    );
 
     if (count >= 3) {
       throw new ForbiddenException(
