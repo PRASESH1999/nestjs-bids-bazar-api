@@ -16,7 +16,7 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        deletedAt: Date;
+        deletedAt: Date | null;
     }>;
     getProfile(req: RequestWithUser): Promise<{
         name: string;
@@ -27,7 +27,7 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        deletedAt: Date;
+        deletedAt: Date | null;
     } | null>;
     updateProfile(req: RequestWithUser, updateData: UpdateUserDto): Promise<{
         name: string;
@@ -38,7 +38,7 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        deletedAt: Date;
+        deletedAt: Date | null;
     }>;
     findAll(req: RequestWithUser, pagination: PaginationDto): Promise<{
         data: {
@@ -50,7 +50,7 @@ export declare class UsersController {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            deletedAt: Date;
+            deletedAt: Date | null;
         }[];
         meta: {
             page: number | undefined;
@@ -67,7 +67,7 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        deletedAt: Date;
+        deletedAt: Date | null;
     }>;
     deleteUser(id: string): Promise<{
         success: boolean;
@@ -81,6 +81,6 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        deletedAt: Date;
+        deletedAt: Date | null;
     }>;
 }

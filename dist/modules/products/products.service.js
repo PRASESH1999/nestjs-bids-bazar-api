@@ -10,14 +10,14 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProductsService = void 0;
-const common_1 = require("@nestjs/common");
 const product_status_enum_1 = require("../../common/enums/product-status.enum");
-const kyc_service_1 = require("../kyc/kyc.service");
-const users_service_1 = require("../users/users.service");
 const categories_service_1 = require("../categories/categories.service");
+const kyc_service_1 = require("../kyc/kyc.service");
 const mail_service_1 = require("../mail/mail.service");
-const products_repository_1 = require("./products.repository");
+const users_service_1 = require("../users/users.service");
+const common_1 = require("@nestjs/common");
 const product_storage_service_1 = require("./product-storage.service");
+const products_repository_1 = require("./products.repository");
 const AUCTION_ACTIVE_STATUSES = [
     product_status_enum_1.ProductStatus.ACTIVE,
     product_status_enum_1.ProductStatus.CLOSED,
@@ -83,7 +83,7 @@ let ProductsService = class ProductsService {
             ...meta,
         }));
         await this.productsRepository.saveImages(images);
-        return this.productsRepository.findById(savedProduct.id);
+        return this.mapProduct((await this.productsRepository.findById(savedProduct.id)));
     }
     async updateProduct(userId, productId, dto, newImageFiles) {
         const product = await this.findOwnedProduct(userId, productId);
@@ -120,7 +120,7 @@ let ProductsService = class ProductsService {
             await this.productsRepository.saveImages(images);
         }
         await this.productsRepository.saveProduct(product);
-        return this.productsRepository.findById(productId);
+        return this.mapProduct((await this.productsRepository.findById(productId)));
     }
     async submitProduct(userId, productId) {
         const product = await this.findOwnedProduct(userId, productId);
@@ -141,7 +141,7 @@ let ProductsService = class ProductsService {
         if (user) {
             await this.mailService.sendProductSubmitted(user.email, user.name, saved.title);
         }
-        return saved;
+        return this.mapProduct(saved);
     }
     async withdrawProduct(userId, productId) {
         const product = await this.findOwnedProduct(userId, productId);
@@ -175,7 +175,10 @@ let ProductsService = class ProductsService {
             ...filters,
             ownerId: userId,
         });
-        return { data, meta: { page, limit, total } };
+        return {
+            data: data.map((p) => this.mapProduct(p)),
+            meta: { page, limit, total },
+        };
     }
     async listPublicProducts(query) {
         const { page = 1, limit = 20, ...filters } = query;
@@ -183,14 +186,20 @@ let ProductsService = class ProductsService {
             ...filters,
             statuses: product_status_enum_1.PUBLICLY_VISIBLE_STATUSES,
         });
-        return { data, meta: { page, limit, total } };
+        return {
+            data: data.map((p) => this.mapProduct(p)),
+            meta: { page, limit, total },
+        };
     }
-    async getPublicProductById(id) {
+    async getPublicProductById(id, requesterId = null) {
         const product = await this.productsRepository.findById(id);
-        if (!product || !product_status_enum_1.PUBLICLY_VISIBLE_STATUSES.includes(product.status)) {
+        if (!product)
+            throw new common_1.NotFoundException('Product not found');
+        const isOwner = requesterId !== null && product.ownerId === requesterId;
+        if (!product_status_enum_1.PUBLICLY_VISIBLE_STATUSES.includes(product.status) && !isOwner) {
             throw new common_1.NotFoundException('Product not found');
         }
-        return product;
+        return this.mapProduct(product);
     }
     async getProductImageFile(imageId, requesterId, requesterIsAdmin) {
         const image = await this.productsRepository.findImageById(imageId);
@@ -216,12 +225,15 @@ let ProductsService = class ProductsService {
         if (!isAdmin && product.ownerId !== userId) {
             throw new common_1.NotFoundException('Product not found');
         }
-        return product;
+        return this.mapProduct(product);
     }
     async listAllProducts(query) {
         const { page = 1, limit = 20, status, ownerId, ...filters } = query;
         const [data, total] = await this.productsRepository.findPaginatedWithOwner(page, limit, { ...filters, status, ownerId });
-        return { data, meta: { page, limit, total } };
+        return {
+            data: data.map((p) => this.mapProduct(p)),
+            meta: { page, limit, total },
+        };
     }
     async approveProduct(adminId, productId) {
         const product = await this.productsRepository.findByIdWithoutImages(productId);
@@ -238,7 +250,7 @@ let ProductsService = class ProductsService {
         if (owner) {
             await this.mailService.sendProductApproved(owner.email, owner.name, saved.title);
         }
-        return saved;
+        return this.mapProduct(saved);
     }
     async rejectProduct(adminId, productId, dto) {
         const product = await this.productsRepository.findByIdWithoutImages(productId);
@@ -256,7 +268,7 @@ let ProductsService = class ProductsService {
         if (owner) {
             await this.mailService.sendProductRejected(owner.email, owner.name, saved.title, dto.rejectionReason);
         }
-        return saved;
+        return this.mapProduct(saved);
     }
     async assertKycApproved(userId) {
         const verified = await this.kycService.isVerified(userId);
@@ -293,6 +305,43 @@ let ProductsService = class ProductsService {
     }
     computeBiddingStartPrice(basePrice) {
         return Math.round(basePrice * 1.1 * 100) / 100;
+    }
+    mapProduct(product) {
+        return {
+            id: product.id,
+            ownerId: product.ownerId,
+            title: product.title,
+            description: product.description,
+            categoryId: product.categoryId,
+            subcategoryId: product.subcategoryId,
+            condition: product.condition,
+            status: product.status,
+            basePrice: product.basePrice,
+            biddingStartPrice: product.biddingStartPrice,
+            currency: product.currency,
+            biddingDurationHours: product.biddingDurationHours,
+            currentHighestBid: product.currentHighestBid,
+            currentHighestBidderId: product.currentHighestBidderId,
+            biddingStartedAt: product.biddingStartedAt,
+            biddingEndsAt: product.biddingEndsAt,
+            submittedAt: product.submittedAt,
+            reviewedById: product.reviewedById,
+            reviewedAt: product.reviewedAt,
+            rejectionReason: product.rejectionReason,
+            locationProvince: product.locationProvince,
+            locationDistrict: product.locationDistrict,
+            locationArea: product.locationArea,
+            withdrawnAt: product.withdrawnAt,
+            createdAt: product.createdAt,
+            updatedAt: product.updatedAt,
+            deletedAt: product.deletedAt,
+            images: product.images?.map((img) => ({
+                id: img.id,
+                displayOrder: img.displayOrder,
+                mimeType: img.mimeType,
+                url: `/api/v1/products/${product.id}/images/${img.id}`,
+            })) || [],
+        };
     }
 };
 exports.ProductsService = ProductsService;

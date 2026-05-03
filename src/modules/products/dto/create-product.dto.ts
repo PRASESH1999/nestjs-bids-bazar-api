@@ -58,4 +58,5 @@ export class CreateProductDto {
   @Max(720)
   @IsOptional()
   biddingDurationHours?: number;
+
 }

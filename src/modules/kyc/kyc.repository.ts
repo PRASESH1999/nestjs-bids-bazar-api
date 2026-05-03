@@ -40,7 +40,7 @@ export class KycRepository {
       qb.where('kyc.status = :status', { status });
     }
     return qb
-      .orderBy('kyc.createdAt', 'DESC')
+      .orderBy('kyc.createdAt', 'ASC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();

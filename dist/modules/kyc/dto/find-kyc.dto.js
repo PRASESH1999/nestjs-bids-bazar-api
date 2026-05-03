@@ -9,29 +9,22 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BaseEntity = void 0;
-const typeorm_1 = require("typeorm");
-class BaseEntity {
-    id;
-    createdAt;
-    updatedAt;
-    deletedAt;
+exports.FindKycDto = void 0;
+const class_validator_1 = require("class-validator");
+const swagger_1 = require("@nestjs/swagger");
+const kyc_status_enum_1 = require("../../../common/enums/kyc-status.enum");
+const pagination_dto_1 = require("../../../common/dto/pagination.dto");
+class FindKycDto extends pagination_dto_1.PaginationDto {
+    status;
 }
-exports.BaseEntity = BaseEntity;
+exports.FindKycDto = FindKycDto;
 __decorate([
-    (0, typeorm_1.PrimaryGeneratedColumn)('uuid'),
+    (0, swagger_1.ApiPropertyOptional)({
+        enum: kyc_status_enum_1.KycStatus,
+        description: 'Filter by KYC status',
+    }),
+    (0, class_validator_1.IsEnum)(kyc_status_enum_1.KycStatus),
+    (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
-], BaseEntity.prototype, "id", void 0);
-__decorate([
-    (0, typeorm_1.CreateDateColumn)({ type: 'timestamptz' }),
-    __metadata("design:type", Date)
-], BaseEntity.prototype, "createdAt", void 0);
-__decorate([
-    (0, typeorm_1.UpdateDateColumn)({ type: 'timestamptz' }),
-    __metadata("design:type", Date)
-], BaseEntity.prototype, "updatedAt", void 0);
-__decorate([
-    (0, typeorm_1.DeleteDateColumn)({ type: 'timestamptz', nullable: true }),
-    __metadata("design:type", Object)
-], BaseEntity.prototype, "deletedAt", void 0);
-//# sourceMappingURL=base.entity.js.map
+], FindKycDto.prototype, "status", void 0);
+//# sourceMappingURL=find-kyc.dto.js.map

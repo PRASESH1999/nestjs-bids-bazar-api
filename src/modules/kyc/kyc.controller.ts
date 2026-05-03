@@ -27,11 +27,10 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
 import { Permission } from '@common/enums/permission.enum';
-import { KycStatus } from '@common/enums/kyc-status.enum';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
-import { PaginationDto } from '@common/dto/pagination.dto';
 import { KycService } from './kyc.service';
+import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 
@@ -85,11 +84,8 @@ export class KycController {
       'List all KYC submissions with optional status filter (Admin/SuperAdmin)',
   })
   @RequirePermissions(Permission.KYC_VIEW_ALL)
-  async getAllKyc(
-    @Query() pagination: PaginationDto,
-    @Query('status') status?: KycStatus,
-  ) {
-    return this.kycService.getAllKyc(pagination, status);
+  async getAllKyc(@Query() query: FindKycDto) {
+    return this.kycService.getAllKyc(query);
   }
 
   @Get(':id')

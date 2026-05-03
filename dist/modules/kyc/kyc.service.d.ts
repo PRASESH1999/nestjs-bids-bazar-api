@@ -2,8 +2,8 @@ import { EncryptionService } from "../../common/services/encryption.service";
 import { StorageService } from "../../common/services/storage.service";
 import { DocumentType } from "../../common/enums/document-type.enum";
 import { KycStatus } from "../../common/enums/kyc-status.enum";
-import { PaginationDto } from "../../common/dto/pagination.dto";
 import { KycRepository } from './kyc.repository';
+import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { MailService } from "../mail/mail.service";
@@ -43,8 +43,11 @@ export declare class KycService {
             accountHolderName: string;
             accountNumber: string;
         } | null;
+        citizenshipFrontUrl: string | null;
+        citizenshipBackUrl: string | null;
+        passportUrl: string | null;
     } | null>;
-    getAllKyc(pagination: PaginationDto, status?: KycStatus): Promise<{
+    getAllKyc(query: FindKycDto): Promise<{
         data: {
             id: string;
             userId: string;
@@ -53,6 +56,9 @@ export declare class KycService {
             rejectionReason: string | null;
             reviewedAt: Date | null;
             createdAt: Date;
+            citizenshipFrontUrl: string | null;
+            citizenshipBackUrl: string | null;
+            passportUrl: string | null;
         }[];
         meta: {
             page: number;
@@ -60,7 +66,22 @@ export declare class KycService {
             total: number;
         };
     }>;
-    getKycById(id: string): Promise<import("./entities/kyc-verification.entity").KycVerification>;
+    getKycById(id: string): Promise<{
+        id: string;
+        userId: string;
+        documentType: DocumentType;
+        permanentAddress: import("./entities/kyc-verification.entity").AddressData;
+        temporaryAddress: import("./entities/kyc-verification.entity").AddressData | null;
+        status: KycStatus;
+        rejectionReason: string | null;
+        reviewedBy: string | null;
+        reviewedAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+        citizenshipFrontUrl: string | null;
+        citizenshipBackUrl: string | null;
+        passportUrl: string | null;
+    }>;
     reviewKyc(id: string, dto: ReviewKycDto, reviewerUserId: string): Promise<import("./entities/kyc-verification.entity").KycVerification>;
     getDecryptedBankDetails(kycId: string): Promise<{
         id: string;
@@ -77,4 +98,5 @@ export declare class KycService {
     }>;
     isVerified(userId: string): Promise<boolean>;
     private maskAccountNumber;
+    private getVirtualDocumentUrl;
 }

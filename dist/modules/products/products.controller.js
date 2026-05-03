@@ -16,10 +16,12 @@ exports.ProductsController = void 0;
 const common_1 = require("@nestjs/common");
 const platform_express_1 = require("@nestjs/platform-express");
 const swagger_1 = require("@nestjs/swagger");
+const item_condition_enum_1 = require("../../common/enums/item-condition.enum");
 const fs_1 = require("fs");
 const multer_1 = require("multer");
 const require_permissions_decorator_1 = require("../../common/decorators/require-permissions.decorator");
 const public_decorator_1 = require("../../common/decorators/public.decorator");
+const optional_jwt_guard_1 = require("../../common/guards/optional-jwt.guard");
 const permission_enum_1 = require("../../common/enums/permission.enum");
 const role_enum_1 = require("../../common/enums/role.enum");
 const permissions_guard_1 = require("../../common/guards/permissions.guard");
@@ -41,8 +43,9 @@ let ProductsController = class ProductsController {
     async listMyProducts(req, query) {
         return this.productsService.listMyProducts(req.user.sub, query);
     }
-    async getPublicProduct(id) {
-        return this.productsService.getPublicProductById(id);
+    async getPublicProduct(id, req) {
+        const requesterId = req.user?.sub ?? null;
+        return this.productsService.getPublicProductById(id, requesterId);
     }
     async getProductImage(imageId, req, res) {
         const requesterId = req.user?.sub ?? null;
@@ -112,10 +115,12 @@ __decorate([
 __decorate([
     (0, common_1.Get)('products/:id'),
     (0, public_decorator_1.Public)(),
-    (0, swagger_1.ApiOperation)({ summary: 'Get a publicly visible product by ID' }),
+    (0, common_1.UseGuards)(optional_jwt_guard_1.OptionalJwtGuard),
+    (0, swagger_1.ApiOperation)({ summary: 'Get a product by ID (owner can view own product regardless of status)' }),
     __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Request)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], ProductsController.prototype, "getPublicProduct", null);
 __decorate([
@@ -134,6 +139,22 @@ __decorate([
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_CREATE),
     (0, swagger_1.ApiConsumes)('multipart/form-data'),
     (0, swagger_1.ApiOperation)({ summary: 'Create a new product listing (KYC required)' }),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            required: ['title', 'description', 'categoryId', 'subcategoryId', 'condition', 'basePrice'],
+            properties: {
+                title: { type: 'string', minLength: 5, maxLength: 150 },
+                description: { type: 'string', minLength: 20, maxLength: 5000 },
+                categoryId: { type: 'string', format: 'uuid' },
+                subcategoryId: { type: 'string', format: 'uuid' },
+                condition: { type: 'string', enum: Object.values(item_condition_enum_1.ItemCondition) },
+                basePrice: { type: 'number', minimum: 1 },
+                biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+                images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
+            },
+        },
+    }),
     (0, common_1.UseInterceptors)((0, platform_express_1.FilesInterceptor)('images', 8, multerOptions)),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Body)()),
@@ -147,6 +168,21 @@ __decorate([
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MANAGE_OWN),
     (0, swagger_1.ApiConsumes)('multipart/form-data'),
     (0, swagger_1.ApiOperation)({ summary: 'Update own product (DRAFT or REJECTED only)' }),
+    (0, swagger_1.ApiBody)({
+        schema: {
+            type: 'object',
+            properties: {
+                title: { type: 'string', minLength: 5, maxLength: 150 },
+                description: { type: 'string', minLength: 20, maxLength: 5000 },
+                categoryId: { type: 'string', format: 'uuid' },
+                subcategoryId: { type: 'string', format: 'uuid' },
+                condition: { type: 'string', enum: Object.values(item_condition_enum_1.ItemCondition) },
+                basePrice: { type: 'number', minimum: 1 },
+                biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+                images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
+            },
+        },
+    }),
     (0, common_1.UseInterceptors)((0, platform_express_1.FilesInterceptor)('images', 8, multerOptions)),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Param)('id')),

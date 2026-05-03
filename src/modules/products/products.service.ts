@@ -1,26 +1,37 @@
 import {
+  OWNER_EDITABLE_STATUSES,
+  PUBLICLY_VISIBLE_STATUSES,
+  ProductStatus,
+} from '@common/enums/product-status.enum';
+import { CategoriesService } from '@modules/categories/categories.service';
+import { KycService } from '@modules/kyc/kyc.service';
+import { MailService } from '@modules/mail/mail.service';
+import { UsersService } from '@modules/users/users.service';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  OWNER_EDITABLE_STATUSES,
-  PUBLICLY_VISIBLE_STATUSES,
-  ProductStatus,
-} from '@common/enums/product-status.enum';
-import { KycService } from '@modules/kyc/kyc.service';
-import { UsersService } from '@modules/users/users.service';
-import { CategoriesService } from '@modules/categories/categories.service';
-import { MailService } from '@modules/mail/mail.service';
-import { ProductsRepository } from './products.repository';
-import { ProductStorageService } from './product-storage.service';
-import { CreateProductDto } from './dto/create-product.dto';
-import { UpdateProductDto } from './dto/update-product.dto';
-import { RejectProductDto } from './dto/reject-product.dto';
-import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
+import { CreateProductDto } from './dto/create-product.dto';
+import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { RejectProductDto } from './dto/reject-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
+import { ProductStorageService } from './product-storage.service';
+import { ProductsRepository } from './products.repository';
+
+export type ProductImageResponse = {
+  id: string;
+  displayOrder: number;
+  mimeType: string;
+  url: string;
+};
+
+export type ProductResponse = Omit<Product, 'images'> & {
+  images: ProductImageResponse[];
+};
 
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
   ProductStatus.ACTIVE,
@@ -48,7 +59,7 @@ export class ProductsService {
     userId: string,
     dto: CreateProductDto,
     imageFiles: Express.Multer.File[],
-  ): Promise<Product> {
+  ): Promise<ProductResponse> {
     await this.assertKycApproved(userId);
     await this.assertCategoryAndSubcategory(dto.categoryId, dto.subcategoryId);
 
@@ -105,9 +116,9 @@ export class ProductsService {
 
     await this.productsRepository.saveImages(images);
 
-    return this.productsRepository.findById(
-      savedProduct.id,
-    ) as Promise<Product>;
+    return this.mapProduct(
+      (await this.productsRepository.findById(savedProduct.id)) as Product,
+    );
   }
 
   // ─── Update ───────────────────────────────────────────────────────────────
@@ -117,7 +128,7 @@ export class ProductsService {
     productId: string,
     dto: UpdateProductDto,
     newImageFiles?: Express.Multer.File[],
-  ): Promise<Product> {
+  ): Promise<ProductResponse> {
     const product = await this.findOwnedProduct(userId, productId);
     this.assertEditable(product);
 
@@ -164,12 +175,17 @@ export class ProductsService {
     }
 
     await this.productsRepository.saveProduct(product);
-    return this.productsRepository.findById(productId) as Promise<Product>;
+    return this.mapProduct(
+      (await this.productsRepository.findById(productId)) as Product,
+    );
   }
 
   // ─── Submit ───────────────────────────────────────────────────────────────
 
-  async submitProduct(userId: string, productId: string): Promise<Product> {
+  async submitProduct(
+    userId: string,
+    productId: string,
+  ): Promise<ProductResponse> {
     const product = await this.findOwnedProduct(userId, productId);
     this.assertEditable(product);
 
@@ -202,7 +218,7 @@ export class ProductsService {
       );
     }
 
-    return saved;
+    return this.mapProduct(saved);
   }
 
   // ─── Withdraw ─────────────────────────────────────────────────────────────
@@ -253,7 +269,7 @@ export class ProductsService {
     userId: string,
     query: ListProductsQueryDto,
   ): Promise<{
-    data: Product[];
+    data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
     const { page = 1, limit = 20, ...filters } = query;
@@ -265,13 +281,16 @@ export class ProductsService {
         ownerId: userId,
       },
     );
-    return { data, meta: { page, limit, total } };
+    return {
+      data: data.map((p) => this.mapProduct(p)),
+      meta: { page, limit, total },
+    };
   }
 
   // ─── Public views ─────────────────────────────────────────────────────────
 
   async listPublicProducts(query: ListProductsQueryDto): Promise<{
-    data: Product[];
+    data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
     const { page = 1, limit = 20, ...filters } = query;
@@ -283,17 +302,25 @@ export class ProductsService {
         statuses: PUBLICLY_VISIBLE_STATUSES,
       },
     );
-    return { data, meta: { page, limit, total } };
+    return {
+      data: data.map((p) => this.mapProduct(p)),
+      meta: { page, limit, total },
+    };
   }
 
-  async getPublicProductById(id: string): Promise<Product> {
+  async getPublicProductById(
+    id: string,
+    requesterId: string | null = null,
+  ): Promise<ProductResponse> {
     const product = await this.productsRepository.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
 
-    if (!product || !PUBLICLY_VISIBLE_STATUSES.includes(product.status)) {
+    const isOwner = requesterId !== null && product.ownerId === requesterId;
+    if (!PUBLICLY_VISIBLE_STATUSES.includes(product.status) && !isOwner) {
       throw new NotFoundException('Product not found');
     }
 
-    return product;
+    return this.mapProduct(product);
   }
 
   async getProductImageFile(
@@ -330,7 +357,7 @@ export class ProductsService {
     userId: string,
     productId: string,
     isAdmin: boolean,
-  ): Promise<Product> {
+  ): Promise<ProductResponse> {
     const product = await this.productsRepository.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
 
@@ -338,13 +365,13 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    return product;
+    return this.mapProduct(product);
   }
 
   // ─── Admin moderation ─────────────────────────────────────────────────────
 
   async listAllProducts(query: AdminListProductsQueryDto): Promise<{
-    data: Product[];
+    data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
     const { page = 1, limit = 20, status, ownerId, ...filters } = query;
@@ -353,10 +380,16 @@ export class ProductsService {
       limit,
       { ...filters, status, ownerId },
     );
-    return { data, meta: { page, limit, total } };
+    return {
+      data: data.map((p) => this.mapProduct(p)),
+      meta: { page, limit, total },
+    };
   }
 
-  async approveProduct(adminId: string, productId: string): Promise<Product> {
+  async approveProduct(
+    adminId: string,
+    productId: string,
+  ): Promise<ProductResponse> {
     const product =
       await this.productsRepository.findByIdWithoutImages(productId);
     if (!product) throw new NotFoundException('Product not found');
@@ -384,14 +417,14 @@ export class ProductsService {
       );
     }
 
-    return saved;
+    return this.mapProduct(saved);
   }
 
   async rejectProduct(
     adminId: string,
     productId: string,
     dto: RejectProductDto,
-  ): Promise<Product> {
+  ): Promise<ProductResponse> {
     const product =
       await this.productsRepository.findByIdWithoutImages(productId);
     if (!product) throw new NotFoundException('Product not found');
@@ -419,7 +452,7 @@ export class ProductsService {
       );
     }
 
-    return saved;
+    return this.mapProduct(saved);
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
@@ -477,5 +510,44 @@ export class ProductsService {
 
   private computeBiddingStartPrice(basePrice: number): number {
     return Math.round(basePrice * 1.1 * 100) / 100;
+  }
+
+  private mapProduct(product: Product): ProductResponse {
+    return {
+      id: product.id,
+      ownerId: product.ownerId,
+      title: product.title,
+      description: product.description,
+      categoryId: product.categoryId,
+      subcategoryId: product.subcategoryId,
+      condition: product.condition,
+      status: product.status,
+      basePrice: product.basePrice,
+      biddingStartPrice: product.biddingStartPrice,
+      currency: product.currency,
+      biddingDurationHours: product.biddingDurationHours,
+      currentHighestBid: product.currentHighestBid,
+      currentHighestBidderId: product.currentHighestBidderId,
+      biddingStartedAt: product.biddingStartedAt,
+      biddingEndsAt: product.biddingEndsAt,
+      submittedAt: product.submittedAt,
+      reviewedById: product.reviewedById,
+      reviewedAt: product.reviewedAt,
+      rejectionReason: product.rejectionReason,
+      locationProvince: product.locationProvince,
+      locationDistrict: product.locationDistrict,
+      locationArea: product.locationArea,
+      withdrawnAt: product.withdrawnAt,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+      deletedAt: product.deletedAt,
+      images:
+        product.images?.map((img) => ({
+          id: img.id,
+          displayOrder: img.displayOrder,
+          mimeType: img.mimeType,
+          url: `/api/v1/products/${product.id}/images/${img.id}`,
+        })) || [],
+    };
   }
 }

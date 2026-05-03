@@ -163,10 +163,19 @@ let KycService = class KycService {
                     accountNumber: this.maskAccountNumber(this.encryptionService.decrypt(bank.accountNumber)),
                 }
                 : null,
+            citizenshipFrontUrl: kyc.citizenshipFrontPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
+                : null,
+            citizenshipBackUrl: kyc.citizenshipBackPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
+                : null,
+            passportUrl: kyc.passportPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+                : null,
         };
     }
-    async getAllKyc(pagination, status) {
-        const { page = 1, limit = 20 } = pagination;
+    async getAllKyc(query) {
+        const { page = 1, limit = 20, status } = query;
         const [records, total] = await this.kycRepository.findAllKycPaginated(page, limit, status);
         const data = records.map((kyc) => ({
             id: kyc.id,
@@ -176,6 +185,15 @@ let KycService = class KycService {
             rejectionReason: kyc.rejectionReason,
             reviewedAt: kyc.reviewedAt,
             createdAt: kyc.createdAt,
+            citizenshipFrontUrl: kyc.citizenshipFrontPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
+                : null,
+            citizenshipBackUrl: kyc.citizenshipBackPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
+                : null,
+            passportUrl: kyc.passportPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+                : null,
         }));
         return { data, meta: { page, limit, total } };
     }
@@ -184,7 +202,28 @@ let KycService = class KycService {
         if (!kyc) {
             throw new common_1.NotFoundException('KYC record not found');
         }
-        return kyc;
+        return {
+            id: kyc.id,
+            userId: kyc.userId,
+            documentType: kyc.documentType,
+            permanentAddress: kyc.permanentAddress,
+            temporaryAddress: kyc.temporaryAddress,
+            status: kyc.status,
+            rejectionReason: kyc.rejectionReason,
+            reviewedBy: kyc.reviewedBy,
+            reviewedAt: kyc.reviewedAt,
+            createdAt: kyc.createdAt,
+            updatedAt: kyc.updatedAt,
+            citizenshipFrontUrl: kyc.citizenshipFrontPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
+                : null,
+            citizenshipBackUrl: kyc.citizenshipBackPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
+                : null,
+            passportUrl: kyc.passportPath
+                ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+                : null,
+        };
     }
     async reviewKyc(id, dto, reviewerUserId) {
         const kyc = await this.kycRepository.findKycById(id);
@@ -272,6 +311,9 @@ let KycService = class KycService {
         if (accountNumber.length <= 4)
             return accountNumber;
         return '*'.repeat(accountNumber.length - 4) + accountNumber.slice(-4);
+    }
+    getVirtualDocumentUrl(kycId, fileKey) {
+        return `/api/v1/kyc/${kycId}/documents/${fileKey}`;
     }
 };
 exports.KycService = KycService;

@@ -11,7 +11,7 @@ export declare class ProductsController {
     private readonly productsService;
     constructor(productsService: ProductsService);
     listPublicProducts(query: ListProductsQueryDto): Promise<{
-        data: import("./entities/product.entity").Product[];
+        data: import("./products.service").ProductResponse[];
         meta: {
             page: number;
             limit: number;
@@ -19,18 +19,18 @@ export declare class ProductsController {
         };
     }>;
     listMyProducts(req: RequestWithUser, query: ListProductsQueryDto): Promise<{
-        data: import("./entities/product.entity").Product[];
+        data: import("./products.service").ProductResponse[];
         meta: {
             page: number;
             limit: number;
             total: number;
         };
     }>;
-    getPublicProduct(id: string): Promise<import("./entities/product.entity").Product>;
+    getPublicProduct(id: string, req: RequestWithUser): Promise<import("./products.service").ProductResponse>;
     getProductImage(imageId: string, req: RequestWithUser, res: Response): Promise<StreamableFile>;
-    createProduct(req: RequestWithUser, dto: CreateProductDto, files: Express.Multer.File[]): Promise<import("./entities/product.entity").Product>;
-    updateProduct(req: RequestWithUser, id: string, dto: UpdateProductDto, files: Express.Multer.File[]): Promise<import("./entities/product.entity").Product>;
-    submitProduct(req: RequestWithUser, id: string): Promise<import("./entities/product.entity").Product>;
+    createProduct(req: RequestWithUser, dto: CreateProductDto, files: Express.Multer.File[]): Promise<import("./products.service").ProductResponse>;
+    updateProduct(req: RequestWithUser, id: string, dto: UpdateProductDto, files: Express.Multer.File[]): Promise<import("./products.service").ProductResponse>;
+    submitProduct(req: RequestWithUser, id: string): Promise<import("./products.service").ProductResponse>;
     withdrawProduct(req: RequestWithUser, id: string): Promise<{
         message: string;
     }>;
@@ -38,14 +38,14 @@ export declare class ProductsController {
         message: string;
     }>;
     listAllProducts(query: AdminListProductsQueryDto): Promise<{
-        data: import("./entities/product.entity").Product[];
+        data: import("./products.service").ProductResponse[];
         meta: {
             page: number;
             limit: number;
             total: number;
         };
     }>;
-    getAdminProduct(req: RequestWithUser, id: string): Promise<import("./entities/product.entity").Product>;
-    approveProduct(req: RequestWithUser, id: string): Promise<import("./entities/product.entity").Product>;
-    rejectProduct(req: RequestWithUser, id: string, dto: RejectProductDto): Promise<import("./entities/product.entity").Product>;
+    getAdminProduct(req: RequestWithUser, id: string): Promise<import("./products.service").ProductResponse>;
+    approveProduct(req: RequestWithUser, id: string): Promise<import("./products.service").ProductResponse>;
+    rejectProduct(req: RequestWithUser, id: string, dto: RejectProductDto): Promise<import("./products.service").ProductResponse>;
 }

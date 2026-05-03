@@ -18,15 +18,18 @@ import {
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { ItemCondition } from '@common/enums/item-condition.enum';
 import { existsSync, createReadStream } from 'fs';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
 import { Public } from '@common/decorators/public.decorator';
+import { OptionalJwtGuard } from '@common/guards/optional-jwt.guard';
 import { Permission } from '@common/enums/permission.enum';
 import { Role } from '@common/enums/role.enum';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
@@ -68,9 +71,15 @@ export class ProductsController {
 
   @Get('products/:id')
   @Public()
-  @ApiOperation({ summary: 'Get a publicly visible product by ID' })
-  async getPublicProduct(@Param('id') id: string) {
-    return this.productsService.getPublicProductById(id);
+  @UseGuards(OptionalJwtGuard)
+  @ApiOperation({ summary: 'Get a product by ID (owner can view own product regardless of status)' })
+  async getPublicProduct(
+    @Param('id') id: string,
+    @Request() req: RequestWithUser,
+  ) {
+    const requesterId =
+      (req.user as RequestWithUser['user'] | undefined)?.sub ?? null;
+    return this.productsService.getPublicProductById(id, requesterId);
   }
 
   @Get('products/:id/images/:imageId')
@@ -113,6 +122,22 @@ export class ProductsController {
   @RequirePermissions(Permission.PRODUCT_CREATE)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Create a new product listing (KYC required)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['title', 'description', 'categoryId', 'subcategoryId', 'condition', 'basePrice'],
+      properties: {
+        title: { type: 'string', minLength: 5, maxLength: 150 },
+        description: { type: 'string', minLength: 20, maxLength: 5000 },
+        categoryId: { type: 'string', format: 'uuid' },
+        subcategoryId: { type: 'string', format: 'uuid' },
+        condition: { type: 'string', enum: Object.values(ItemCondition) },
+        basePrice: { type: 'number', minimum: 1 },
+        biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+        images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
+      },
+    },
+  })
   @UseInterceptors(FilesInterceptor('images', 8, multerOptions))
   async createProduct(
     @Request() req: RequestWithUser,
@@ -126,6 +151,21 @@ export class ProductsController {
   @RequirePermissions(Permission.PRODUCT_MANAGE_OWN)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update own product (DRAFT or REJECTED only)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', minLength: 5, maxLength: 150 },
+        description: { type: 'string', minLength: 20, maxLength: 5000 },
+        categoryId: { type: 'string', format: 'uuid' },
+        subcategoryId: { type: 'string', format: 'uuid' },
+        condition: { type: 'string', enum: Object.values(ItemCondition) },
+        basePrice: { type: 'number', minimum: 1 },
+        biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+        images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
+      },
+    },
+  })
   @UseInterceptors(FilesInterceptor('images', 8, multerOptions))
   async updateProduct(
     @Request() req: RequestWithUser,

@@ -20,10 +20,9 @@ const fs_1 = require("fs");
 const multer_1 = require("multer");
 const require_permissions_decorator_1 = require("../../common/decorators/require-permissions.decorator");
 const permission_enum_1 = require("../../common/enums/permission.enum");
-const kyc_status_enum_1 = require("../../common/enums/kyc-status.enum");
 const permissions_guard_1 = require("../../common/guards/permissions.guard");
-const pagination_dto_1 = require("../../common/dto/pagination.dto");
 const kyc_service_1 = require("./kyc.service");
+const find_kyc_dto_1 = require("./dto/find-kyc.dto");
 const review_kyc_dto_1 = require("./dto/review-kyc.dto");
 const submit_kyc_dto_1 = require("./dto/submit-kyc.dto");
 let KycController = class KycController {
@@ -37,8 +36,8 @@ let KycController = class KycController {
     async getMyKyc(req) {
         return this.kycService.getMyKyc(req.user.sub);
     }
-    async getAllKyc(pagination, status) {
-        return this.kycService.getAllKyc(pagination, status);
+    async getAllKyc(query) {
+        return this.kycService.getAllKyc(query);
     }
     async getKycById(id) {
         return this.kycService.getKycById(id);
@@ -98,9 +97,8 @@ __decorate([
     }),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.KYC_VIEW_ALL),
     __param(0, (0, common_1.Query)()),
-    __param(1, (0, common_1.Query)('status')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [pagination_dto_1.PaginationDto, String]),
+    __metadata("design:paramtypes", [find_kyc_dto_1.FindKycDto]),
     __metadata("design:returntype", Promise)
 ], KycController.prototype, "getAllKyc", null);
 __decorate([

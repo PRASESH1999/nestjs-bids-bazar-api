@@ -8,8 +8,8 @@ import { EncryptionService } from '@common/services/encryption.service';
 import { StorageService } from '@common/services/storage.service';
 import { DocumentType } from '@common/enums/document-type.enum';
 import { KycStatus } from '@common/enums/kyc-status.enum';
-import { PaginationDto } from '@common/dto/pagination.dto';
 import { KycRepository } from './kyc.repository';
+import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewAction, ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { MailService } from '@modules/mail/mail.service';
@@ -205,11 +205,20 @@ export class KycService {
             ),
           }
         : null,
+      citizenshipFrontUrl: kyc.citizenshipFrontPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
+        : null,
+      citizenshipBackUrl: kyc.citizenshipBackPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
+        : null,
+      passportUrl: kyc.passportPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+        : null,
     };
   }
 
-  async getAllKyc(pagination: PaginationDto, status?: KycStatus) {
-    const { page = 1, limit = 20 } = pagination;
+  async getAllKyc(query: FindKycDto) {
+    const { page = 1, limit = 20, status } = query;
     const [records, total] = await this.kycRepository.findAllKycPaginated(
       page,
       limit,
@@ -224,6 +233,15 @@ export class KycService {
       rejectionReason: kyc.rejectionReason,
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
+      citizenshipFrontUrl: kyc.citizenshipFrontPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
+        : null,
+      citizenshipBackUrl: kyc.citizenshipBackPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
+        : null,
+      passportUrl: kyc.passportPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+        : null,
     }));
 
     return { data, meta: { page, limit, total } };
@@ -234,7 +252,29 @@ export class KycService {
     if (!kyc) {
       throw new NotFoundException('KYC record not found');
     }
-    return kyc;
+
+    return {
+      id: kyc.id,
+      userId: kyc.userId,
+      documentType: kyc.documentType,
+      permanentAddress: kyc.permanentAddress,
+      temporaryAddress: kyc.temporaryAddress,
+      status: kyc.status,
+      rejectionReason: kyc.rejectionReason,
+      reviewedBy: kyc.reviewedBy,
+      reviewedAt: kyc.reviewedAt,
+      createdAt: kyc.createdAt,
+      updatedAt: kyc.updatedAt,
+      citizenshipFrontUrl: kyc.citizenshipFrontPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
+        : null,
+      citizenshipBackUrl: kyc.citizenshipBackPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
+        : null,
+      passportUrl: kyc.passportPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+        : null,
+    };
   }
 
   async reviewKyc(id: string, dto: ReviewKycDto, reviewerUserId: string) {
@@ -351,5 +391,9 @@ export class KycService {
   private maskAccountNumber(accountNumber: string): string {
     if (accountNumber.length <= 4) return accountNumber;
     return '*'.repeat(accountNumber.length - 4) + accountNumber.slice(-4);
+  }
+
+  private getVirtualDocumentUrl(kycId: string, fileKey: string): string {
+    return `/api/v1/kyc/${kycId}/documents/${fileKey}`;
   }
 }
