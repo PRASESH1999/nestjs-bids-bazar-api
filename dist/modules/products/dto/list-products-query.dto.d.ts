@@ -5,4 +5,7 @@ export declare class ListProductsQueryDto extends PaginationDto {
     subcategoryId?: string;
     condition?: ItemCondition;
     keyword?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    priceSort?: 'asc' | 'desc';
 }

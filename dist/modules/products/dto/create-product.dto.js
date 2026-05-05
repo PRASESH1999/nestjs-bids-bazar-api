@@ -18,11 +18,13 @@ const item_condition_enum_1 = require("../../../common/enums/item-condition.enum
 class CreateProductDto {
     title;
     description;
+    specifications;
     categoryId;
     subcategoryId;
     condition;
     basePrice;
     biddingDurationHours;
+    previewImageIndex;
 }
 exports.CreateProductDto = CreateProductDto;
 __decorate([
@@ -39,6 +41,13 @@ __decorate([
     (0, class_validator_1.MaxLength)(5000),
     __metadata("design:type", String)
 ], CreateProductDto.prototype, "description", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Plain-text product specifications', maxLength: 5000 }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(5000),
+    (0, class_validator_2.IsOptional)(),
+    __metadata("design:type", String)
+], CreateProductDto.prototype, "specifications", void 0);
 __decorate([
     (0, swagger_1.ApiProperty)(),
     (0, class_validator_1.IsUUID)(),
@@ -75,4 +84,18 @@ __decorate([
     (0, class_validator_2.IsOptional)(),
     __metadata("design:type", Number)
 ], CreateProductDto.prototype, "biddingDurationHours", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({
+        description: 'Zero-based index of the uploaded image to use as the preview thumbnail (defaults to 0)',
+        minimum: 0,
+        maximum: 7,
+        default: 0,
+    }),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(7),
+    (0, class_validator_2.IsOptional)(),
+    __metadata("design:type", Number)
+], CreateProductDto.prototype, "previewImageIndex", void 0);
 //# sourceMappingURL=create-product.dto.js.map

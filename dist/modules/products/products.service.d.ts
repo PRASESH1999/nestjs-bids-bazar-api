@@ -17,6 +17,11 @@ export type ProductImageResponse = {
     url: string;
 };
 export type ProductResponse = Omit<Product, 'images'> & {
+    previewImage: {
+        id: string;
+        url: string;
+        mimeType: string;
+    } | null;
     images: ProductImageResponse[];
 };
 export declare class ProductsService {
@@ -49,10 +54,12 @@ export declare class ProductsService {
         };
     }>;
     getPublicProductById(id: string, requesterId?: string | null): Promise<ProductResponse>;
-    getProductImageFile(imageId: string, requesterId: string | null, requesterIsAdmin: boolean): Promise<{
+    getProductImageFile(productId: string, imageId: string, requesterId: string | null, requesterIsAdmin: boolean): Promise<{
         absolutePath: string;
         mimeType: string;
     }>;
+    reorderImages(productId: string, imageIds: string[], requesterId: string, isAdmin: boolean): Promise<ProductResponse>;
+    setPreviewImage(productId: string, imageId: string, requesterId: string, isAdmin: boolean): Promise<ProductResponse>;
     getProductForOwnerOrAdmin(userId: string, productId: string, isAdmin: boolean): Promise<ProductResponse>;
     listAllProducts(query: AdminListProductsQueryDto): Promise<{
         data: ProductResponse[];
@@ -68,6 +75,6 @@ export declare class ProductsService {
     private assertCategoryAndSubcategory;
     private findOwnedProduct;
     private assertEditable;
-    private computeBiddingStartPrice;
+    computeBiddingStartPrice(basePrice: number): number;
     private mapProduct;
 }

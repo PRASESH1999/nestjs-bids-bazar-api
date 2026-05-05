@@ -6,6 +6,7 @@ export declare class Product extends BaseEntity {
     ownerId: string;
     title: string;
     description: string;
+    specifications: string | null;
     categoryId: string;
     subcategoryId: string;
     condition: ItemCondition;

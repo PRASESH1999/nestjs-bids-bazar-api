@@ -28,6 +28,12 @@ export class CreateProductDto {
   @MaxLength(5000)
   description: string;
 
+  @ApiPropertyOptional({ description: 'Plain-text product specifications', maxLength: 5000 })
+  @IsString()
+  @MaxLength(5000)
+  @IsOptional()
+  specifications?: string;
+
   @ApiProperty()
   @IsUUID()
   categoryId: string;
@@ -59,4 +65,16 @@ export class CreateProductDto {
   @IsOptional()
   biddingDurationHours?: number;
 
+  @ApiPropertyOptional({
+    description: 'Zero-based index of the uploaded image to use as the preview thumbnail (defaults to 0)',
+    minimum: 0,
+    maximum: 7,
+    default: 0,
+  })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(7)
+  @IsOptional()
+  previewImageIndex?: number;
 }

@@ -11,6 +11,9 @@ export interface ProductFilters {
     status?: ProductStatus;
     ownerId?: string;
     statuses?: ProductStatus[];
+    minPrice?: number;
+    maxPrice?: number;
+    priceSort?: 'asc' | 'desc';
 }
 export declare class ProductsRepository {
     private readonly dataSource;
@@ -29,5 +32,7 @@ export declare class ProductsRepository {
     findImageById(id: string): Promise<ProductImage | null>;
     findImagesByProductId(productId: string): Promise<ProductImage[]>;
     deleteImagesByProductId(productId: string): Promise<void>;
+    reorderImages(productId: string, orderedIds: string[]): Promise<void>;
+    setPreviewImage(productId: string, previewImageId: string): Promise<void>;
     private buildFilterQuery;
 }

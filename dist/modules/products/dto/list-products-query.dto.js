@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ListProductsQueryDto = void 0;
 const class_validator_1 = require("class-validator");
+const class_transformer_1 = require("class-transformer");
 const swagger_1 = require("@nestjs/swagger");
 const item_condition_enum_1 = require("../../../common/enums/item-condition.enum");
 const pagination_dto_1 = require("../../../common/dto/pagination.dto");
@@ -19,6 +20,9 @@ class ListProductsQueryDto extends pagination_dto_1.PaginationDto {
     subcategoryId;
     condition;
     keyword;
+    minPrice;
+    maxPrice;
+    priceSort;
 }
 exports.ListProductsQueryDto = ListProductsQueryDto;
 __decorate([
@@ -47,4 +51,29 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
 ], ListProductsQueryDto.prototype, "keyword", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Minimum base price (inclusive)', minimum: 0 }),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", Number)
+], ListProductsQueryDto.prototype, "minPrice", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Maximum base price (inclusive)', minimum: 0 }),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", Number)
+], ListProductsQueryDto.prototype, "maxPrice", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({
+        description: 'Sort by base price',
+        enum: ['asc', 'desc'],
+    }),
+    (0, class_validator_1.IsIn)(['asc', 'desc']),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], ListProductsQueryDto.prototype, "priceSort", void 0);
 //# sourceMappingURL=list-products-query.dto.js.map

@@ -51,11 +51,18 @@ let ProductsService = class ProductsService {
             throw new common_1.BadRequestException('A product can have at most 8 images');
         }
         this.productStorage.validateFiles(imageFiles);
+        const previewIdx = Math.min(dto.previewImageIndex ?? 0, imageFiles.length - 1);
+        const orderedFiles = [
+            imageFiles[previewIdx],
+            ...imageFiles.slice(0, previewIdx),
+            ...imageFiles.slice(previewIdx + 1),
+        ];
         const biddingStartPrice = this.computeBiddingStartPrice(dto.basePrice);
         const product = this.productsRepository.createProduct({
             ownerId: userId,
             title: dto.title,
             description: dto.description,
+            specifications: dto.specifications ?? null,
             categoryId: dto.categoryId,
             subcategoryId: dto.subcategoryId,
             condition: dto.condition,
@@ -77,7 +84,7 @@ let ProductsService = class ProductsService {
             withdrawnAt: null,
         });
         const savedProduct = await this.productsRepository.saveProduct(product);
-        const imageMeta = await this.productStorage.saveProductImages(savedProduct.id, imageFiles);
+        const imageMeta = await this.productStorage.saveProductImages(savedProduct.id, orderedFiles);
         const images = imageMeta.map((meta) => this.productsRepository.createImage({
             productId: savedProduct.id,
             ...meta,
@@ -95,6 +102,8 @@ let ProductsService = class ProductsService {
             product.title = dto.title;
         if (dto.description !== undefined)
             product.description = dto.description;
+        if (dto.specifications !== undefined)
+            product.specifications = dto.specifications;
         if (dto.categoryId !== undefined)
             product.categoryId = dto.categoryId;
         if (dto.subcategoryId !== undefined)
@@ -112,10 +121,16 @@ let ProductsService = class ProductsService {
                 throw new common_1.BadRequestException('A product can have at most 8 images');
             }
             this.productStorage.validateFiles(newImageFiles);
+            const previewIdx = Math.min(dto.previewImageIndex ?? 0, newImageFiles.length - 1);
+            const orderedFiles = [
+                newImageFiles[previewIdx],
+                ...newImageFiles.slice(0, previewIdx),
+                ...newImageFiles.slice(previewIdx + 1),
+            ];
             const oldImages = await this.productsRepository.findImagesByProductId(productId);
             await this.productStorage.deleteProductImages(oldImages);
             await this.productsRepository.deleteImagesByProductId(productId);
-            const imageMeta = await this.productStorage.saveProductImages(productId, newImageFiles);
+            const imageMeta = await this.productStorage.saveProductImages(productId, orderedFiles);
             const images = imageMeta.map((meta) => this.productsRepository.createImage({ productId, ...meta }));
             await this.productsRepository.saveImages(images);
         }
@@ -201,9 +216,9 @@ let ProductsService = class ProductsService {
         }
         return this.mapProduct(product);
     }
-    async getProductImageFile(imageId, requesterId, requesterIsAdmin) {
+    async getProductImageFile(productId, imageId, requesterId, requesterIsAdmin) {
         const image = await this.productsRepository.findImageById(imageId);
-        if (!image)
+        if (!image || image.productId !== productId)
             throw new common_1.NotFoundException('Image not found');
         const product = await this.productsRepository.findByIdWithoutImages(image.productId);
         if (!product)
@@ -217,6 +232,32 @@ let ProductsService = class ProductsService {
             absolutePath: this.productStorage.getAbsolutePath(image.filePath),
             mimeType: image.mimeType,
         };
+    }
+    async reorderImages(productId, imageIds, requesterId, isAdmin) {
+        const product = await this.productsRepository.findByIdWithoutImages(productId);
+        if (!product)
+            throw new common_1.NotFoundException('Product not found');
+        if (!isAdmin) {
+            if (product.ownerId !== requesterId) {
+                throw new common_1.ForbiddenException('You do not own this product');
+            }
+            this.assertEditable(product);
+        }
+        await this.productsRepository.reorderImages(productId, imageIds);
+        return this.mapProduct((await this.productsRepository.findById(productId)));
+    }
+    async setPreviewImage(productId, imageId, requesterId, isAdmin) {
+        const product = await this.productsRepository.findByIdWithoutImages(productId);
+        if (!product)
+            throw new common_1.NotFoundException('Product not found');
+        if (!isAdmin) {
+            if (product.ownerId !== requesterId) {
+                throw new common_1.ForbiddenException('You do not own this product');
+            }
+            this.assertEditable(product);
+        }
+        await this.productsRepository.setPreviewImage(productId, imageId);
+        return this.mapProduct((await this.productsRepository.findById(productId)));
     }
     async getProductForOwnerOrAdmin(userId, productId, isAdmin) {
         const product = await this.productsRepository.findById(productId);
@@ -304,7 +345,20 @@ let ProductsService = class ProductsService {
         }
     }
     computeBiddingStartPrice(basePrice) {
-        return Math.round(basePrice * 1.1 * 100) / 100;
+        let markup;
+        if (basePrice <= 10000)
+            markup = 0.20;
+        else if (basePrice <= 20000)
+            markup = 0.18;
+        else if (basePrice <= 30000)
+            markup = 0.16;
+        else if (basePrice <= 40000)
+            markup = 0.14;
+        else if (basePrice <= 50000)
+            markup = 0.12;
+        else
+            markup = 0.10;
+        return Math.round(basePrice * (1 + markup) * 100) / 100;
     }
     mapProduct(product) {
         return {
@@ -312,6 +366,7 @@ let ProductsService = class ProductsService {
             ownerId: product.ownerId,
             title: product.title,
             description: product.description,
+            specifications: product.specifications,
             categoryId: product.categoryId,
             subcategoryId: product.subcategoryId,
             condition: product.condition,
@@ -335,6 +390,12 @@ let ProductsService = class ProductsService {
             createdAt: product.createdAt,
             updatedAt: product.updatedAt,
             deletedAt: product.deletedAt,
+            previewImage: (() => {
+                const p = product.images?.find((img) => img.displayOrder === 0);
+                return p
+                    ? { id: p.id, url: `/api/v1/products/${product.id}/images/${p.id}`, mimeType: p.mimeType }
+                    : null;
+            })(),
             images: product.images?.map((img) => ({
                 id: img.id,
                 displayOrder: img.displayOrder,

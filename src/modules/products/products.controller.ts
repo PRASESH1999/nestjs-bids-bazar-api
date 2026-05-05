@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -38,6 +39,8 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { RejectProductDto } from './dto/reject-product.dto';
+import { SetPreviewImageDto } from './dto/set-preview-image.dto';
+import { ReorderImagesDto } from './dto/reorder-images.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 
@@ -57,6 +60,18 @@ export class ProductsController {
   @ApiOperation({ summary: 'List publicly visible products' })
   async listPublicProducts(@Query() query: ListProductsQueryDto) {
     return this.productsService.listPublicProducts(query);
+  }
+
+  @Get('products/calculate-bidding-price')
+  @Public()
+  @ApiOperation({ summary: 'Calculate the bidding start price for a given base price' })
+  calculateBiddingPrice(@Query('basePrice') basePrice: string) {
+    const price = parseFloat(basePrice);
+    if (isNaN(price) || price <= 0) {
+      throw new BadRequestException('basePrice must be a positive number');
+    }
+    const biddingStartPrice = this.productsService.computeBiddingStartPrice(price);
+    return { basePrice: price, biddingStartPrice };
   }
 
   @Get('products/me')
@@ -84,8 +99,10 @@ export class ProductsController {
 
   @Get('products/:id/images/:imageId')
   @Public()
+  @UseGuards(OptionalJwtGuard)
   @ApiOperation({ summary: 'Stream a product image file' })
   async getProductImage(
+    @Param('id') productId: string,
     @Param('imageId') imageId: string,
     @Request() req: RequestWithUser,
     @NestResponse({ passthrough: true }) res: Response,
@@ -99,6 +116,7 @@ export class ProductsController {
 
     const { absolutePath, mimeType } =
       await this.productsService.getProductImageFile(
+        productId,
         imageId,
         requesterId,
         isAdmin,
@@ -129,11 +147,13 @@ export class ProductsController {
       properties: {
         title: { type: 'string', minLength: 5, maxLength: 150 },
         description: { type: 'string', minLength: 20, maxLength: 5000 },
+        specifications: { type: 'string', maxLength: 5000, description: 'Plain-text product specifications (optional)' },
         categoryId: { type: 'string', format: 'uuid' },
         subcategoryId: { type: 'string', format: 'uuid' },
         condition: { type: 'string', enum: Object.values(ItemCondition) },
         basePrice: { type: 'number', minimum: 1 },
         biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+        previewImageIndex: { type: 'integer', minimum: 0, maximum: 7, default: 0, description: 'Zero-based index of the image to use as the preview thumbnail' },
         images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
       },
     },
@@ -157,11 +177,13 @@ export class ProductsController {
       properties: {
         title: { type: 'string', minLength: 5, maxLength: 150 },
         description: { type: 'string', minLength: 20, maxLength: 5000 },
+        specifications: { type: 'string', maxLength: 5000, description: 'Plain-text product specifications (optional)' },
         categoryId: { type: 'string', format: 'uuid' },
         subcategoryId: { type: 'string', format: 'uuid' },
         condition: { type: 'string', enum: Object.values(ItemCondition) },
         basePrice: { type: 'number', minimum: 1 },
         biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+        previewImageIndex: { type: 'integer', minimum: 0, maximum: 7, default: 0, description: 'Zero-based index of the new image set to use as preview thumbnail' },
         images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
       },
     },
@@ -213,6 +235,28 @@ export class ProductsController {
     return { message: 'Product deleted successfully' };
   }
 
+  @Patch('products/:id/images/order')
+  @RequirePermissions(Permission.PRODUCT_MANAGE_OWN)
+  @ApiOperation({ summary: 'Reorder images for own product (DRAFT or REJECTED only). First ID becomes the preview.' })
+  async reorderImages(
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: ReorderImagesDto,
+  ) {
+    return this.productsService.reorderImages(id, dto.imageIds, req.user.sub, false);
+  }
+
+  @Patch('products/:id/preview-image')
+  @RequirePermissions(Permission.PRODUCT_MANAGE_OWN)
+  @ApiOperation({ summary: 'Set the preview thumbnail image for own product (DRAFT or REJECTED only)' })
+  async setPreviewImage(
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: SetPreviewImageDto,
+  ) {
+    return this.productsService.setPreviewImage(id, dto.previewImageId, req.user.sub, false);
+  }
+
   // ─── Admin endpoints ──────────────────────────────────────────────────────
 
   @Get('admin/products')
@@ -255,5 +299,27 @@ export class ProductsController {
     @Body() dto: RejectProductDto,
   ) {
     return this.productsService.rejectProduct(req.user.sub, id, dto);
+  }
+
+  @Patch('admin/products/:id/images/order')
+  @RequirePermissions(Permission.PRODUCT_MODERATE)
+  @ApiOperation({ summary: 'Admin: reorder images for any product. First ID becomes the preview.' })
+  async adminReorderImages(
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: ReorderImagesDto,
+  ) {
+    return this.productsService.reorderImages(id, dto.imageIds, req.user.sub, true);
+  }
+
+  @Patch('admin/products/:id/preview-image')
+  @RequirePermissions(Permission.PRODUCT_MODERATE)
+  @ApiOperation({ summary: 'Admin: set the preview thumbnail image for any product' })
+  async adminSetPreviewImage(
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: SetPreviewImageDto,
+  ) {
+    return this.productsService.setPreviewImage(id, dto.previewImageId, req.user.sub, true);
   }
 }

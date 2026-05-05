@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { ItemCondition } from '@common/enums/item-condition.enum';
@@ -13,6 +13,9 @@ export interface ProductFilters {
   status?: ProductStatus;
   ownerId?: string;
   statuses?: ProductStatus[];
+  minPrice?: number;
+  maxPrice?: number;
+  priceSort?: 'asc' | 'desc';
 }
 
 @Injectable()
@@ -56,9 +59,15 @@ export class ProductsRepository {
   ): Promise<[Product[], number]> {
     const qb = this.buildFilterQuery(filters);
 
+    qb.leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0');
+
+    if (filters.priceSort) {
+      qb.orderBy('product.basePrice', filters.priceSort.toUpperCase() as 'ASC' | 'DESC');
+    } else {
+      qb.orderBy('product.createdAt', 'DESC');
+    }
+
     return qb
-      .leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0')
-      .orderBy('product.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
@@ -104,6 +113,56 @@ export class ProductsRepository {
     await this.imageRepo.delete({ productId });
   }
 
+  async reorderImages(productId: string, orderedIds: string[]): Promise<void> {
+    const images = await this.imageRepo.find({ where: { productId } });
+
+    const existingIds = new Set(images.map((img) => img.id));
+    const missing = orderedIds.filter((id) => !existingIds.has(id));
+    if (missing.length > 0) {
+      throw new NotFoundException(`Image(s) not found for this product: ${missing.join(', ')}`);
+    }
+    if (orderedIds.length !== images.length) {
+      throw new BadRequestException(`All ${images.length} image(s) must be included in the new order`);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await manager.update(ProductImage, { id: orderedIds[i] }, { displayOrder: 1000 + i });
+      }
+      for (let i = 0; i < orderedIds.length; i++) {
+        await manager.update(ProductImage, { id: orderedIds[i] }, { displayOrder: i });
+      }
+    });
+  }
+
+  async setPreviewImage(productId: string, previewImageId: string): Promise<void> {
+    const images = await this.imageRepo.find({
+      where: { productId },
+      order: { displayOrder: 'ASC' },
+    });
+
+    if (!images.some((img) => img.id === previewImageId)) {
+      throw new NotFoundException('Image not found for this product');
+    }
+
+    if (images[0]?.id === previewImageId) return;
+
+    const reordered = [
+      images.find((img) => img.id === previewImageId)!,
+      ...images.filter((img) => img.id !== previewImageId),
+    ];
+
+    await this.dataSource.transaction(async (manager) => {
+      // Use temp values (1000+) first to avoid the unique (productId, displayOrder) constraint
+      for (let i = 0; i < reordered.length; i++) {
+        await manager.update(ProductImage, { id: reordered[i].id }, { displayOrder: 1000 + i });
+      }
+      for (let i = 0; i < reordered.length; i++) {
+        await manager.update(ProductImage, { id: reordered[i].id }, { displayOrder: i });
+      }
+    });
+  }
+
   // ─── Private ──────────────────────────────────────────────────────────────
 
   private buildFilterQuery(
@@ -146,6 +205,14 @@ export class ProductsRepository {
         '(LOWER(product.title) LIKE :kw OR LOWER(product.description) LIKE :kw)',
         { kw: `%${filters.keyword.toLowerCase()}%` },
       );
+    }
+
+    if (filters.minPrice !== undefined) {
+      qb.andWhere('product.basePrice >= :minPrice', { minPrice: filters.minPrice });
+    }
+
+    if (filters.maxPrice !== undefined) {
+      qb.andWhere('product.basePrice <= :maxPrice', { maxPrice: filters.maxPrice });
     }
 
     return qb;

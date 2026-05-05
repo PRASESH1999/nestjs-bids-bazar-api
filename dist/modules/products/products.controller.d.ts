@@ -5,6 +5,8 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { RejectProductDto } from './dto/reject-product.dto';
+import { SetPreviewImageDto } from './dto/set-preview-image.dto';
+import { ReorderImagesDto } from './dto/reorder-images.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 export declare class ProductsController {
@@ -18,6 +20,10 @@ export declare class ProductsController {
             total: number;
         };
     }>;
+    calculateBiddingPrice(basePrice: string): {
+        basePrice: number;
+        biddingStartPrice: number;
+    };
     listMyProducts(req: RequestWithUser, query: ListProductsQueryDto): Promise<{
         data: import("./products.service").ProductResponse[];
         meta: {
@@ -27,7 +33,7 @@ export declare class ProductsController {
         };
     }>;
     getPublicProduct(id: string, req: RequestWithUser): Promise<import("./products.service").ProductResponse>;
-    getProductImage(imageId: string, req: RequestWithUser, res: Response): Promise<StreamableFile>;
+    getProductImage(productId: string, imageId: string, req: RequestWithUser, res: Response): Promise<StreamableFile>;
     createProduct(req: RequestWithUser, dto: CreateProductDto, files: Express.Multer.File[]): Promise<import("./products.service").ProductResponse>;
     updateProduct(req: RequestWithUser, id: string, dto: UpdateProductDto, files: Express.Multer.File[]): Promise<import("./products.service").ProductResponse>;
     submitProduct(req: RequestWithUser, id: string): Promise<import("./products.service").ProductResponse>;
@@ -37,6 +43,8 @@ export declare class ProductsController {
     deleteProduct(req: RequestWithUser, id: string): Promise<{
         message: string;
     }>;
+    reorderImages(req: RequestWithUser, id: string, dto: ReorderImagesDto): Promise<import("./products.service").ProductResponse>;
+    setPreviewImage(req: RequestWithUser, id: string, dto: SetPreviewImageDto): Promise<import("./products.service").ProductResponse>;
     listAllProducts(query: AdminListProductsQueryDto): Promise<{
         data: import("./products.service").ProductResponse[];
         meta: {
@@ -48,4 +56,6 @@ export declare class ProductsController {
     getAdminProduct(req: RequestWithUser, id: string): Promise<import("./products.service").ProductResponse>;
     approveProduct(req: RequestWithUser, id: string): Promise<import("./products.service").ProductResponse>;
     rejectProduct(req: RequestWithUser, id: string, dto: RejectProductDto): Promise<import("./products.service").ProductResponse>;
+    adminReorderImages(req: RequestWithUser, id: string, dto: ReorderImagesDto): Promise<import("./products.service").ProductResponse>;
+    adminSetPreviewImage(req: RequestWithUser, id: string, dto: SetPreviewImageDto): Promise<import("./products.service").ProductResponse>;
 }

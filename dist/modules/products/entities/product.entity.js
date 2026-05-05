@@ -19,6 +19,7 @@ let Product = class Product extends base_entity_1.BaseEntity {
     ownerId;
     title;
     description;
+    specifications;
     categoryId;
     subcategoryId;
     condition;
@@ -55,6 +56,10 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'text' }),
     __metadata("design:type", String)
 ], Product.prototype, "description", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'text', nullable: true }),
+    __metadata("design:type", Object)
+], Product.prototype, "specifications", void 0);
 __decorate([
     (0, typeorm_1.Index)(),
     (0, typeorm_1.Column)({ type: 'uuid' }),

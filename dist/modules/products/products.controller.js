@@ -29,6 +29,8 @@ const products_service_1 = require("./products.service");
 const create_product_dto_1 = require("./dto/create-product.dto");
 const update_product_dto_1 = require("./dto/update-product.dto");
 const reject_product_dto_1 = require("./dto/reject-product.dto");
+const set_preview_image_dto_1 = require("./dto/set-preview-image.dto");
+const reorder_images_dto_1 = require("./dto/reorder-images.dto");
 const list_products_query_dto_1 = require("./dto/list-products-query.dto");
 const admin_list_products_query_dto_1 = require("./dto/admin-list-products-query.dto");
 const multerOptions = { storage: (0, multer_1.memoryStorage)() };
@@ -40,6 +42,14 @@ let ProductsController = class ProductsController {
     async listPublicProducts(query) {
         return this.productsService.listPublicProducts(query);
     }
+    calculateBiddingPrice(basePrice) {
+        const price = parseFloat(basePrice);
+        if (isNaN(price) || price <= 0) {
+            throw new common_1.BadRequestException('basePrice must be a positive number');
+        }
+        const biddingStartPrice = this.productsService.computeBiddingStartPrice(price);
+        return { basePrice: price, biddingStartPrice };
+    }
     async listMyProducts(req, query) {
         return this.productsService.listMyProducts(req.user.sub, query);
     }
@@ -47,12 +57,12 @@ let ProductsController = class ProductsController {
         const requesterId = req.user?.sub ?? null;
         return this.productsService.getPublicProductById(id, requesterId);
     }
-    async getProductImage(imageId, req, res) {
+    async getProductImage(productId, imageId, req, res) {
         const requesterId = req.user?.sub ?? null;
         const isAdmin = req.user?.role === role_enum_1.Role.ADMIN ||
             req.user?.role ===
                 role_enum_1.Role.SUPERADMIN;
-        const { absolutePath, mimeType } = await this.productsService.getProductImageFile(imageId, requesterId, isAdmin);
+        const { absolutePath, mimeType } = await this.productsService.getProductImageFile(productId, imageId, requesterId, isAdmin);
         if (!(0, fs_1.existsSync)(absolutePath)) {
             throw new common_1.NotFoundException('Image file not found on server');
         }
@@ -79,6 +89,12 @@ let ProductsController = class ProductsController {
         await this.productsService.deleteProduct(req.user.sub, id);
         return { message: 'Product deleted successfully' };
     }
+    async reorderImages(req, id, dto) {
+        return this.productsService.reorderImages(id, dto.imageIds, req.user.sub, false);
+    }
+    async setPreviewImage(req, id, dto) {
+        return this.productsService.setPreviewImage(id, dto.previewImageId, req.user.sub, false);
+    }
     async listAllProducts(query) {
         return this.productsService.listAllProducts(query);
     }
@@ -91,6 +107,12 @@ let ProductsController = class ProductsController {
     async rejectProduct(req, id, dto) {
         return this.productsService.rejectProduct(req.user.sub, id, dto);
     }
+    async adminReorderImages(req, id, dto) {
+        return this.productsService.reorderImages(id, dto.imageIds, req.user.sub, true);
+    }
+    async adminSetPreviewImage(req, id, dto) {
+        return this.productsService.setPreviewImage(id, dto.previewImageId, req.user.sub, true);
+    }
 };
 exports.ProductsController = ProductsController;
 __decorate([
@@ -102,6 +124,15 @@ __decorate([
     __metadata("design:paramtypes", [list_products_query_dto_1.ListProductsQueryDto]),
     __metadata("design:returntype", Promise)
 ], ProductsController.prototype, "listPublicProducts", null);
+__decorate([
+    (0, common_1.Get)('products/calculate-bidding-price'),
+    (0, public_decorator_1.Public)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Calculate the bidding start price for a given base price' }),
+    __param(0, (0, common_1.Query)('basePrice')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], ProductsController.prototype, "calculateBiddingPrice", null);
 __decorate([
     (0, common_1.Get)('products/me'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_VIEW_OWN),
@@ -126,12 +157,14 @@ __decorate([
 __decorate([
     (0, common_1.Get)('products/:id/images/:imageId'),
     (0, public_decorator_1.Public)(),
+    (0, common_1.UseGuards)(optional_jwt_guard_1.OptionalJwtGuard),
     (0, swagger_1.ApiOperation)({ summary: 'Stream a product image file' }),
-    __param(0, (0, common_1.Param)('imageId')),
-    __param(1, (0, common_1.Request)()),
-    __param(2, (0, common_1.Response)({ passthrough: true })),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Param)('imageId')),
+    __param(2, (0, common_1.Request)()),
+    __param(3, (0, common_1.Response)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object, Object]),
+    __metadata("design:paramtypes", [String, String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], ProductsController.prototype, "getProductImage", null);
 __decorate([
@@ -146,11 +179,13 @@ __decorate([
             properties: {
                 title: { type: 'string', minLength: 5, maxLength: 150 },
                 description: { type: 'string', minLength: 20, maxLength: 5000 },
+                specifications: { type: 'string', maxLength: 5000, description: 'Plain-text product specifications (optional)' },
                 categoryId: { type: 'string', format: 'uuid' },
                 subcategoryId: { type: 'string', format: 'uuid' },
                 condition: { type: 'string', enum: Object.values(item_condition_enum_1.ItemCondition) },
                 basePrice: { type: 'number', minimum: 1 },
                 biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+                previewImageIndex: { type: 'integer', minimum: 0, maximum: 7, default: 0, description: 'Zero-based index of the image to use as the preview thumbnail' },
                 images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
             },
         },
@@ -174,11 +209,13 @@ __decorate([
             properties: {
                 title: { type: 'string', minLength: 5, maxLength: 150 },
                 description: { type: 'string', minLength: 20, maxLength: 5000 },
+                specifications: { type: 'string', maxLength: 5000, description: 'Plain-text product specifications (optional)' },
                 categoryId: { type: 'string', format: 'uuid' },
                 subcategoryId: { type: 'string', format: 'uuid' },
                 condition: { type: 'string', enum: Object.values(item_condition_enum_1.ItemCondition) },
                 basePrice: { type: 'number', minimum: 1 },
                 biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
+                previewImageIndex: { type: 'integer', minimum: 0, maximum: 7, default: 0, description: 'Zero-based index of the new image set to use as preview thumbnail' },
                 images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
             },
         },
@@ -223,6 +260,28 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ProductsController.prototype, "deleteProduct", null);
 __decorate([
+    (0, common_1.Patch)('products/:id/images/order'),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MANAGE_OWN),
+    (0, swagger_1.ApiOperation)({ summary: 'Reorder images for own product (DRAFT or REJECTED only). First ID becomes the preview.' }),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, reorder_images_dto_1.ReorderImagesDto]),
+    __metadata("design:returntype", Promise)
+], ProductsController.prototype, "reorderImages", null);
+__decorate([
+    (0, common_1.Patch)('products/:id/preview-image'),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MANAGE_OWN),
+    (0, swagger_1.ApiOperation)({ summary: 'Set the preview thumbnail image for own product (DRAFT or REJECTED only)' }),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, set_preview_image_dto_1.SetPreviewImageDto]),
+    __metadata("design:returntype", Promise)
+], ProductsController.prototype, "setPreviewImage", null);
+__decorate([
     (0, common_1.Get)('admin/products'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_VIEW_ALL),
     (0, swagger_1.ApiOperation)({ summary: 'Admin: list all products (all statuses)' }),
@@ -262,6 +321,28 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, reject_product_dto_1.RejectProductDto]),
     __metadata("design:returntype", Promise)
 ], ProductsController.prototype, "rejectProduct", null);
+__decorate([
+    (0, common_1.Patch)('admin/products/:id/images/order'),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MODERATE),
+    (0, swagger_1.ApiOperation)({ summary: 'Admin: reorder images for any product. First ID becomes the preview.' }),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, reorder_images_dto_1.ReorderImagesDto]),
+    __metadata("design:returntype", Promise)
+], ProductsController.prototype, "adminReorderImages", null);
+__decorate([
+    (0, common_1.Patch)('admin/products/:id/preview-image'),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MODERATE),
+    (0, swagger_1.ApiOperation)({ summary: 'Admin: set the preview thumbnail image for any product' }),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, set_preview_image_dto_1.SetPreviewImageDto]),
+    __metadata("design:returntype", Promise)
+], ProductsController.prototype, "adminSetPreviewImage", null);
 exports.ProductsController = ProductsController = __decorate([
     (0, swagger_1.ApiTags)('products'),
     (0, swagger_1.ApiBearerAuth)(),

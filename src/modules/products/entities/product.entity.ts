@@ -19,6 +19,9 @@ export class Product extends BaseEntity {
   @Column({ type: 'text' })
   description: string;
 
+  @Column({ type: 'text', nullable: true })
+  specifications: string | null;
+
   @Index()
   @Column({ type: 'uuid' })
   categoryId: string;

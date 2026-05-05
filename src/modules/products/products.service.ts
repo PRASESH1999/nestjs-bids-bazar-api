@@ -30,6 +30,7 @@ export type ProductImageResponse = {
 };
 
 export type ProductResponse = Omit<Product, 'images'> & {
+  previewImage: { id: string; url: string; mimeType: string } | null;
   images: ProductImageResponse[];
 };
 
@@ -72,6 +73,13 @@ export class ProductsService {
 
     this.productStorage.validateFiles(imageFiles);
 
+    const previewIdx = Math.min(dto.previewImageIndex ?? 0, imageFiles.length - 1);
+    const orderedFiles = [
+      imageFiles[previewIdx],
+      ...imageFiles.slice(0, previewIdx),
+      ...imageFiles.slice(previewIdx + 1),
+    ];
+
     const biddingStartPrice = this.computeBiddingStartPrice(dto.basePrice);
 
     // Save product first to get the UUID for the image directory.
@@ -79,6 +87,7 @@ export class ProductsService {
       ownerId: userId,
       title: dto.title,
       description: dto.description,
+      specifications: dto.specifications ?? null,
       categoryId: dto.categoryId,
       subcategoryId: dto.subcategoryId,
       condition: dto.condition,
@@ -104,7 +113,7 @@ export class ProductsService {
 
     const imageMeta = await this.productStorage.saveProductImages(
       savedProduct.id,
-      imageFiles,
+      orderedFiles,
     );
 
     const images = imageMeta.map((meta) =>
@@ -141,6 +150,7 @@ export class ProductsService {
 
     if (dto.title !== undefined) product.title = dto.title;
     if (dto.description !== undefined) product.description = dto.description;
+    if (dto.specifications !== undefined) product.specifications = dto.specifications;
     if (dto.categoryId !== undefined) product.categoryId = dto.categoryId;
     if (dto.subcategoryId !== undefined)
       product.subcategoryId = dto.subcategoryId;
@@ -159,6 +169,13 @@ export class ProductsService {
       }
       this.productStorage.validateFiles(newImageFiles);
 
+      const previewIdx = Math.min(dto.previewImageIndex ?? 0, newImageFiles.length - 1);
+      const orderedFiles = [
+        newImageFiles[previewIdx],
+        ...newImageFiles.slice(0, previewIdx),
+        ...newImageFiles.slice(previewIdx + 1),
+      ];
+
       const oldImages =
         await this.productsRepository.findImagesByProductId(productId);
       await this.productStorage.deleteProductImages(oldImages);
@@ -166,7 +183,7 @@ export class ProductsService {
 
       const imageMeta = await this.productStorage.saveProductImages(
         productId,
-        newImageFiles,
+        orderedFiles,
       );
       const images = imageMeta.map((meta) =>
         this.productsRepository.createImage({ productId, ...meta }),
@@ -324,12 +341,13 @@ export class ProductsService {
   }
 
   async getProductImageFile(
+    productId: string,
     imageId: string,
     requesterId: string | null,
     requesterIsAdmin: boolean,
   ): Promise<{ absolutePath: string; mimeType: string }> {
     const image = await this.productsRepository.findImageById(imageId);
-    if (!image) throw new NotFoundException('Image not found');
+    if (!image || image.productId !== productId) throw new NotFoundException('Image not found');
 
     const product = await this.productsRepository.findByIdWithoutImages(
       image.productId,
@@ -349,6 +367,54 @@ export class ProductsService {
       absolutePath: this.productStorage.getAbsolutePath(image.filePath),
       mimeType: image.mimeType,
     };
+  }
+
+  // ─── Image order ──────────────────────────────────────────────────────────
+
+  async reorderImages(
+    productId: string,
+    imageIds: string[],
+    requesterId: string,
+    isAdmin: boolean,
+  ): Promise<ProductResponse> {
+    const product = await this.productsRepository.findByIdWithoutImages(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (!isAdmin) {
+      if (product.ownerId !== requesterId) {
+        throw new ForbiddenException('You do not own this product');
+      }
+      this.assertEditable(product);
+    }
+
+    await this.productsRepository.reorderImages(productId, imageIds);
+    return this.mapProduct(
+      (await this.productsRepository.findById(productId)) as Product,
+    );
+  }
+
+  // ─── Preview image ────────────────────────────────────────────────────────
+
+  async setPreviewImage(
+    productId: string,
+    imageId: string,
+    requesterId: string,
+    isAdmin: boolean,
+  ): Promise<ProductResponse> {
+    const product = await this.productsRepository.findByIdWithoutImages(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (!isAdmin) {
+      if (product.ownerId !== requesterId) {
+        throw new ForbiddenException('You do not own this product');
+      }
+      this.assertEditable(product);
+    }
+
+    await this.productsRepository.setPreviewImage(productId, imageId);
+    return this.mapProduct(
+      (await this.productsRepository.findById(productId)) as Product,
+    );
   }
 
   // ─── Owner or Admin view ──────────────────────────────────────────────────
@@ -508,8 +574,15 @@ export class ProductsService {
     }
   }
 
-  private computeBiddingStartPrice(basePrice: number): number {
-    return Math.round(basePrice * 1.1 * 100) / 100;
+  computeBiddingStartPrice(basePrice: number): number {
+    let markup: number;
+    if (basePrice <= 10000)      markup = 0.20;
+    else if (basePrice <= 20000) markup = 0.18;
+    else if (basePrice <= 30000) markup = 0.16;
+    else if (basePrice <= 40000) markup = 0.14;
+    else if (basePrice <= 50000) markup = 0.12;
+    else                         markup = 0.10;
+    return Math.round(basePrice * (1 + markup) * 100) / 100;
   }
 
   private mapProduct(product: Product): ProductResponse {
@@ -518,6 +591,7 @@ export class ProductsService {
       ownerId: product.ownerId,
       title: product.title,
       description: product.description,
+      specifications: product.specifications,
       categoryId: product.categoryId,
       subcategoryId: product.subcategoryId,
       condition: product.condition,
@@ -541,6 +615,12 @@ export class ProductsService {
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
       deletedAt: product.deletedAt,
+      previewImage: (() => {
+        const p = product.images?.find((img) => img.displayOrder === 0);
+        return p
+          ? { id: p.id, url: `/api/v1/products/${product.id}/images/${p.id}`, mimeType: p.mimeType }
+          : null;
+      })(),
       images:
         product.images?.map((img) => ({
           id: img.id,
