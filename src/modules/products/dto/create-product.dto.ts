@@ -28,7 +28,10 @@ export class CreateProductDto {
   @MaxLength(5000)
   description: string;
 
-  @ApiPropertyOptional({ description: 'Plain-text product specifications', maxLength: 5000 })
+  @ApiPropertyOptional({
+    description: 'Plain-text product specifications',
+    maxLength: 5000,
+  })
   @IsString()
   @MaxLength(5000)
   @IsOptional()
@@ -66,7 +69,8 @@ export class CreateProductDto {
   biddingDurationHours?: number;
 
   @ApiPropertyOptional({
-    description: 'Zero-based index of the uploaded image to use as the preview thumbnail (defaults to 0)',
+    description:
+      'Zero-based index of the uploaded image to use as the preview thumbnail (defaults to 0)',
     minimum: 0,
     maximum: 7,
     default: 0,

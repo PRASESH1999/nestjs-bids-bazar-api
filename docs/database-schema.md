@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-04-29 by agent (Products module added)_
+_Last updated: 2026-05-11 by agent (Bidding module added — Bid entity, Product auction outcome fields)_
 
 ---
 
@@ -19,6 +19,9 @@ erDiagram
     CATEGORY ||--o{ PRODUCT : "categorises"
     SUBCATEGORY ||--o{ PRODUCT : "categorises"
     PRODUCT ||--|{ PRODUCTIMAGE : "has images"
+    USER ||--o{ BID : places
+    PRODUCT ||--o{ BID : receives
+    PRODUCT ||--o| BID : "winning bid"
 ```
 
 ---
@@ -130,6 +133,10 @@ erDiagram
         string locationDistrict
         string locationArea
         timestamp withdrawnAt
+        uuid winningBidId FK
+        timestamp closedAt
+        timestamp settledAt
+        timestamp abandonedAt
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -146,6 +153,28 @@ erDiagram
         timestamp createdAt
     }
 
+    BID {
+        uuid id PK
+        uuid productId FK
+        uuid bidderId FK
+        decimal amount
+        timestamp placedAt
+        decimal previousHighestAmount
+        boolean wasFirstBid
+        boolean isOriginalWinner
+        int fallbackRank
+        boolean isCurrentlyPaymentResponsible
+        enum paymentStatus
+        timestamp paymentDeadline
+        timestamp paymentConfirmedAt
+        uuid paymentConfirmedById
+        enum paymentConfirmationMethod
+        timestamp paymentWarningSentAt
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp deletedAt
+    }
+
     USER ||--o| KYCVERIFICATION : "has KYC"
     USER ||--o| BANKDETAIL : "has bank"
     USER ||--o{ EMAILVERIFICATIONTOKEN : "has tokens"
@@ -154,6 +183,9 @@ erDiagram
     CATEGORY ||--o{ PRODUCT : "categorises"
     SUBCATEGORY ||--o{ PRODUCT : "categorises"
     PRODUCT ||--|{ PRODUCTIMAGE : "has images"
+    USER ||--o{ BID : places
+    PRODUCT ||--o{ BID : receives
+    PRODUCT ||--o| BID : "winning bid"
 ```
 
 ---
@@ -209,10 +241,30 @@ erDiagram
 - `status` enum values: `DRAFT`, `SUBMITTED`, `REJECTED`, `APPROVED`, `PENDING`, `ACTIVE`, `CLOSED`, `AWAITING_PAYMENT`, `SETTLED`, `PAYMENT_FAILED`, `ABANDONED`, `WITHDRAWN`. Default: `DRAFT`. See Rule 13 for full state machine.
 - `basePrice` is the user-entered desired price. `biddingStartPrice` is auto-computed as `basePrice * 1.10` and stored so the bidding module never recomputes it.
 - `biddingDurationHours` — countdown duration (hours) after the first bid is placed; configurable per product, default 72.
-- `currentHighestBid`, `currentHighestBidderId`, `biddingStartedAt`, `biddingEndsAt` — reserved for the future Bidding module; null until bidding begins.
+- `currentHighestBid`, `currentHighestBidderId`, `biddingStartedAt`, `biddingEndsAt` — null until the first bid is placed.
+- `winningBidId` — references the `bids.id` of the bid that is currently payment-responsible (set when auction closes to `AWAITING_PAYMENT`) or the bid that led to `SETTLED`. Nullable; plain UUID column, no TypeORM relation.
+- `closedAt` — timestamp when the auction timer expired and the product transitioned to `AWAITING_PAYMENT`.
+- `settledAt` — timestamp when payment was confirmed and the product transitioned to `SETTLED`.
+- `abandonedAt` — timestamp when all bidders in the fallback chain failed to pay and the product transitioned to `ABANDONED`.
 - `reviewedById` references `users.id` (the admin who reviewed) — plain UUID column, no TypeORM relation.
 - `locationProvince`, `locationDistrict`, `locationArea` — nullable, reserved for future location-based filtering.
 - Composite indexes: `(status, createdAt)` for public listing, `(ownerId, status)` for "my products" queries, `(categoryId, subcategoryId)` for filters.
+- `deletedAt` soft-delete inherited from `BaseEntity`.
+
+### BID
+- `productId` and `bidderId` are foreign keys stored as plain UUID columns with individual `@Index` decorators; TypeORM `@ManyToOne` relations are declared for `product` and `bidder` to enable JOIN-based queries.
+- `amount` and `previousHighestAmount` are stored as `decimal(12,2)`. All monetary arithmetic in the service layer uses `decimal.js` — never JavaScript floats.
+- `previousHighestAmount` — snapshot of `product.currentHighestBid` at the moment this bid was placed. `null` for the very first bid.
+- `wasFirstBid` — true if this bid triggered the `PENDING → ACTIVE` product transition.
+- `isOriginalWinner` — set to `true` on the highest bid when the auction closes; false for all other bids.
+- `fallbackRank` — position in the payment fallback chain: `0` = original winner, `1` = first fallback, `2` = second fallback, etc.
+- `isCurrentlyPaymentResponsible` — only ONE bid per product may have this `true` at any time. Enforced by a **partial unique index** on `(productId) WHERE "isCurrentlyPaymentResponsible" = true`.
+- `paymentStatus` enum values: `NOT_RESPONSIBLE` (default), `PENDING`, `CONFIRMED`, `EXPIRED`. See Rule 14 for the full payment state machine.
+- `paymentDeadline` — only meaningful when `isCurrentlyPaymentResponsible = true`. Set to `now + PAYMENT_WINDOW_HOURS` when a bid becomes responsible.
+- `paymentWarningSentAt` — set once when the ~2-hour warning email is dispatched. Prevents duplicate warning emails on subsequent cron runs; never reset once set.
+- `paymentConfirmedById` — UUID of the admin who manually confirmed payment (plain column, no TypeORM relation).
+- `paymentConfirmationMethod` enum values: `ADMIN_MANUAL`, `BANK_API`.
+- Composite indexes: `(productId, amount)` for highest-bid lookup, `(bidderId, placedAt)` for "my bids" queries, `(paymentStatus, paymentDeadline)` for overdue payment cron, `(productId, fallbackRank)` for fallback chain promotion.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
 ### PRODUCTIMAGE

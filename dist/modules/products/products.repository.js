@@ -157,10 +157,14 @@ let ProductsRepository = class ProductsRepository {
             qb.andWhere('(LOWER(product.title) LIKE :kw OR LOWER(product.description) LIKE :kw)', { kw: `%${filters.keyword.toLowerCase()}%` });
         }
         if (filters.minPrice !== undefined) {
-            qb.andWhere('product.basePrice >= :minPrice', { minPrice: filters.minPrice });
+            qb.andWhere('product.basePrice >= :minPrice', {
+                minPrice: filters.minPrice,
+            });
         }
         if (filters.maxPrice !== undefined) {
-            qb.andWhere('product.basePrice <= :maxPrice', { maxPrice: filters.maxPrice });
+            qb.andWhere('product.basePrice <= :maxPrice', {
+                maxPrice: filters.maxPrice,
+            });
         }
         return qb;
     }

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { ItemCondition } from '@common/enums/item-condition.enum';
@@ -62,7 +66,10 @@ export class ProductsRepository {
     qb.leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0');
 
     if (filters.priceSort) {
-      qb.orderBy('product.basePrice', filters.priceSort.toUpperCase() as 'ASC' | 'DESC');
+      qb.orderBy(
+        'product.basePrice',
+        filters.priceSort.toUpperCase() as 'ASC' | 'DESC',
+      );
     } else {
       qb.orderBy('product.createdAt', 'DESC');
     }
@@ -119,23 +126,38 @@ export class ProductsRepository {
     const existingIds = new Set(images.map((img) => img.id));
     const missing = orderedIds.filter((id) => !existingIds.has(id));
     if (missing.length > 0) {
-      throw new NotFoundException(`Image(s) not found for this product: ${missing.join(', ')}`);
+      throw new NotFoundException(
+        `Image(s) not found for this product: ${missing.join(', ')}`,
+      );
     }
     if (orderedIds.length !== images.length) {
-      throw new BadRequestException(`All ${images.length} image(s) must be included in the new order`);
+      throw new BadRequestException(
+        `All ${images.length} image(s) must be included in the new order`,
+      );
     }
 
     await this.dataSource.transaction(async (manager) => {
       for (let i = 0; i < orderedIds.length; i++) {
-        await manager.update(ProductImage, { id: orderedIds[i] }, { displayOrder: 1000 + i });
+        await manager.update(
+          ProductImage,
+          { id: orderedIds[i] },
+          { displayOrder: 1000 + i },
+        );
       }
       for (let i = 0; i < orderedIds.length; i++) {
-        await manager.update(ProductImage, { id: orderedIds[i] }, { displayOrder: i });
+        await manager.update(
+          ProductImage,
+          { id: orderedIds[i] },
+          { displayOrder: i },
+        );
       }
     });
   }
 
-  async setPreviewImage(productId: string, previewImageId: string): Promise<void> {
+  async setPreviewImage(
+    productId: string,
+    previewImageId: string,
+  ): Promise<void> {
     const images = await this.imageRepo.find({
       where: { productId },
       order: { displayOrder: 'ASC' },
@@ -155,10 +177,18 @@ export class ProductsRepository {
     await this.dataSource.transaction(async (manager) => {
       // Use temp values (1000+) first to avoid the unique (productId, displayOrder) constraint
       for (let i = 0; i < reordered.length; i++) {
-        await manager.update(ProductImage, { id: reordered[i].id }, { displayOrder: 1000 + i });
+        await manager.update(
+          ProductImage,
+          { id: reordered[i].id },
+          { displayOrder: 1000 + i },
+        );
       }
       for (let i = 0; i < reordered.length; i++) {
-        await manager.update(ProductImage, { id: reordered[i].id }, { displayOrder: i });
+        await manager.update(
+          ProductImage,
+          { id: reordered[i].id },
+          { displayOrder: i },
+        );
       }
     });
   }
@@ -208,11 +238,15 @@ export class ProductsRepository {
     }
 
     if (filters.minPrice !== undefined) {
-      qb.andWhere('product.basePrice >= :minPrice', { minPrice: filters.minPrice });
+      qb.andWhere('product.basePrice >= :minPrice', {
+        minPrice: filters.minPrice,
+      });
     }
 
     if (filters.maxPrice !== undefined) {
-      qb.andWhere('product.basePrice <= :maxPrice', { maxPrice: filters.maxPrice });
+      qb.andWhere('product.basePrice <= :maxPrice', {
+        maxPrice: filters.maxPrice,
+      });
     }
 
     return qb;

@@ -1,4 +1,12 @@
-import { IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemCondition } from '@common/enums/item-condition.enum';
@@ -27,14 +35,20 @@ export class ListProductsQueryDto extends PaginationDto {
   @IsOptional()
   keyword?: string;
 
-  @ApiPropertyOptional({ description: 'Minimum base price (inclusive)', minimum: 0 })
+  @ApiPropertyOptional({
+    description: 'Minimum base price (inclusive)',
+    minimum: 0,
+  })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @IsOptional()
   minPrice?: number;
 
-  @ApiPropertyOptional({ description: 'Maximum base price (inclusive)', minimum: 0 })
+  @ApiPropertyOptional({
+    description: 'Maximum base price (inclusive)',
+    minimum: 0,
+  })
   @Type(() => Number)
   @IsNumber()
   @Min(0)

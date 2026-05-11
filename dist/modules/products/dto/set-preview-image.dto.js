@@ -17,7 +17,9 @@ class SetPreviewImageDto {
 }
 exports.SetPreviewImageDto = SetPreviewImageDto;
 __decorate([
-    (0, swagger_1.ApiProperty)({ description: 'ID of the image to use as the preview thumbnail' }),
+    (0, swagger_1.ApiProperty)({
+        description: 'ID of the image to use as the preview thumbnail',
+    }),
     (0, class_validator_1.IsUUID)(),
     __metadata("design:type", String)
 ], SetPreviewImageDto.prototype, "previewImageId", void 0);

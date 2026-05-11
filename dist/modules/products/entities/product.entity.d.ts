@@ -26,6 +26,10 @@ export declare class Product extends BaseEntity {
     locationProvince: string | null;
     locationDistrict: string | null;
     locationArea: string | null;
+    winningBidId: string | null;
+    closedAt: Date | null;
+    settledAt: Date | null;
+    abandonedAt: Date | null;
     withdrawnAt: Date | null;
     images: ProductImage[];
 }

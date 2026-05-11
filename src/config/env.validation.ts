@@ -23,4 +23,10 @@ export const envValidationSchema = Joi.object({
   MAIL_PASSWORD: Joi.string().required(),
   MAIL_FROM: Joi.string().required(),
   APP_FRONTEND_URL: Joi.string().uri().required(),
+
+  // Bidding & Auction Lifecycle
+  BIDDING_DURATION_HOURS: Joi.number().integer().min(1).required(),
+  PAYMENT_WINDOW_HOURS: Joi.number().integer().min(1).required(),
+  BID_INCREMENT_MIN_FLAT: Joi.number().min(0.01).required(),
+  BID_INCREMENT_PERCENT: Joi.number().min(0.001).max(1).required(),
 });

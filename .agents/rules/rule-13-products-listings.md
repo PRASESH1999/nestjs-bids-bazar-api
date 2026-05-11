@@ -19,6 +19,9 @@ trigger: always_on
 - First bid must be ≥ `biddingStartPrice`.
 - Bidding logic, countdown, and increments are governed by Rule 3: Bidding Domain
   Logic — do NOT duplicate that logic here.
+- For the full bidding mechanics including increment rules, payment windows, auction
+  closing logic, and the fallback payment chain, see
+  **Rule 14: Bidding & Auction Lifecycle**.
 
 ## Required Pre-conditions to Sell
 - User must have `isEmailVerified === true` (enforced via login gate).
@@ -56,10 +59,14 @@ enum ItemCondition {
 
 ## Lifecycle State Machine
 
-### Auction Lifecycle (managed by future Bidding module)
+### Auction Lifecycle (managed by Rule 14: Bidding & Auction Lifecycle)
 ```
 PENDING → ACTIVE → CLOSED → AWAITING_PAYMENT → SETTLED | PAYMENT_FAILED | ABANDONED
 ```
+All transitions from `PENDING` onward — including the countdown timer, winner
+selection, payment window, and fallback chain — are owned by
+**Rule 14: Bidding & Auction Lifecycle** and implemented in `BiddingModule`.
+Do not add auction-state transition logic to this module.
 
 ### Moderation Lifecycle (managed by this module)
 ```

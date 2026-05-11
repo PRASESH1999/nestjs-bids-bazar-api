@@ -2,6 +2,7 @@ import { CategoriesService } from "../categories/categories.service";
 import { KycService } from "../kyc/kyc.service";
 import { MailService } from "../mail/mail.service";
 import { UsersService } from "../users/users.service";
+import { AuctionLifecycleService } from "../bidding/services/auction-lifecycle.service";
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -31,7 +32,9 @@ export declare class ProductsService {
     private readonly usersService;
     private readonly categoriesService;
     private readonly mailService;
-    constructor(productsRepository: ProductsRepository, productStorage: ProductStorageService, kycService: KycService, usersService: UsersService, categoriesService: CategoriesService, mailService: MailService);
+    private readonly auctionLifecycleService;
+    private readonly logger;
+    constructor(productsRepository: ProductsRepository, productStorage: ProductStorageService, kycService: KycService, usersService: UsersService, categoriesService: CategoriesService, mailService: MailService, auctionLifecycleService: AuctionLifecycleService);
     createProduct(userId: string, dto: CreateProductDto, imageFiles: Express.Multer.File[]): Promise<ProductResponse>;
     updateProduct(userId: string, productId: string, dto: UpdateProductDto, newImageFiles?: Express.Multer.File[]): Promise<ProductResponse>;
     submitProduct(userId: string, productId: string): Promise<ProductResponse>;

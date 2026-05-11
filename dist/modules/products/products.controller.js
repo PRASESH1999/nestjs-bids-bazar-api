@@ -127,7 +127,9 @@ __decorate([
 __decorate([
     (0, common_1.Get)('products/calculate-bidding-price'),
     (0, public_decorator_1.Public)(),
-    (0, swagger_1.ApiOperation)({ summary: 'Calculate the bidding start price for a given base price' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Calculate the bidding start price for a given base price',
+    }),
     __param(0, (0, common_1.Query)('basePrice')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -147,7 +149,9 @@ __decorate([
     (0, common_1.Get)('products/:id'),
     (0, public_decorator_1.Public)(),
     (0, common_1.UseGuards)(optional_jwt_guard_1.OptionalJwtGuard),
-    (0, swagger_1.ApiOperation)({ summary: 'Get a product by ID (owner can view own product regardless of status)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Get a product by ID (owner can view own product regardless of status)',
+    }),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Request)()),
     __metadata("design:type", Function),
@@ -175,18 +179,44 @@ __decorate([
     (0, swagger_1.ApiBody)({
         schema: {
             type: 'object',
-            required: ['title', 'description', 'categoryId', 'subcategoryId', 'condition', 'basePrice'],
+            required: [
+                'title',
+                'description',
+                'categoryId',
+                'subcategoryId',
+                'condition',
+                'basePrice',
+            ],
             properties: {
                 title: { type: 'string', minLength: 5, maxLength: 150 },
                 description: { type: 'string', minLength: 20, maxLength: 5000 },
-                specifications: { type: 'string', maxLength: 5000, description: 'Plain-text product specifications (optional)' },
+                specifications: {
+                    type: 'string',
+                    maxLength: 5000,
+                    description: 'Plain-text product specifications (optional)',
+                },
                 categoryId: { type: 'string', format: 'uuid' },
                 subcategoryId: { type: 'string', format: 'uuid' },
                 condition: { type: 'string', enum: Object.values(item_condition_enum_1.ItemCondition) },
                 basePrice: { type: 'number', minimum: 1 },
-                biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
-                previewImageIndex: { type: 'integer', minimum: 0, maximum: 7, default: 0, description: 'Zero-based index of the image to use as the preview thumbnail' },
-                images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
+                biddingDurationHours: {
+                    type: 'integer',
+                    minimum: 1,
+                    maximum: 720,
+                    default: 72,
+                },
+                previewImageIndex: {
+                    type: 'integer',
+                    minimum: 0,
+                    maximum: 7,
+                    default: 0,
+                    description: 'Zero-based index of the image to use as the preview thumbnail',
+                },
+                images: {
+                    type: 'array',
+                    items: { type: 'string', format: 'binary' },
+                    description: 'Product images (up to 8)',
+                },
             },
         },
     }),
@@ -209,14 +239,33 @@ __decorate([
             properties: {
                 title: { type: 'string', minLength: 5, maxLength: 150 },
                 description: { type: 'string', minLength: 20, maxLength: 5000 },
-                specifications: { type: 'string', maxLength: 5000, description: 'Plain-text product specifications (optional)' },
+                specifications: {
+                    type: 'string',
+                    maxLength: 5000,
+                    description: 'Plain-text product specifications (optional)',
+                },
                 categoryId: { type: 'string', format: 'uuid' },
                 subcategoryId: { type: 'string', format: 'uuid' },
                 condition: { type: 'string', enum: Object.values(item_condition_enum_1.ItemCondition) },
                 basePrice: { type: 'number', minimum: 1 },
-                biddingDurationHours: { type: 'integer', minimum: 1, maximum: 720, default: 72 },
-                previewImageIndex: { type: 'integer', minimum: 0, maximum: 7, default: 0, description: 'Zero-based index of the new image set to use as preview thumbnail' },
-                images: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'Product images (up to 8)' },
+                biddingDurationHours: {
+                    type: 'integer',
+                    minimum: 1,
+                    maximum: 720,
+                    default: 72,
+                },
+                previewImageIndex: {
+                    type: 'integer',
+                    minimum: 0,
+                    maximum: 7,
+                    default: 0,
+                    description: 'Zero-based index of the new image set to use as preview thumbnail',
+                },
+                images: {
+                    type: 'array',
+                    items: { type: 'string', format: 'binary' },
+                    description: 'Product images (up to 8)',
+                },
             },
         },
     }),
@@ -262,7 +311,9 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('products/:id/images/order'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MANAGE_OWN),
-    (0, swagger_1.ApiOperation)({ summary: 'Reorder images for own product (DRAFT or REJECTED only). First ID becomes the preview.' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Reorder images for own product (DRAFT or REJECTED only). First ID becomes the preview.',
+    }),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -273,7 +324,9 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('products/:id/preview-image'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MANAGE_OWN),
-    (0, swagger_1.ApiOperation)({ summary: 'Set the preview thumbnail image for own product (DRAFT or REJECTED only)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Set the preview thumbnail image for own product (DRAFT or REJECTED only)',
+    }),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -324,7 +377,9 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('admin/products/:id/images/order'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MODERATE),
-    (0, swagger_1.ApiOperation)({ summary: 'Admin: reorder images for any product. First ID becomes the preview.' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Admin: reorder images for any product. First ID becomes the preview.',
+    }),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -335,7 +390,9 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('admin/products/:id/preview-image'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_MODERATE),
-    (0, swagger_1.ApiOperation)({ summary: 'Admin: set the preview thumbnail image for any product' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Admin: set the preview thumbnail image for any product',
+    }),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),

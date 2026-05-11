@@ -8,6 +8,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var ProductsService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProductsService = void 0;
 const product_status_enum_1 = require("../../common/enums/product-status.enum");
@@ -15,6 +16,7 @@ const categories_service_1 = require("../categories/categories.service");
 const kyc_service_1 = require("../kyc/kyc.service");
 const mail_service_1 = require("../mail/mail.service");
 const users_service_1 = require("../users/users.service");
+const auction_lifecycle_service_1 = require("../bidding/services/auction-lifecycle.service");
 const common_1 = require("@nestjs/common");
 const product_storage_service_1 = require("./product-storage.service");
 const products_repository_1 = require("./products.repository");
@@ -26,20 +28,23 @@ const AUCTION_ACTIVE_STATUSES = [
     product_status_enum_1.ProductStatus.PAYMENT_FAILED,
     product_status_enum_1.ProductStatus.ABANDONED,
 ];
-let ProductsService = class ProductsService {
+let ProductsService = ProductsService_1 = class ProductsService {
     productsRepository;
     productStorage;
     kycService;
     usersService;
     categoriesService;
     mailService;
-    constructor(productsRepository, productStorage, kycService, usersService, categoriesService, mailService) {
+    auctionLifecycleService;
+    logger = new common_1.Logger(ProductsService_1.name);
+    constructor(productsRepository, productStorage, kycService, usersService, categoriesService, mailService, auctionLifecycleService) {
         this.productsRepository = productsRepository;
         this.productStorage = productStorage;
         this.kycService = kycService;
         this.usersService = usersService;
         this.categoriesService = categoriesService;
         this.mailService = mailService;
+        this.auctionLifecycleService = auctionLifecycleService;
     }
     async createProduct(userId, dto, imageFiles) {
         await this.assertKycApproved(userId);
@@ -207,9 +212,29 @@ let ProductsService = class ProductsService {
         };
     }
     async getPublicProductById(id, requesterId = null) {
-        const product = await this.productsRepository.findById(id);
+        let product = await this.productsRepository.findById(id);
         if (!product)
             throw new common_1.NotFoundException('Product not found');
+        if (product.status === product_status_enum_1.ProductStatus.ACTIVE) {
+            try {
+                await this.auctionLifecycleService.closeIfExpired(id);
+                product = (await this.productsRepository.findById(id)) ?? product;
+            }
+            catch (err) {
+                this.logger.error(`Lazy closeIfExpired failed for product ${id}: ` +
+                    `${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+        else if (product.status === product_status_enum_1.ProductStatus.AWAITING_PAYMENT) {
+            try {
+                await this.auctionLifecycleService.handlePaymentExpiry(id);
+                product = (await this.productsRepository.findById(id)) ?? product;
+            }
+            catch (err) {
+                this.logger.error(`Lazy handlePaymentExpiry failed for product ${id}: ` +
+                    `${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
         const isOwner = requesterId !== null && product.ownerId === requesterId;
         if (!product_status_enum_1.PUBLICLY_VISIBLE_STATUSES.includes(product.status) && !isOwner) {
             throw new common_1.NotFoundException('Product not found');
@@ -347,7 +372,7 @@ let ProductsService = class ProductsService {
     computeBiddingStartPrice(basePrice) {
         let markup;
         if (basePrice <= 10000)
-            markup = 0.20;
+            markup = 0.2;
         else if (basePrice <= 20000)
             markup = 0.18;
         else if (basePrice <= 30000)
@@ -357,7 +382,7 @@ let ProductsService = class ProductsService {
         else if (basePrice <= 50000)
             markup = 0.12;
         else
-            markup = 0.10;
+            markup = 0.1;
         return Math.round(basePrice * (1 + markup) * 100) / 100;
     }
     mapProduct(product) {
@@ -386,6 +411,10 @@ let ProductsService = class ProductsService {
             locationProvince: product.locationProvince,
             locationDistrict: product.locationDistrict,
             locationArea: product.locationArea,
+            winningBidId: product.winningBidId,
+            closedAt: product.closedAt,
+            settledAt: product.settledAt,
+            abandonedAt: product.abandonedAt,
             withdrawnAt: product.withdrawnAt,
             createdAt: product.createdAt,
             updatedAt: product.updatedAt,
@@ -393,7 +422,11 @@ let ProductsService = class ProductsService {
             previewImage: (() => {
                 const p = product.images?.find((img) => img.displayOrder === 0);
                 return p
-                    ? { id: p.id, url: `/api/v1/products/${product.id}/images/${p.id}`, mimeType: p.mimeType }
+                    ? {
+                        id: p.id,
+                        url: `/api/v1/products/${product.id}/images/${p.id}`,
+                        mimeType: p.mimeType,
+                    }
                     : null;
             })(),
             images: product.images?.map((img) => ({
@@ -406,13 +439,14 @@ let ProductsService = class ProductsService {
     }
 };
 exports.ProductsService = ProductsService;
-exports.ProductsService = ProductsService = __decorate([
+exports.ProductsService = ProductsService = ProductsService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [products_repository_1.ProductsRepository,
         product_storage_service_1.ProductStorageService,
         kyc_service_1.KycService,
         users_service_1.UsersService,
         categories_service_1.CategoriesService,
-        mail_service_1.MailService])
+        mail_service_1.MailService,
+        auction_lifecycle_service_1.AuctionLifecycleService])
 ], ProductsService);
 //# sourceMappingURL=products.service.js.map

@@ -16,6 +16,8 @@ exports.RolePermissionsMap = {
         permission_enum_1.Permission.PRODUCT_CREATE,
         permission_enum_1.Permission.PRODUCT_MANAGE_OWN,
         permission_enum_1.Permission.PRODUCT_VIEW_OWN,
+        permission_enum_1.Permission.BID_PLACE,
+        permission_enum_1.Permission.BID_VIEW_OWN,
     ],
     [role_enum_1.Role.ADMIN]: [
         permission_enum_1.Permission.USER_VIEW,
@@ -28,6 +30,8 @@ exports.RolePermissionsMap = {
         permission_enum_1.Permission.KYC_REVIEW,
         permission_enum_1.Permission.PRODUCT_MODERATE,
         permission_enum_1.Permission.PRODUCT_VIEW_ALL,
+        permission_enum_1.Permission.BID_VIEW_ALL,
+        permission_enum_1.Permission.PAYMENT_CONFIRM_MANUAL,
     ],
     [role_enum_1.Role.SUPERADMIN]: Object.values(permission_enum_1.Permission),
 };

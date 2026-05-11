@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { UsersModule } from '@modules/users/users.module';
 import { AuthModule } from '@modules/auth/auth.module';
@@ -11,6 +12,7 @@ import { KycModule } from '@modules/kyc/kyc.module';
 import { MailModule } from '@modules/mail/mail.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
 import { ProductsModule } from '@modules/products/products.module';
+import { BiddingModule } from '@modules/bidding/bidding.module';
 import { CommonModule } from '@common/common.module';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
@@ -50,6 +52,7 @@ import { envValidationSchema } from './config/env.validation';
         limit: 100,
       },
     ]),
+    ScheduleModule.forRoot(),
     CommonModule,
     UsersModule,
     AuthModule,
@@ -57,6 +60,7 @@ import { envValidationSchema } from './config/env.validation';
     MailModule,
     CategoriesModule,
     ProductsModule,
+    BiddingModule,
   ],
   controllers: [AppController],
   providers: [

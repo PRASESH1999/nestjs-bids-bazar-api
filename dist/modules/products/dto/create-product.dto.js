@@ -42,7 +42,10 @@ __decorate([
     __metadata("design:type", String)
 ], CreateProductDto.prototype, "description", void 0);
 __decorate([
-    (0, swagger_1.ApiPropertyOptional)({ description: 'Plain-text product specifications', maxLength: 5000 }),
+    (0, swagger_1.ApiPropertyOptional)({
+        description: 'Plain-text product specifications',
+        maxLength: 5000,
+    }),
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.MaxLength)(5000),
     (0, class_validator_2.IsOptional)(),

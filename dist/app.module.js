@@ -13,6 +13,7 @@ const app_service_1 = require("./app.service");
 const config_1 = require("@nestjs/config");
 const typeorm_1 = require("@nestjs/typeorm");
 const throttler_1 = require("@nestjs/throttler");
+const schedule_1 = require("@nestjs/schedule");
 const core_1 = require("@nestjs/core");
 const users_module_1 = require("./modules/users/users.module");
 const auth_module_1 = require("./modules/auth/auth.module");
@@ -20,6 +21,7 @@ const kyc_module_1 = require("./modules/kyc/kyc.module");
 const mail_module_1 = require("./modules/mail/mail.module");
 const categories_module_1 = require("./modules/categories/categories.module");
 const products_module_1 = require("./modules/products/products.module");
+const bidding_module_1 = require("./modules/bidding/bidding.module");
 const common_module_1 = require("./common/common.module");
 const jwt_auth_guard_1 = require("./common/guards/jwt-auth.guard");
 const env_validation_1 = require("./config/env.validation");
@@ -62,6 +64,7 @@ exports.AppModule = AppModule = __decorate([
                     limit: 100,
                 },
             ]),
+            schedule_1.ScheduleModule.forRoot(),
             common_module_1.CommonModule,
             users_module_1.UsersModule,
             auth_module_1.AuthModule,
@@ -69,6 +72,7 @@ exports.AppModule = AppModule = __decorate([
             mail_module_1.MailModule,
             categories_module_1.CategoriesModule,
             products_module_1.ProductsModule,
+            bidding_module_1.BiddingModule,
         ],
         controllers: [app_controller_1.AppController],
         providers: [

@@ -92,6 +92,21 @@ export class Product extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   locationArea: string | null;
 
+  // ─── Auction outcome (set by BiddingModule) ──────────────────────────────
+
+  // UUID FK → bids (ON DELETE SET NULL). Enforced at DB level via migration.
+  @Column({ type: 'uuid', nullable: true })
+  winningBidId: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  closedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  settledAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  abandonedAt: Date | null;
+
   // ─── Audit ────────────────────────────────────────────────────────────────
 
   @Column({ type: 'timestamptz', nullable: true })

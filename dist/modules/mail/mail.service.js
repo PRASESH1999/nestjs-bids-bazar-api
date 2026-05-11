@@ -54,6 +54,16 @@ const verify_email_template_1 = require("./templates/verify-email.template");
 const product_submitted_template_1 = require("./templates/product-submitted.template");
 const product_approved_template_1 = require("./templates/product-approved.template");
 const product_rejected_template_1 = require("./templates/product-rejected.template");
+const bid_placed_seller_template_1 = require("./templates/bid-placed-seller.template");
+const bid_outbid_template_1 = require("./templates/bid-outbid.template");
+const auction_won_template_1 = require("./templates/auction-won.template");
+const auction_closed_seller_template_1 = require("./templates/auction-closed-seller.template");
+const payment_window_expiring_template_1 = require("./templates/payment-window-expiring.template");
+const payment_failed_fallback_template_1 = require("./templates/payment-failed-fallback.template");
+const payment_failed_seller_template_1 = require("./templates/payment-failed-seller.template");
+const payment_confirmed_seller_template_1 = require("./templates/payment-confirmed-seller.template");
+const payment_confirmed_buyer_template_1 = require("./templates/payment-confirmed-buyer.template");
+const auction_abandoned_template_1 = require("./templates/auction-abandoned.template");
 let MailService = MailService_1 = class MailService {
     configService;
     logger = new common_1.Logger(MailService_1.name);
@@ -128,6 +138,102 @@ let MailService = MailService_1 = class MailService {
         await this.send(to, subject, html);
         this.logger.log('Product rejected email dispatched', { to });
     }
+    async sendBidPlacedSeller(to, params) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const auctionUrl = `${frontendUrl}/products/${params.productId}`;
+        const { subject, html } = (0, bid_placed_seller_template_1.bidPlacedSellerTemplate)({
+            sellerName: params.sellerName,
+            productTitle: params.productTitle,
+            bidAmount: params.bidAmount,
+            biddingEndsAt: params.biddingEndsAt,
+            auctionUrl,
+        });
+        await this.send(to, subject, html);
+        this.logger.log('Bid placed (seller) email dispatched', { to });
+    }
+    async sendBidOutbid(to, params) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const auctionUrl = `${frontendUrl}/products/${params.productId}`;
+        const { subject, html } = (0, bid_outbid_template_1.bidOutbidTemplate)({
+            bidderName: params.bidderName,
+            productTitle: params.productTitle,
+            yourBidAmount: params.yourBidAmount,
+            newHighestBid: params.newHighestBid,
+            biddingEndsAt: params.biddingEndsAt,
+            auctionUrl,
+        });
+        await this.send(to, subject, html);
+        this.logger.log('Outbid email dispatched', { to });
+    }
+    async sendAuctionWon(to, params) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const paymentUrl = `${frontendUrl}/products/${params.productId}/pay`;
+        const { subject, html } = (0, auction_won_template_1.auctionWonTemplate)({
+            bidderName: params.bidderName,
+            productTitle: params.productTitle,
+            winningAmount: params.winningAmount,
+            paymentDeadline: params.paymentDeadline,
+            paymentUrl,
+        });
+        await this.send(to, subject, html);
+        this.logger.log('Auction won email dispatched', { to });
+    }
+    async sendAuctionClosedSeller(to, params) {
+        const { subject, html } = (0, auction_closed_seller_template_1.auctionClosedSellerTemplate)(params);
+        await this.send(to, subject, html);
+        this.logger.log('Auction closed (seller) email dispatched', { to });
+    }
+    async sendPaymentWindowExpiring(to, params) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const paymentUrl = `${frontendUrl}/products/${params.productId}/pay`;
+        const { subject, html } = (0, payment_window_expiring_template_1.paymentWindowExpiringTemplate)({
+            bidderName: params.bidderName,
+            productTitle: params.productTitle,
+            amount: params.amount,
+            paymentDeadline: params.paymentDeadline,
+            paymentUrl,
+        });
+        const sent = await this.trySend(to, subject, html);
+        if (sent)
+            this.logger.log('Payment window expiring email dispatched', { to });
+        return sent;
+    }
+    async sendPaymentFailedFallback(to, params) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const paymentUrl = `${frontendUrl}/products/${params.productId}/pay`;
+        const { subject, html } = (0, payment_failed_fallback_template_1.paymentFailedFallbackTemplate)({
+            bidderName: params.bidderName,
+            productTitle: params.productTitle,
+            winningAmount: params.winningAmount,
+            paymentDeadline: params.paymentDeadline,
+            fallbackRank: params.fallbackRank,
+            paymentUrl,
+        });
+        await this.send(to, subject, html);
+        this.logger.log('Payment failed — fallback winner email dispatched', {
+            to,
+        });
+    }
+    async sendPaymentFailedSeller(to, params) {
+        const { subject, html } = (0, payment_failed_seller_template_1.paymentFailedSellerTemplate)(params);
+        await this.send(to, subject, html);
+        this.logger.log('Payment failed (seller) email dispatched', { to });
+    }
+    async sendPaymentConfirmedSeller(to, params) {
+        const { subject, html } = (0, payment_confirmed_seller_template_1.paymentConfirmedSellerTemplate)(params);
+        await this.send(to, subject, html);
+        this.logger.log('Payment confirmed (seller) email dispatched', { to });
+    }
+    async sendPaymentConfirmedBuyer(to, params) {
+        const { subject, html } = (0, payment_confirmed_buyer_template_1.paymentConfirmedBuyerTemplate)(params);
+        await this.send(to, subject, html);
+        this.logger.log('Payment confirmed (buyer) email dispatched', { to });
+    }
+    async sendAuctionAbandoned(to, params) {
+        const { subject, html } = (0, auction_abandoned_template_1.auctionAbandonedTemplate)(params);
+        await this.send(to, subject, html);
+        this.logger.log('Auction abandoned email dispatched', { to });
+    }
     async send(to, subject, html) {
         const from = this.configService.getOrThrow('MAIL_FROM');
         try {
@@ -140,6 +246,22 @@ let MailService = MailService_1 = class MailService {
                 subject,
                 error: message,
             });
+        }
+    }
+    async trySend(to, subject, html) {
+        const from = this.configService.getOrThrow('MAIL_FROM');
+        try {
+            await this.transporter.sendMail({ from, to, subject, html });
+            return true;
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error('Failed to send email', {
+                to,
+                subject,
+                error: message,
+            });
+            return false;
         }
     }
 };

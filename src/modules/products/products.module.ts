@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { KycModule } from '@modules/kyc/kyc.module';
 import { UsersModule } from '@modules/users/users.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
+import { BiddingModule } from '@modules/bidding/bidding.module';
 import { Product } from './entities/product.entity';
 import { ProductImage } from './entities/product-image.entity';
 import { ProductsController } from './products.controller';
@@ -16,6 +17,7 @@ import { ProductStorageService } from './product-storage.service';
     UsersModule,
     KycModule,
     CategoriesModule,
+    BiddingModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService, ProductsRepository, ProductStorageService],

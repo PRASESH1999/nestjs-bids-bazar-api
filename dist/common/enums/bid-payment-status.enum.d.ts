@@ -1,0 +1,6 @@
+export declare enum BidPaymentStatus {
+    NOT_RESPONSIBLE = "NOT_RESPONSIBLE",
+    PENDING = "PENDING",
+    CONFIRMED = "CONFIRMED",
+    EXPIRED = "EXPIRED"
+}

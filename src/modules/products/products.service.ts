@@ -7,10 +7,12 @@ import { CategoriesService } from '@modules/categories/categories.service';
 import { KycService } from '@modules/kyc/kyc.service';
 import { MailService } from '@modules/mail/mail.service';
 import { UsersService } from '@modules/users/users.service';
+import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
@@ -45,6 +47,8 @@ const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     private readonly productsRepository: ProductsRepository,
     private readonly productStorage: ProductStorageService,
@@ -52,6 +56,7 @@ export class ProductsService {
     private readonly usersService: UsersService,
     private readonly categoriesService: CategoriesService,
     private readonly mailService: MailService,
+    private readonly auctionLifecycleService: AuctionLifecycleService,
   ) {}
 
   // ─── Create ───────────────────────────────────────────────────────────────
@@ -73,7 +78,10 @@ export class ProductsService {
 
     this.productStorage.validateFiles(imageFiles);
 
-    const previewIdx = Math.min(dto.previewImageIndex ?? 0, imageFiles.length - 1);
+    const previewIdx = Math.min(
+      dto.previewImageIndex ?? 0,
+      imageFiles.length - 1,
+    );
     const orderedFiles = [
       imageFiles[previewIdx],
       ...imageFiles.slice(0, previewIdx),
@@ -150,7 +158,8 @@ export class ProductsService {
 
     if (dto.title !== undefined) product.title = dto.title;
     if (dto.description !== undefined) product.description = dto.description;
-    if (dto.specifications !== undefined) product.specifications = dto.specifications;
+    if (dto.specifications !== undefined)
+      product.specifications = dto.specifications;
     if (dto.categoryId !== undefined) product.categoryId = dto.categoryId;
     if (dto.subcategoryId !== undefined)
       product.subcategoryId = dto.subcategoryId;
@@ -169,7 +178,10 @@ export class ProductsService {
       }
       this.productStorage.validateFiles(newImageFiles);
 
-      const previewIdx = Math.min(dto.previewImageIndex ?? 0, newImageFiles.length - 1);
+      const previewIdx = Math.min(
+        dto.previewImageIndex ?? 0,
+        newImageFiles.length - 1,
+      );
       const orderedFiles = [
         newImageFiles[previewIdx],
         ...newImageFiles.slice(0, previewIdx),
@@ -329,8 +341,32 @@ export class ProductsService {
     id: string,
     requesterId: string | null = null,
   ): Promise<ProductResponse> {
-    const product = await this.productsRepository.findById(id);
+    let product = await this.productsRepository.findById(id);
     if (!product) throw new NotFoundException('Product not found');
+
+    // Lazy auction-state trigger — idempotent and non-fatal.
+    // Failures are logged and suppressed; the cron picks up the slack on the next tick.
+    if (product.status === ProductStatus.ACTIVE) {
+      try {
+        await this.auctionLifecycleService.closeIfExpired(id);
+        product = (await this.productsRepository.findById(id)) ?? product;
+      } catch (err: unknown) {
+        this.logger.error(
+          `Lazy closeIfExpired failed for product ${id}: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else if (product.status === ProductStatus.AWAITING_PAYMENT) {
+      try {
+        await this.auctionLifecycleService.handlePaymentExpiry(id);
+        product = (await this.productsRepository.findById(id)) ?? product;
+      } catch (err: unknown) {
+        this.logger.error(
+          `Lazy handlePaymentExpiry failed for product ${id}: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     const isOwner = requesterId !== null && product.ownerId === requesterId;
     if (!PUBLICLY_VISIBLE_STATUSES.includes(product.status) && !isOwner) {
@@ -347,7 +383,8 @@ export class ProductsService {
     requesterIsAdmin: boolean,
   ): Promise<{ absolutePath: string; mimeType: string }> {
     const image = await this.productsRepository.findImageById(imageId);
-    if (!image || image.productId !== productId) throw new NotFoundException('Image not found');
+    if (!image || image.productId !== productId)
+      throw new NotFoundException('Image not found');
 
     const product = await this.productsRepository.findByIdWithoutImages(
       image.productId,
@@ -377,7 +414,8 @@ export class ProductsService {
     requesterId: string,
     isAdmin: boolean,
   ): Promise<ProductResponse> {
-    const product = await this.productsRepository.findByIdWithoutImages(productId);
+    const product =
+      await this.productsRepository.findByIdWithoutImages(productId);
     if (!product) throw new NotFoundException('Product not found');
 
     if (!isAdmin) {
@@ -401,7 +439,8 @@ export class ProductsService {
     requesterId: string,
     isAdmin: boolean,
   ): Promise<ProductResponse> {
-    const product = await this.productsRepository.findByIdWithoutImages(productId);
+    const product =
+      await this.productsRepository.findByIdWithoutImages(productId);
     if (!product) throw new NotFoundException('Product not found');
 
     if (!isAdmin) {
@@ -576,12 +615,12 @@ export class ProductsService {
 
   computeBiddingStartPrice(basePrice: number): number {
     let markup: number;
-    if (basePrice <= 10000)      markup = 0.20;
+    if (basePrice <= 10000) markup = 0.2;
     else if (basePrice <= 20000) markup = 0.18;
     else if (basePrice <= 30000) markup = 0.16;
     else if (basePrice <= 40000) markup = 0.14;
     else if (basePrice <= 50000) markup = 0.12;
-    else                         markup = 0.10;
+    else markup = 0.1;
     return Math.round(basePrice * (1 + markup) * 100) / 100;
   }
 
@@ -611,6 +650,10 @@ export class ProductsService {
       locationProvince: product.locationProvince,
       locationDistrict: product.locationDistrict,
       locationArea: product.locationArea,
+      winningBidId: product.winningBidId,
+      closedAt: product.closedAt,
+      settledAt: product.settledAt,
+      abandonedAt: product.abandonedAt,
       withdrawnAt: product.withdrawnAt,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
@@ -618,7 +661,11 @@ export class ProductsService {
       previewImage: (() => {
         const p = product.images?.find((img) => img.displayOrder === 0);
         return p
-          ? { id: p.id, url: `/api/v1/products/${product.id}/images/${p.id}`, mimeType: p.mimeType }
+          ? {
+              id: p.id,
+              url: `/api/v1/products/${product.id}/images/${p.id}`,
+              mimeType: p.mimeType,
+            }
           : null;
       })(),
       images:

@@ -39,6 +39,10 @@ let Product = class Product extends base_entity_1.BaseEntity {
     locationProvince;
     locationDistrict;
     locationArea;
+    winningBidId;
+    closedAt;
+    settledAt;
+    abandonedAt;
     withdrawnAt;
     images;
 };
@@ -139,6 +143,22 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'varchar', nullable: true }),
     __metadata("design:type", Object)
 ], Product.prototype, "locationArea", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'uuid', nullable: true }),
+    __metadata("design:type", Object)
+], Product.prototype, "winningBidId", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true }),
+    __metadata("design:type", Object)
+], Product.prototype, "closedAt", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true }),
+    __metadata("design:type", Object)
+], Product.prototype, "settledAt", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true }),
+    __metadata("design:type", Object)
+], Product.prototype, "abandonedAt", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true }),
     __metadata("design:type", Object)

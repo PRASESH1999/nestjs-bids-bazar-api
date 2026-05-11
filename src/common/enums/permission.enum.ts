@@ -29,6 +29,12 @@ export enum Permission {
   PRODUCT_MODERATE = 'product:moderate',
   PRODUCT_VIEW_ALL = 'product:view_all',
 
+  // Bidding permissions
+  BID_PLACE = 'bid:place',
+  BID_VIEW_OWN = 'bid:view_own',
+  BID_VIEW_ALL = 'bid:view_all',
+  PAYMENT_CONFIRM_MANUAL = 'payment:confirm_manual',
+
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',
   ADMIN_MANAGE = 'admin:manage',
