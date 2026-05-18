@@ -70,8 +70,10 @@ export class AuthService {
   }
 
   async register(data: RegisterDto) {
+    const email = data.email.toLowerCase();
+
     // Check if user already exists
-    const existingUser = await this.usersService.findByEmail(data.email);
+    const existingUser = await this.usersService.findByEmail(email);
     if (existingUser) {
       throw new ConflictException('User with this email already exists');
     }
@@ -80,6 +82,7 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(password, 12);
     const user = await this.usersService.create({
       ...rest,
+      email,
       password: hashedPassword,
       role: Role.USER, // Force USER role for public registration
     });

@@ -352,7 +352,7 @@ export class BiddingService {
     const incrementFlat = new Decimal(String(flatRaw));
 
     const percentInc = current.mul(incrementPercent).toDecimalPlaces(2);
-    const minInc = Decimal.max(incrementFlat, percentInc);
+    const minInc = incrementFlat;
     const maxInc = percentInc;
 
     let minAmount: Decimal;

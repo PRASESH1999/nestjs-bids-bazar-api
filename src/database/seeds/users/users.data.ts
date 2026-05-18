@@ -9,7 +9,7 @@ export const SEED_USER_IDS = {
   USER_2: '00000000-0000-0000-0000-000000000006',
 } as const;
 
-export const SEED_PASSWORD = 'Seed123!Password';
+export const SEED_PASSWORD = 'Test@123';
 
 export interface SeedUser {
   id: string;

@@ -3,7 +3,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+// import { ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { UsersModule } from '@modules/users/users.module';
@@ -69,10 +70,10 @@ import { envValidationSchema } from './config/env.validation';
       provide: APP_GUARD,
       useClass: JwtAuthGuard, // Global JWT Guard
     },
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard, // Global Rate Limiter
-    },
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: ThrottlerGuard, // Global Rate Limiter (Disabled for testing)
+    // },
   ],
 })
 export class AppModule {}

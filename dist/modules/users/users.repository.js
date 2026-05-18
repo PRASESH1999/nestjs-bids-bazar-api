@@ -21,7 +21,10 @@ let UsersRepository = class UsersRepository {
         this.repo = this.dataSource.getRepository(user_entity_1.User);
     }
     async findByEmail(email) {
-        return this.repo.findOneBy({ email });
+        return this.repo
+            .createQueryBuilder('user')
+            .where('LOWER(user.email) = :email', { email: email.toLowerCase() })
+            .getOne();
     }
     async findById(id) {
         return this.repo.findOneBy({ id });

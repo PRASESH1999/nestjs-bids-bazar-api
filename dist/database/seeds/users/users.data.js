@@ -10,7 +10,7 @@ exports.SEED_USER_IDS = {
     USER_1: '00000000-0000-0000-0000-000000000005',
     USER_2: '00000000-0000-0000-0000-000000000006',
 };
-exports.SEED_PASSWORD = 'Seed123!Password';
+exports.SEED_PASSWORD = 'Test@123';
 exports.SEED_USERS = [
     {
         id: exports.SEED_USER_IDS.SUPERADMIN_1,

@@ -36,10 +36,11 @@ export class UsersService {
   }
 
   async createAdmin(data: CreateAdminDto): Promise<User> {
-    const { password, ...rest } = data;
+    const { password, email, ...rest } = data;
     const hashedPassword = await bcrypt.hash(password, 12);
     const user = this.usersRepository.createEntity({
       ...rest,
+      email: email.toLowerCase(),
       password: hashedPassword,
       isActive: true,
     });
@@ -58,6 +59,9 @@ export class UsersService {
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+    if (data.email) {
+      data.email = data.email.toLowerCase();
     }
     Object.assign(user, data);
     return this.usersRepository.saveUser(user);

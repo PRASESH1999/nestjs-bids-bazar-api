@@ -11,7 +11,10 @@ export class UsersRepository {
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.repo.findOneBy({ email });
+    return this.repo
+      .createQueryBuilder('user')
+      .where('LOWER(user.email) = :email', { email: email.toLowerCase() })
+      .getOne();
   }
 
   async findById(id: string): Promise<User | null> {

@@ -72,7 +72,8 @@ let CategoriesService = class CategoriesService {
     }
     async updateCategory(id, dto, iconFile) {
         const category = await this.getCategoryById(id);
-        if (dto.name !== undefined && dto.name !== category.name) {
+        if (dto.name !== undefined &&
+            dto.name.toLowerCase() !== category.name.toLowerCase()) {
             await this.assertCategoryNameUnique(dto.name, id);
             category.name = dto.name;
         }
@@ -129,7 +130,8 @@ let CategoriesService = class CategoriesService {
             }
             subcategory.categoryId = dto.categoryId;
         }
-        if (dto.name !== undefined && dto.name !== subcategory.name) {
+        if (dto.name !== undefined &&
+            dto.name.toLowerCase() !== subcategory.name.toLowerCase()) {
             await this.assertSubcategoryNameUnique(subcategory.categoryId, dto.name, id);
             subcategory.name = dto.name;
         }
@@ -149,15 +151,20 @@ let CategoriesService = class CategoriesService {
         await this.subcategoryRepo.save(subcategory);
     }
     async assertCategoryNameUnique(name, excludeId) {
-        const existing = await this.categoryRepo.findOne({ where: { name } });
+        const existing = await this.categoryRepo
+            .createQueryBuilder('category')
+            .where('LOWER(category.name) = :name', { name: name.toLowerCase() })
+            .getOne();
         if (existing && existing.id !== excludeId) {
             throw new common_1.ConflictException(`A category with name '${name}' already exists`);
         }
     }
     async assertSubcategoryNameUnique(categoryId, name, excludeId) {
-        const existing = await this.subcategoryRepo.findOne({
-            where: { categoryId, name },
-        });
+        const existing = await this.subcategoryRepo
+            .createQueryBuilder('subcategory')
+            .where('subcategory.categoryId = :categoryId', { categoryId })
+            .andWhere('LOWER(subcategory.name) = :name', { name: name.toLowerCase() })
+            .getOne();
         if (existing && existing.id !== excludeId) {
             throw new common_1.ConflictException(`A subcategory with name '${name}' already exists under this category`);
         }

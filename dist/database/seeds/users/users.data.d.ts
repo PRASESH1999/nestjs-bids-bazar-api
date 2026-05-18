@@ -7,7 +7,7 @@ export declare const SEED_USER_IDS: {
     readonly USER_1: "00000000-0000-0000-0000-000000000005";
     readonly USER_2: "00000000-0000-0000-0000-000000000006";
 };
-export declare const SEED_PASSWORD = "Seed123!Password";
+export declare const SEED_PASSWORD = "Test@123";
 export interface SeedUser {
     id: string;
     email: string;

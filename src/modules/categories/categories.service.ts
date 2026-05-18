@@ -87,7 +87,10 @@ export class CategoriesService {
   ): Promise<Category> {
     const category = await this.getCategoryById(id);
 
-    if (dto.name !== undefined && dto.name !== category.name) {
+    if (
+      dto.name !== undefined &&
+      dto.name.toLowerCase() !== category.name.toLowerCase()
+    ) {
       await this.assertCategoryNameUnique(dto.name, id);
       category.name = dto.name;
     }
@@ -170,7 +173,10 @@ export class CategoriesService {
       subcategory.categoryId = dto.categoryId;
     }
 
-    if (dto.name !== undefined && dto.name !== subcategory.name) {
+    if (
+      dto.name !== undefined &&
+      dto.name.toLowerCase() !== subcategory.name.toLowerCase()
+    ) {
       await this.assertSubcategoryNameUnique(
         subcategory.categoryId,
         dto.name,
@@ -203,7 +209,10 @@ export class CategoriesService {
     name: string,
     excludeId?: string,
   ): Promise<void> {
-    const existing = await this.categoryRepo.findOne({ where: { name } });
+    const existing = await this.categoryRepo
+      .createQueryBuilder('category')
+      .where('LOWER(category.name) = :name', { name: name.toLowerCase() })
+      .getOne();
     if (existing && existing.id !== excludeId) {
       throw new ConflictException(
         `A category with name '${name}' already exists`,
@@ -216,9 +225,11 @@ export class CategoriesService {
     name: string,
     excludeId?: string,
   ): Promise<void> {
-    const existing = await this.subcategoryRepo.findOne({
-      where: { categoryId, name },
-    });
+    const existing = await this.subcategoryRepo
+      .createQueryBuilder('subcategory')
+      .where('subcategory.categoryId = :categoryId', { categoryId })
+      .andWhere('LOWER(subcategory.name) = :name', { name: name.toLowerCase() })
+      .getOne();
     if (existing && existing.id !== excludeId) {
       throw new ConflictException(
         `A subcategory with name '${name}' already exists under this category`,

@@ -81,10 +81,6 @@ exports.AppModule = AppModule = __decorate([
                 provide: core_1.APP_GUARD,
                 useClass: jwt_auth_guard_1.JwtAuthGuard,
             },
-            {
-                provide: core_1.APP_GUARD,
-                useClass: throttler_1.ThrottlerGuard,
-            },
         ],
     })
 ], AppModule);

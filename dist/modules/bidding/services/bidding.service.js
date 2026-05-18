@@ -260,7 +260,7 @@ let BiddingService = BiddingService_1 = class BiddingService {
         const incrementPercent = new decimal_js_1.default(String(percentRaw));
         const incrementFlat = new decimal_js_1.default(String(flatRaw));
         const percentInc = current.mul(incrementPercent).toDecimalPlaces(2);
-        const minInc = decimal_js_1.default.max(incrementFlat, percentInc);
+        const minInc = incrementFlat;
         const maxInc = percentInc;
         let minAmount;
         let maxAmount;

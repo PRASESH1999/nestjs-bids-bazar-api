@@ -71,10 +71,11 @@ let UsersService = class UsersService {
         return this.usersRepository.saveUser(user);
     }
     async createAdmin(data) {
-        const { password, ...rest } = data;
+        const { password, email, ...rest } = data;
         const hashedPassword = await bcrypt.hash(password, 12);
         const user = this.usersRepository.createEntity({
             ...rest,
+            email: email.toLowerCase(),
             password: hashedPassword,
             isActive: true,
         });
@@ -90,6 +91,9 @@ let UsersService = class UsersService {
         const user = await this.findById(id);
         if (!user) {
             throw new common_1.NotFoundException('User not found');
+        }
+        if (data.email) {
+            data.email = data.email.toLowerCase();
         }
         Object.assign(user, data);
         return this.usersRepository.saveUser(user);
