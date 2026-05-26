@@ -41,16 +41,24 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var UsersService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersService = void 0;
 const common_1 = require("@nestjs/common");
 const bcrypt = __importStar(require("bcrypt"));
+const typeorm_1 = require("typeorm");
 const users_repository_1 = require("./users.repository");
 const role_enum_1 = require("../../common/enums/role.enum");
-let UsersService = class UsersService {
+const mail_service_1 = require("../mail/mail.service");
+let UsersService = UsersService_1 = class UsersService {
     usersRepository;
-    constructor(usersRepository) {
+    dataSource;
+    mailService;
+    logger = new common_1.Logger(UsersService_1.name);
+    constructor(usersRepository, dataSource, mailService) {
         this.usersRepository = usersRepository;
+        this.dataSource = dataSource;
+        this.mailService = mailService;
     }
     async findAll(pagination, requesterRole) {
         const { page = 1, limit = 20 } = pagination;
@@ -124,10 +132,48 @@ let UsersService = class UsersService {
             await this.usersRepository.updateUser(id, { hashedRefreshToken: null });
         }
     }
+    async updateUserInTransaction(id, data, queryRunner) {
+        await this.usersRepository.updateUser(id, data, queryRunner);
+    }
+    async changePassword(userId, currentPassword, newPassword) {
+        const user = await this.findById(userId);
+        if (!user)
+            throw new common_1.NotFoundException('User not found');
+        const matches = await bcrypt.compare(currentPassword, user.password);
+        if (!matches) {
+            throw new common_1.UnauthorizedException('Current password is incorrect');
+        }
+        if (currentPassword === newPassword) {
+            throw new common_1.BadRequestException('New password must be different from current password');
+        }
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+        try {
+            await this.usersRepository.updateUser(userId, { password: hashedPassword, hashedRefreshToken: null }, queryRunner);
+            await queryRunner.commitTransaction();
+        }
+        catch (err) {
+            await queryRunner.rollbackTransaction();
+            throw err;
+        }
+        finally {
+            await queryRunner.release();
+        }
+        try {
+            await this.mailService.sendPasswordChangedConfirmation(user.email, user.name);
+        }
+        catch (err) {
+            this.logger.error('[changePassword] Failed to dispatch confirmation email', err instanceof Error ? err.stack : String(err));
+        }
+    }
 };
 exports.UsersService = UsersService;
-exports.UsersService = UsersService = __decorate([
+exports.UsersService = UsersService = UsersService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [users_repository_1.UsersRepository])
+    __metadata("design:paramtypes", [users_repository_1.UsersRepository,
+        typeorm_1.DataSource,
+        mail_service_1.MailService])
 ], UsersService);
 //# sourceMappingURL=users.service.js.map

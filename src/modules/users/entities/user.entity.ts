@@ -28,4 +28,7 @@ export class User extends BaseEntity {
 
   @Column({ type: 'varchar', nullable: true })
   hashedRefreshToken: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  nameChangedAt: Date | null;
 }

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npm install *)",
-      "Bash(node -e \"require\\('decimal.js'\\); console.log\\('decimal.js ok:', require\\('decimal.js'\\).Decimal.version\\)\")"
+      "Bash(node -e \"require\\('decimal.js'\\); console.log\\('decimal.js ok:', require\\('decimal.js'\\).Decimal.version\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)"
     ]
   }
 }

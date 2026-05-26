@@ -16,6 +16,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -32,8 +33,10 @@ import {
   UserSchema,
 } from '@common/swagger/api-responses';
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { ChangeEmailDto } from './dto/change-email.dto';
+import { UpdateSelfDto } from './dto/update-self.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -64,30 +67,27 @@ export class UsersController {
   }
 
   @Get('me')
-  @ApiOperation({ summary: 'Get current user profile' })
+  @ApiOperation({ summary: 'Get own profile with KYC summary and pending email-change info' })
   @ApiResponse({
     status: 200,
-    description: 'Current authenticated user object.',
-    schema: UserSchema,
+    description: 'Rich own-profile including KYC summary and pending email change (if any).',
   })
   @ApiResponse(R401)
   @ApiResponse(R403)
   @RequirePermissions(Permission.PROFILE_VIEW)
   async getProfile(@Request() req: RequestWithUser) {
-    // req.user is set by JwtAuthGuard, but we refetch to get full data safely.
-    const user = await this.usersService.findById(req.user.sub);
-    if (!user) return null;
-    // Remove sensitive data (password, hash) before returning
-    const { password: _, hashedRefreshToken: __, ...result } = user;
-    return result;
+    return this.usersService.getOwnProfile(req.user.sub);
   }
 
   @Patch('me')
-  @ApiOperation({ summary: 'Update current user profile' })
+  @ApiOperation({ summary: 'Change display name (one-time only)' })
   @ApiResponse({
     status: 200,
-    description: 'Updated user object.',
-    schema: UserSchema,
+    description: 'Name updated. This can only be done once.',
+    schema: {
+      type: 'object',
+      properties: { message: { type: 'string', example: 'Display name updated successfully.' } },
+    },
   })
   @ApiResponse(R400)
   @ApiResponse(R401)
@@ -95,11 +95,77 @@ export class UsersController {
   @RequirePermissions(Permission.PROFILE_EDIT)
   async updateProfile(
     @Request() req: RequestWithUser,
-    @Body() updateData: UpdateUserDto,
+    @Body() dto: UpdateSelfDto,
   ) {
-    const user = await this.usersService.updateUser(req.user.sub, updateData);
-    const { password: _, hashedRefreshToken: __, ...result } = user;
-    return result;
+    await this.usersService.updateSelfName(req.user.sub, dto.name);
+    return { message: 'Display name updated successfully.' };
+  }
+
+  @Patch('me/email')
+  @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
+  @ApiOperation({ summary: 'Request an email address change (sends verification to new address)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Verification email sent to the new address.',
+    schema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'A verification link has been sent to your new email address.',
+        },
+      },
+    },
+  })
+  @ApiResponse(R400)
+  @ApiResponse(R401)
+  @ApiResponse(R403)
+  @ApiResponse(R409)
+  @RequirePermissions(Permission.PROFILE_EDIT)
+  async requestEmailChange(
+    @Request() req: RequestWithUser,
+    @Body() dto: ChangeEmailDto,
+  ) {
+    await this.usersService.requestEmailChange(
+      req.user.sub,
+      dto.newEmail,
+      dto.currentPassword,
+    );
+    return {
+      message: 'A verification link has been sent to your new email address.',
+    };
+  }
+
+  @Patch('me/password')
+  @ApiOperation({ summary: 'Change own password (authenticated users)' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Password changed. All sessions invalidated — user must log in again.',
+    schema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'Password changed successfully. Please log in again.',
+        },
+      },
+    },
+  })
+  @ApiResponse(R400)
+  @ApiResponse(R401)
+  @ApiResponse(R403)
+  @RequirePermissions(Permission.PROFILE_EDIT)
+  async changePassword(
+    @Request() req: RequestWithUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    await this.usersService.changePassword(
+      req.user.sub,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+    return { message: 'Password changed successfully. Please log in again.' };
   }
 
   @Get()

@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import type { User } from '../users/entities/user.entity';
 interface RefreshRequest extends ExpressRequest {
     cookies: Record<string, string | undefined>;
@@ -31,6 +33,12 @@ export declare class AuthController {
     }>;
     refresh(req: RefreshRequest, res: Response): Promise<{
         accessToken: string;
+    }>;
+    forgotPassword(dto: ForgotPasswordDto): Promise<{
+        message: string;
+    }>;
+    resetPassword(dto: ResetPasswordDto): Promise<{
+        message: string;
     }>;
     logout(req: RequestWithUser, res: Response): Promise<{
         message: string;

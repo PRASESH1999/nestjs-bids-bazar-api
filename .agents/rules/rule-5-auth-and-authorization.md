@@ -274,3 +274,71 @@ Lives in: modules/auth/entities/email-verification-token.entity.ts
 - Templates: plain functions returning { subject, html } — no template engine
 - Required env vars: MAIL_HOST, MAIL_PORT, MAIL_SECURE, MAIL_USER,
   MAIL_PASSWORD, MAIL_FROM, APP_FRONTEND_URL
+
+---
+
+## Password Reset
+
+### Purpose
+- Provide a secure mechanism for users to recover account access when they have forgotten their password.
+- Provide an authenticated channel for users to change their password while logged in.
+
+### Forgot-Password Flow (Unauthenticated)
+1. User submits email via `POST /auth/forgot-password`
+2. Server looks up the user
+   - If user exists AND `isActive=true`: check per-email rate limit (3/hour), then generate token, hash and store, send reset email
+   - Otherwise: do NOT send email, do NOT create token row, but DO return 200 with the same generic message
+3. User receives email with link: `${APP_FRONTEND_URL}/auth/reset-password?token={rawToken}`
+4. User opens link, enters new password
+5. User submits new password via `POST /auth/reset-password`
+6. Server validates token, hashes new password, invalidates all refresh tokens, sends confirmation email
+
+### In-App Change Flow (Authenticated)
+1. User submits current + new password via `PATCH /users/me/password`
+2. Server validates `currentPassword` via `bcrypt.compare`
+3. Server enforces `newPassword !== currentPassword`
+4. Server enforces the same password policy as registration
+5. Server hashes and saves new password, invalidates all refresh tokens, sends confirmation email
+6. User must log in again on every device (including the current one)
+
+### Token Rules
+- Generated with `crypto.randomBytes(32).toString('hex')`
+- Raw token included in email link — **NEVER stored in DB, logged, or returned in any API response**
+- SHA-256 hash of the token stored in `password_reset_tokens.tokenHash`
+- Expiry: 1 hour from creation
+- Single-use: hard-deleted immediately on successful reset
+- Invalidate-on-issue: existing reset token for the user is **soft-deleted** before a new one is issued
+- Soft-delete (`deletedAt`) is intentional: keeps invalidated rows queryable for per-email rate limiting
+- Tokens older than 7 days are removed by a daily cleanup cron (defense against table bloat)
+
+### Side Effects of a Successful Password Change (Reset or In-App)
+- `hashedRefreshToken` set to `null` — every device must log in again
+- A "Password changed" confirmation email is sent to the user's email address with a "If this wasn't you" line and support contact
+- On reset of an unverified account: `isEmailVerified` is set to `true` (the reset link proves email ownership)
+
+### Security Rules
+- Email existence is **never** revealed — `POST /auth/forgot-password` always returns 200 with a generic message
+- Inactive accounts (`isActive=false`) silently do not receive reset emails
+- Raw tokens are never logged, never returned in API responses, never persisted
+- DB lookup is always by SHA-256 hash, never by raw token
+- Rate limits: 3 forgot-password requests per hour per email (service layer); 5 per hour per IP (throttler); 10 reset-password per hour per IP (throttler)
+
+### Endpoint Access Matrix
+| Endpoint                      | Public | USER | ADMIN | SUPERADMIN |
+|-------------------------------|--------|------|-------|------------|
+| POST  /auth/forgot-password   | ✅     | ✅   | ✅    | ✅         |
+| POST  /auth/reset-password    | ✅     | ✅   | ✅    | ✅         |
+| PATCH /users/me/password      | ❌     | ✅   | ✅    | ✅         |
+
+### Cross-references
+- Email Verification section above: token-handling pattern is identical
+- Auth & Authorization section above: bcrypt cost (12) and password policy are defined there and must not be re-specified here
+
+### Entity: PasswordResetToken
+Lives in: `modules/auth/entities/password-reset-token.entity.ts`
+- `id`: UUID (primary key)
+- `userId`: UUID (FK → users, indexed)
+- `tokenHash`: string (SHA-256 hash of raw token — never store raw)
+- `expiresAt`: timestamptz (1 hour from creation)
+- `createdAt`: timestamptz
+- `deletedAt`: timestamptz (soft-delete for rate limiting; null = active)

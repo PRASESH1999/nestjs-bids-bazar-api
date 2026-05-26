@@ -22,6 +22,7 @@ const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
 const api_responses_1 = require("../../common/swagger/api-responses");
 const assign_role_dto_1 = require("./dto/assign-role.dto");
+const change_password_dto_1 = require("./dto/change-password.dto");
 const create_admin_dto_1 = require("./dto/create-admin.dto");
 const update_user_dto_1 = require("./dto/update-user.dto");
 const users_service_1 = require("./users.service");
@@ -46,6 +47,10 @@ let UsersController = class UsersController {
         const user = await this.usersService.updateUser(req.user.sub, updateData);
         const { password: _, hashedRefreshToken: __, ...result } = user;
         return result;
+    }
+    async changePassword(req, dto) {
+        await this.usersService.changePassword(req.user.sub, dto.currentPassword, dto.newPassword);
+        return { message: 'Password changed successfully. Please log in again.' };
     }
     async findAll(req, pagination) {
         const requesterRole = req.user.role;
@@ -135,6 +140,32 @@ __decorate([
     __metadata("design:paramtypes", [Object, update_user_dto_1.UpdateUserDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "updateProfile", null);
+__decorate([
+    (0, common_1.Patch)('me/password'),
+    (0, swagger_1.ApiOperation)({ summary: 'Change own password (authenticated users)' }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Password changed. All sessions invalidated — user must log in again.',
+        schema: {
+            type: 'object',
+            properties: {
+                message: {
+                    type: 'string',
+                    example: 'Password changed successfully. Please log in again.',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PROFILE_EDIT),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, change_password_dto_1.ChangePasswordDto]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "changePassword", null);
 __decorate([
     (0, common_1.Get)(),
     (0, swagger_1.ApiOperation)({ summary: 'List all users (Admin/SuperAdmin only)' }),

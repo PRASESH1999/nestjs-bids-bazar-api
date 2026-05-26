@@ -18,14 +18,17 @@ const typeorm_1 = require("@nestjs/typeorm");
 const jwt_strategy_1 = require("./strategies/jwt.strategy");
 const local_strategy_1 = require("./strategies/local.strategy");
 const email_verification_token_entity_1 = require("./entities/email-verification-token.entity");
+const password_reset_token_entity_1 = require("./entities/password-reset-token.entity");
 const auth_repository_1 = require("./auth.repository");
+const password_reset_repository_1 = require("./password-reset.repository");
+const auth_cleanup_cron_1 = require("./cron/auth-cleanup.cron");
 let AuthModule = class AuthModule {
 };
 exports.AuthModule = AuthModule;
 exports.AuthModule = AuthModule = __decorate([
     (0, common_1.Module)({
         imports: [
-            typeorm_1.TypeOrmModule.forFeature([email_verification_token_entity_1.EmailVerificationToken]),
+            typeorm_1.TypeOrmModule.forFeature([email_verification_token_entity_1.EmailVerificationToken, password_reset_token_entity_1.PasswordResetToken]),
             users_module_1.UsersModule,
             passport_1.PassportModule,
             jwt_1.JwtModule.registerAsync({
@@ -45,7 +48,14 @@ exports.AuthModule = AuthModule = __decorate([
                 }),
             }),
         ],
-        providers: [auth_service_1.AuthService, local_strategy_1.LocalStrategy, jwt_strategy_1.JwtStrategy, auth_repository_1.AuthRepository],
+        providers: [
+            auth_service_1.AuthService,
+            local_strategy_1.LocalStrategy,
+            jwt_strategy_1.JwtStrategy,
+            auth_repository_1.AuthRepository,
+            password_reset_repository_1.PasswordResetRepository,
+            auth_cleanup_cron_1.AuthCleanupCron,
+        ],
         controllers: [auth_controller_1.AuthController],
         exports: [auth_service_1.AuthService],
     })

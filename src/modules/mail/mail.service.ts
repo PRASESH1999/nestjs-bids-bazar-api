@@ -18,6 +18,12 @@ import { paymentFailedSellerTemplate } from './templates/payment-failed-seller.t
 import { paymentConfirmedSellerTemplate } from './templates/payment-confirmed-seller.template';
 import { paymentConfirmedBuyerTemplate } from './templates/payment-confirmed-buyer.template';
 import { auctionAbandonedTemplate } from './templates/auction-abandoned.template';
+import { passwordResetTemplate } from './templates/password-reset.template';
+import { passwordChangedConfirmationTemplate } from './templates/password-changed-confirmation.template';
+import { nameChangedTemplate } from './templates/name-changed.template';
+import { emailChangeVerificationTemplate } from './templates/email-change-verification.template';
+import { emailChangedOldAddressTemplate } from './templates/email-changed-old-address.template';
+import { emailChangedNewAddressTemplate } from './templates/email-changed-new-address.template';
 
 /**
  * Global mail service that wraps nodemailer for all transactional emails.
@@ -365,6 +371,125 @@ export class MailService implements OnModuleInit {
     const { subject, html } = auctionAbandonedTemplate(params);
     await this.send(to, subject, html);
     this.logger.log('Auction abandoned email dispatched', { to });
+  }
+
+  // ─── Password reset emails ────────────────────────────────────────────────
+
+  /**
+   * Send the password reset link.
+   * The raw token is embedded in the link — never logged.
+   */
+  async sendPasswordResetEmail(
+    to: string,
+    rawToken: string,
+    userName: string,
+  ): Promise<void> {
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+    const resetLink = `${frontendUrl}/auth/reset-password?token=${rawToken}`;
+    const { subject, html } = passwordResetTemplate(userName, resetLink, 1);
+    await this.send(to, subject, html);
+    this.logger.log('Password reset email dispatched', { to });
+  }
+
+  /**
+   * Notify the user that their password was just changed (reset or in-app).
+   * Includes a "wasn't you?" warning with the support email.
+   */
+  async sendPasswordChangedConfirmation(
+    to: string,
+    userName: string,
+  ): Promise<void> {
+    const supportEmail = this.configService.getOrThrow<string>('MAIL_FROM');
+    const changedAt = new Date().toLocaleString('en-US', {
+      timeZone: 'Asia/Kathmandu',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const { subject, html } = passwordChangedConfirmationTemplate(
+      userName,
+      changedAt,
+      supportEmail,
+    );
+    await this.send(to, subject, html);
+    this.logger.log('Password changed confirmation email dispatched', { to });
+  }
+
+  // ─── Profile management emails ───────────────────────────────────────────
+
+  /** Notify the user that their display name was changed. */
+  async sendNameChangedConfirmation(
+    to: string,
+    userName: string,
+  ): Promise<void> {
+    const changedAt = new Date().toLocaleString('en-US', {
+      timeZone: 'Asia/Kathmandu',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const { subject, html } = nameChangedTemplate(userName, changedAt);
+    await this.send(to, subject, html);
+    this.logger.log('Name changed confirmation email dispatched', { to });
+  }
+
+  /**
+   * Send the email-change verification link to the NEW address.
+   * The raw token is embedded in the link — never logged.
+   */
+  async sendEmailChangeVerification(
+    to: string,
+    userName: string,
+    rawToken: string,
+  ): Promise<void> {
+    const frontendUrl =
+      this.configService.getOrThrow<string>('APP_FRONTEND_URL');
+    const verificationLink = `${frontendUrl}/auth/verify-email-change?token=${rawToken}`;
+    const { subject, html } = emailChangeVerificationTemplate(
+      userName,
+      verificationLink,
+      1,
+    );
+    await this.send(to, subject, html);
+    this.logger.log('Email change verification dispatched', { to });
+  }
+
+  /** Notify the OLD address that the account email was changed. */
+  async sendEmailChangedNotificationToOld(
+    to: string,
+    userName: string,
+    newEmail: string,
+  ): Promise<void> {
+    const changedAt = new Date().toLocaleString('en-US', {
+      timeZone: 'Asia/Kathmandu',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const { subject, html } = emailChangedOldAddressTemplate(
+      userName,
+      newEmail,
+      changedAt,
+    );
+    await this.send(to, subject, html);
+    this.logger.log('Email changed (old address) notification dispatched', {
+      to,
+    });
+  }
+
+  /** Confirm to the NEW address that it is now the primary address. */
+  async sendEmailChangedNotificationToNew(
+    to: string,
+    userName: string,
+  ): Promise<void> {
+    const changedAt = new Date().toLocaleString('en-US', {
+      timeZone: 'Asia/Kathmandu',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const { subject, html } = emailChangedNewAddressTemplate(userName, changedAt);
+    await this.send(to, subject, html);
+    this.logger.log('Email changed (new address) confirmation dispatched', {
+      to,
+    });
   }
 
   // ─── Internal send helpers ────────────────────────────────────────────────

@@ -26,6 +26,8 @@ const login_dto_1 = require("./dto/login.dto");
 const register_dto_1 = require("./dto/register.dto");
 const resend_verification_dto_1 = require("./dto/resend-verification.dto");
 const verify_email_query_dto_1 = require("./dto/verify-email-query.dto");
+const forgot_password_dto_1 = require("./dto/forgot-password.dto");
+const reset_password_dto_1 = require("./dto/reset-password.dto");
 let AuthController = class AuthController {
     authService;
     jwtService;
@@ -71,6 +73,18 @@ let AuthController = class AuthController {
         const tokens = await this.authService.refresh(refreshToken, userId);
         this.setRefreshTokenCookie(res, tokens.refreshToken);
         return { accessToken: tokens.accessToken };
+    }
+    async forgotPassword(dto) {
+        await this.authService.requestPasswordReset(dto.email);
+        return {
+            message: 'If your email is registered, you will receive a password reset link shortly.',
+        };
+    }
+    async resetPassword(dto) {
+        await this.authService.resetPassword(dto.token, dto.newPassword);
+        return {
+            message: 'Password reset successfully. Please log in with your new password.',
+        };
     }
     async logout(req, res) {
         await this.authService.logout(req.user.sub);
@@ -217,6 +231,43 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "refresh", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Request a password reset email' }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Always returns 200 with a generic message — never reveals whether the email exists.',
+        ...(0, api_responses_1.MessageResponse)('If your email is registered, you will receive a password reset link shortly.'),
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R429),
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 3600000 } }),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    (0, common_1.Post)('forgot-password'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [forgot_password_dto_1.ForgotPasswordDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "forgotPassword", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Reset password using token from email link' }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Password reset successfully.',
+        ...(0, api_responses_1.MessageResponse)('Password reset successfully. Please log in with your new password.'),
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R404),
+    (0, swagger_1.ApiResponse)(api_responses_1.R429),
+    (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 3600000 } }),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    (0, common_1.Post)('reset-password'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [reset_password_dto_1.ResetPasswordDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "resetPassword", null);
 __decorate([
     (0, swagger_1.ApiOperation)({ summary: 'Logout and clear refresh token' }),
     (0, swagger_1.ApiResponse)({

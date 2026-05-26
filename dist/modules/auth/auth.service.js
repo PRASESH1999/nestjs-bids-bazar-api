@@ -41,6 +41,7 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var AuthService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
@@ -49,30 +50,45 @@ const users_service_1 = require("../users/users.service");
 const bcrypt = __importStar(require("bcrypt"));
 const crypto = __importStar(require("crypto"));
 const config_1 = require("@nestjs/config");
+const typeorm_1 = require("typeorm");
 const role_permissions_map_1 = require("./role-permissions.map");
 const role_enum_1 = require("../../common/enums/role.enum");
 const mail_service_1 = require("../mail/mail.service");
 const auth_repository_1 = require("./auth.repository");
-let AuthService = class AuthService {
+const password_reset_repository_1 = require("./password-reset.repository");
+let AuthService = AuthService_1 = class AuthService {
     usersService;
     jwtService;
     configService;
     mailService;
     authRepository;
-    constructor(usersService, jwtService, configService, mailService, authRepository) {
+    passwordResetRepository;
+    dataSource;
+    logger = new common_1.Logger(AuthService_1.name);
+    constructor(usersService, jwtService, configService, mailService, authRepository, passwordResetRepository, dataSource) {
         this.usersService = usersService;
         this.jwtService = jwtService;
         this.configService = configService;
         this.mailService = mailService;
         this.authRepository = authRepository;
+        this.passwordResetRepository = passwordResetRepository;
+        this.dataSource = dataSource;
     }
     async validateUser(email, pass) {
         const user = await this.usersService.findByEmail(email);
-        if (user && user.isActive && (await bcrypt.compare(pass, user.password))) {
-            const { password: _, hashedRefreshToken: __, ...result } = user;
-            return result;
+        if (!user)
+            return null;
+        if (!user.isActive) {
+            throw new common_1.ForbiddenException({
+                statusCode: 403,
+                code: 'ACCOUNT_SUSPENDED',
+                message: 'Your account has been suspended. Please contact support.',
+            });
         }
-        return null;
+        if (!(await bcrypt.compare(pass, user.password)))
+            return null;
+        const { password: _, hashedRefreshToken: __, ...result } = user;
+        return result;
     }
     async login(user) {
         if (!user.isEmailVerified) {
@@ -188,14 +204,92 @@ let AuthService = class AuthService {
     async logout(userId) {
         await this.usersService.updateRefreshToken(userId, null);
     }
+    async requestPasswordReset(email) {
+        const normalizedEmail = email.toLowerCase();
+        const user = await this.usersService.findByEmail(normalizedEmail);
+        if (!user || !user.isActive)
+            return;
+        const oneHourAgo = new Date(Date.now() - 3_600_000);
+        const count = await this.passwordResetRepository.countRequestsSince(user.id, oneHourAgo);
+        if (count >= 3)
+            return;
+        await this.passwordResetRepository.softDeleteByUserId(user.id);
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto
+            .createHash('sha256')
+            .update(rawToken)
+            .digest('hex');
+        const expiresAt = new Date(Date.now() + 3_600_000);
+        await this.passwordResetRepository.saveToken(user.id, tokenHash, expiresAt);
+        try {
+            await this.mailService.sendPasswordResetEmail(user.email, rawToken, user.name);
+        }
+        catch (err) {
+            this.logger.error('[requestPasswordReset] Failed to dispatch reset email', err instanceof Error ? err.stack : String(err));
+        }
+    }
+    async resetPassword(rawToken, newPassword) {
+        const tokenHash = crypto
+            .createHash('sha256')
+            .update(rawToken)
+            .digest('hex');
+        const tokenRecord = await this.passwordResetRepository.findByTokenHash(tokenHash);
+        if (!tokenRecord) {
+            throw new common_1.NotFoundException('Invalid or expired link');
+        }
+        if (tokenRecord.expiresAt < new Date()) {
+            await this.passwordResetRepository.deleteById(tokenRecord.id);
+            throw new common_1.NotFoundException('Invalid or expired link');
+        }
+        const user = await this.usersService.findById(tokenRecord.userId);
+        if (!user || !user.isActive) {
+            throw new common_1.NotFoundException('Invalid or expired link');
+        }
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+        const updates = {
+            password: hashedPassword,
+            hashedRefreshToken: null,
+        };
+        if (!user.isEmailVerified) {
+            updates.isEmailVerified = true;
+        }
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+        try {
+            await this.usersService.updateUserInTransaction(user.id, updates, queryRunner);
+            await this.passwordResetRepository.deleteById(tokenRecord.id, queryRunner);
+            await queryRunner.commitTransaction();
+        }
+        catch (err) {
+            await queryRunner.rollbackTransaction();
+            throw err;
+        }
+        finally {
+            await queryRunner.release();
+        }
+        try {
+            await this.mailService.sendPasswordChangedConfirmation(user.email, user.name);
+        }
+        catch (err) {
+            this.logger.error('[resetPassword] Failed to dispatch confirmation email', err instanceof Error ? err.stack : String(err));
+        }
+    }
+    async cleanupExpiredResetTokens() {
+        const cutoff = new Date(Date.now() - 7 * 24 * 3_600_000);
+        const deleted = await this.passwordResetRepository.deleteExpiredBefore(cutoff);
+        return { deleted };
+    }
 };
 exports.AuthService = AuthService;
-exports.AuthService = AuthService = __decorate([
+exports.AuthService = AuthService = AuthService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [users_service_1.UsersService,
         jwt_1.JwtService,
         config_1.ConfigService,
         mail_service_1.MailService,
-        auth_repository_1.AuthRepository])
+        auth_repository_1.AuthRepository,
+        password_reset_repository_1.PasswordResetRepository,
+        typeorm_1.DataSource])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map

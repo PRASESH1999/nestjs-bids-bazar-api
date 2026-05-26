@@ -1,6 +1,7 @@
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import type { RequestWithUser } from "../../common/interfaces/request-with-user.interface";
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
@@ -39,6 +40,9 @@ export declare class UsersController {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+    }>;
+    changePassword(req: RequestWithUser, dto: ChangePasswordDto): Promise<{
+        message: string;
     }>;
     findAll(req: RequestWithUser, pagination: PaginationDto): Promise<{
         data: {

@@ -10,6 +10,22 @@ exports.LocalAuthGuard = void 0;
 const common_1 = require("@nestjs/common");
 const passport_1 = require("@nestjs/passport");
 let LocalAuthGuard = class LocalAuthGuard extends (0, passport_1.AuthGuard)('local') {
+    async canActivate(context) {
+        const { body } = context
+            .switchToHttp()
+            .getRequest();
+        const { email, password } = body;
+        if (!email && !password) {
+            throw new common_1.BadRequestException('Email and password are required');
+        }
+        if (!email) {
+            throw new common_1.BadRequestException('Email is required');
+        }
+        if (!password) {
+            throw new common_1.BadRequestException('Password is required');
+        }
+        return super.canActivate(context);
+    }
 };
 exports.LocalAuthGuard = LocalAuthGuard;
 exports.LocalAuthGuard = LocalAuthGuard = __decorate([

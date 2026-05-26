@@ -40,4 +40,5 @@ export enum Permission {
   ADMIN_MANAGE = 'admin:manage',
   ROLE_ASSIGN = 'role:assign',
   SYSTEM_CONFIG = 'system:config',
+  NAME_CHANGE_RESET = 'name_change:reset',
 }

@@ -64,6 +64,8 @@ const payment_failed_seller_template_1 = require("./templates/payment-failed-sel
 const payment_confirmed_seller_template_1 = require("./templates/payment-confirmed-seller.template");
 const payment_confirmed_buyer_template_1 = require("./templates/payment-confirmed-buyer.template");
 const auction_abandoned_template_1 = require("./templates/auction-abandoned.template");
+const password_reset_template_1 = require("./templates/password-reset.template");
+const password_changed_confirmation_template_1 = require("./templates/password-changed-confirmation.template");
 let MailService = MailService_1 = class MailService {
     configService;
     logger = new common_1.Logger(MailService_1.name);
@@ -233,6 +235,24 @@ let MailService = MailService_1 = class MailService {
         const { subject, html } = (0, auction_abandoned_template_1.auctionAbandonedTemplate)(params);
         await this.send(to, subject, html);
         this.logger.log('Auction abandoned email dispatched', { to });
+    }
+    async sendPasswordResetEmail(to, rawToken, userName) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const resetLink = `${frontendUrl}/auth/reset-password?token=${rawToken}`;
+        const { subject, html } = (0, password_reset_template_1.passwordResetTemplate)(userName, resetLink, 1);
+        await this.send(to, subject, html);
+        this.logger.log('Password reset email dispatched', { to });
+    }
+    async sendPasswordChangedConfirmation(to, userName) {
+        const supportEmail = this.configService.getOrThrow('MAIL_FROM');
+        const changedAt = new Date().toLocaleString('en-US', {
+            timeZone: 'Asia/Kathmandu',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        });
+        const { subject, html } = (0, password_changed_confirmation_template_1.passwordChangedConfirmationTemplate)(userName, changedAt, supportEmail);
+        await this.send(to, subject, html);
+        this.logger.log('Password changed confirmation email dispatched', { to });
     }
     async send(to, subject, html) {
         const from = this.configService.getOrThrow('MAIL_FROM');

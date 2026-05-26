@@ -1,17 +1,22 @@
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from "../users/users.service";
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
 import { User } from "../users/entities/user.entity";
 import { RegisterDto } from './dto/register.dto';
 import { MailService } from "../mail/mail.service";
 import { AuthRepository } from './auth.repository';
+import { PasswordResetRepository } from './password-reset.repository';
 export declare class AuthService {
     private usersService;
     private jwtService;
     private configService;
     private mailService;
     private authRepository;
-    constructor(usersService: UsersService, jwtService: JwtService, configService: ConfigService, mailService: MailService, authRepository: AuthRepository);
+    private passwordResetRepository;
+    private dataSource;
+    private readonly logger;
+    constructor(usersService: UsersService, jwtService: JwtService, configService: ConfigService, mailService: MailService, authRepository: AuthRepository, passwordResetRepository: PasswordResetRepository, dataSource: DataSource);
     validateUser(email: string, pass: string): Promise<Partial<User> | null>;
     login(user: Pick<User, 'id' | 'email' | 'role' | 'isEmailVerified'>): Promise<{
         accessToken: string;
@@ -28,4 +33,9 @@ export declare class AuthService {
         refreshToken: string;
     }>;
     logout(userId: string): Promise<void>;
+    requestPasswordReset(email: string): Promise<void>;
+    resetPassword(rawToken: string, newPassword: string): Promise<void>;
+    cleanupExpiredResetTokens(): Promise<{
+        deleted: number;
+    }>;
 }

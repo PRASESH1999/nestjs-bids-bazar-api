@@ -9,11 +9,16 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
+import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { PendingEmailChange } from './entities/pending-email-change.entity';
 import { AuthRepository } from './auth.repository';
+import { PasswordResetRepository } from './password-reset.repository';
+import { PendingEmailChangeRepository } from './pending-email-change.repository';
+import { AuthCleanupCron } from './cron/auth-cleanup.cron';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EmailVerificationToken]),
+    TypeOrmModule.forFeature([EmailVerificationToken, PasswordResetToken, PendingEmailChange]),
     UsersModule,
     PassportModule,
     JwtModule.registerAsync({
@@ -33,7 +38,15 @@ import { AuthRepository } from './auth.repository';
       }),
     }),
   ],
-  providers: [AuthService, LocalStrategy, JwtStrategy, AuthRepository],
+  providers: [
+    AuthService,
+    LocalStrategy,
+    JwtStrategy,
+    AuthRepository,
+    PasswordResetRepository,
+    PendingEmailChangeRepository,
+    AuthCleanupCron,
+  ],
   controllers: [AuthController],
   exports: [AuthService],
 })

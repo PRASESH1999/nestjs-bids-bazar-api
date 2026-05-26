@@ -34,6 +34,8 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import type { User } from '../users/entities/user.entity';
 
 interface DecodedJwtPayload {
@@ -211,6 +213,73 @@ export class AuthController {
 
     this.setRefreshTokenCookie(res, tokens.refreshToken);
     return { accessToken: tokens.accessToken };
+  }
+
+  @Public()
+  @ApiOperation({ summary: 'Verify a new email address using the token from the verification link' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Email address changed. All sessions invalidated — user must log in again.',
+    ...MessageResponse(
+      'Email address changed successfully. Please log in with your new email.',
+    ),
+  })
+  @ApiResponse(R400)
+  @ApiResponse(R404)
+  @Get('verify-email-change')
+  async verifyEmailChange(@Query() query: VerifyEmailQueryDto) {
+    await this.authService.verifyEmailChange(query.token);
+    return {
+      message:
+        'Email address changed successfully. Please log in with your new email.',
+    };
+  }
+
+  @Public()
+  @ApiOperation({ summary: 'Request a password reset email' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Always returns 200 with a generic message — never reveals whether the email exists.',
+    ...MessageResponse(
+      'If your email is registered, you will receive a password reset link shortly.',
+    ),
+  })
+  @ApiResponse(R400)
+  @ApiResponse(R429)
+  @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    await this.authService.requestPasswordReset(dto.email);
+    return {
+      message:
+        'If your email is registered, you will receive a password reset link shortly.',
+    };
+  }
+
+  @Public()
+  @ApiOperation({ summary: 'Reset password using token from email link' })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successfully.',
+    ...MessageResponse(
+      'Password reset successfully. Please log in with your new password.',
+    ),
+  })
+  @ApiResponse(R400)
+  @ApiResponse(R404)
+  @ApiResponse(R429)
+  @Throttle({ default: { limit: 10, ttl: 3600000 } }) // 10/hour per IP
+  @HttpCode(HttpStatus.OK)
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto.token, dto.newPassword);
+    return {
+      message:
+        'Password reset successfully. Please log in with your new password.',
+    };
   }
 
   @ApiOperation({ summary: 'Logout and clear refresh token' })

@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-05-11 by agent (Bidding module added — Bid entity, Product auction outcome fields)_
+_Last updated: 2026-05-20 by agent (User Self-Profile module — nameChangedAt on USER, PendingEmailChange entity added)_
 
 ---
 
@@ -14,6 +14,8 @@ erDiagram
     USER ||--o| KYCVERIFICATION : "has KYC"
     USER ||--o| BANKDETAIL : "has bank"
     USER ||--o{ EMAILVERIFICATIONTOKEN : "has tokens"
+    USER ||--o{ PASSWORDRESETTOKEN : "has reset tokens"
+    USER ||--o| PENDINGEMAILCHANGE : "pending email change"
     USER ||--o{ PRODUCT : "lists"
     CATEGORY ||--o{ SUBCATEGORY : "contains"
     CATEGORY ||--o{ PRODUCT : "categorises"
@@ -39,6 +41,7 @@ erDiagram
         boolean isActive
         boolean isEmailVerified
         string hashedRefreshToken
+        timestamp nameChangedAt
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -47,6 +50,24 @@ erDiagram
     EMAILVERIFICATIONTOKEN {
         uuid id PK
         uuid userId FK
+        string tokenHash
+        timestamp expiresAt
+        timestamp createdAt
+    }
+
+    PASSWORDRESETTOKEN {
+        uuid id PK
+        uuid userId FK
+        string tokenHash
+        timestamp expiresAt
+        timestamp createdAt
+        timestamp deletedAt
+    }
+
+    PENDINGEMAILCHANGE {
+        uuid id PK
+        uuid userId FK,UK
+        string newEmail
         string tokenHash
         timestamp expiresAt
         timestamp createdAt
@@ -178,6 +199,8 @@ erDiagram
     USER ||--o| KYCVERIFICATION : "has KYC"
     USER ||--o| BANKDETAIL : "has bank"
     USER ||--o{ EMAILVERIFICATIONTOKEN : "has tokens"
+    USER ||--o{ PASSWORDRESETTOKEN : "has reset tokens"
+    USER ||--o| PENDINGEMAILCHANGE : "pending email change"
     USER ||--o{ PRODUCT : "lists"
     CATEGORY ||--o{ SUBCATEGORY : "contains"
     CATEGORY ||--o{ PRODUCT : "categorises"
@@ -197,6 +220,7 @@ erDiagram
 - `hashedRefreshToken` stores a bcrypt hash of the refresh token, not the raw token. Set to `null` on logout.
 - `role` enum values: `SUPERADMIN`, `ADMIN`, `USER`. Default: `USER`.
 - `isActive` soft-disables the account without deletion. Checked on every authenticated request.
+- `nameChangedAt` is `null` until the user exercises their one-time display-name change. Once set it cannot be cleared except by a SUPERADMIN via `POST /admin/users/:id/reset-name-change`.
 - `deletedAt` enables TypeORM soft-delete via `@DeleteDateColumn`. Queries exclude soft-deleted rows by default.
 
 ### EMAILVERIFICATIONTOKEN
@@ -204,6 +228,23 @@ erDiagram
 - `tokenHash` stores the **SHA-256 hash** of the raw token only. The raw token is sent by email and never persisted.
 - Tokens expire after **24 hours** (`expiresAt`) and are deleted immediately after a successful verification (single-use).
 - `userId` is indexed for fast lookup but is not a TypeORM-defined `@ManyToOne` relation — it is a plain UUID column referencing `users.id`.
+
+### PASSWORDRESETTOKEN
+- Does **not** extend `BaseEntity` — has its own minimal schema (no `updatedAt`).
+- `tokenHash` stores the **SHA-256 hash** of the raw token only. The raw token is sent by email and never persisted, logged, or returned in any API response.
+- Tokens expire after **1 hour** (`expiresAt`) and are hard-deleted immediately after a successful reset (single-use).
+- `deletedAt` enables TypeORM soft-delete. When a new token is issued for a user, the existing token is **soft-deleted** (not hard-deleted). Soft-deleted rows remain in the table so the per-email rate-limit query (`countRequestsSince`) can count them — hard-deleting would make the count always ≤ 1 and break the 3-per-hour limit.
+- A **daily cleanup cron** hard-deletes all rows (including soft-deleted) where `expiresAt < now - 7 days`, preventing table bloat.
+- `userId` is indexed for fast lookup and for the soft-delete invalidation query. There is no TypeORM `@ManyToOne` relation — it is a plain UUID column referencing `users.id` with `ON DELETE CASCADE` semantics enforced at the application layer.
+
+### PENDINGEMAILCHANGE
+- Does **not** extend `BaseEntity` — has its own minimal schema (no `updatedAt`, no `deletedAt`).
+- `userId` is both a foreign key and **unique** — enforces at most one pending request per user at any time. A new request replaces the previous one (hard-delete then insert).
+- `newEmail` is stored as **plaintext** (not hashed). The sensitive secret is the `tokenHash`, not the destination address.
+- `tokenHash` stores the **SHA-256 hash** of the raw token only. The raw token is sent to `newEmail` and never persisted.
+- Tokens expire after **1 hour** (`expiresAt`) and are hard-deleted immediately after successful verification or when superseded.
+- No soft-delete needed: rate limiting is handled by IP-level `@Throttle` in the controller; there is no per-email rate-limit count.
+- A **daily cleanup cron** hard-deletes expired rows (where `expiresAt < now`) to handle requests that were never followed up.
 
 ### KYCVERIFICATION
 - `userId` is both a foreign key and unique — enforces one KYC record per user.

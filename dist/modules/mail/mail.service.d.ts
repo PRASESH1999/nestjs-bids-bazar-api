@@ -79,6 +79,8 @@ export declare class MailService implements OnModuleInit {
         productTitle: string;
         totalBidders: number;
     }): Promise<void>;
+    sendPasswordResetEmail(to: string, rawToken: string, userName: string): Promise<void>;
+    sendPasswordChangedConfirmation(to: string, userName: string): Promise<void>;
     private send;
     private trySend;
 }
