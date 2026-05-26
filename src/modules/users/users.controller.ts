@@ -5,6 +5,15 @@ import { HierarchyGuard } from '@common/guards/hierarchy.guard';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
 import {
+  R400,
+  R401,
+  R403,
+  R404,
+  R409,
+  SuccessResponse,
+  UserSchema,
+} from '@common/swagger/api-responses';
+import {
   Body,
   Controller,
   Delete,
@@ -16,27 +25,18 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import {
-  R400,
-  R401,
-  R403,
-  R404,
-  R409,
-  SuccessResponse,
-  UserSchema,
-} from '@common/swagger/api-responses';
+import { Throttle } from '@nestjs/throttler';
 import { AssignRoleDto } from './dto/assign-role.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
 import { ChangeEmailDto } from './dto/change-email.dto';
-import { UpdateSelfDto } from './dto/update-self.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { UpdateSelfDto } from './dto/update-self.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -67,10 +67,13 @@ export class UsersController {
   }
 
   @Get('me')
-  @ApiOperation({ summary: 'Get own profile with KYC summary and pending email-change info' })
+  @ApiOperation({
+    summary: 'Get own profile with KYC summary and pending email-change info',
+  })
   @ApiResponse({
     status: 200,
-    description: 'Rich own-profile including KYC summary and pending email change (if any).',
+    description:
+      'Rich own-profile including KYC summary and pending email change (if any).',
   })
   @ApiResponse(R401)
   @ApiResponse(R403)
@@ -86,7 +89,12 @@ export class UsersController {
     description: 'Name updated. This can only be done once.',
     schema: {
       type: 'object',
-      properties: { message: { type: 'string', example: 'Display name updated successfully.' } },
+      properties: {
+        message: {
+          type: 'string',
+          example: 'Display name updated successfully.',
+        },
+      },
     },
   })
   @ApiResponse(R400)
@@ -103,7 +111,10 @@ export class UsersController {
 
   @Patch('me/email')
   @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
-  @ApiOperation({ summary: 'Request an email address change (sends verification to new address)' })
+  @ApiOperation({
+    summary:
+      'Request an email address change (sends verification to new address)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Verification email sent to the new address.',
@@ -112,7 +123,8 @@ export class UsersController {
       properties: {
         message: {
           type: 'string',
-          example: 'A verification link has been sent to your new email address.',
+          example:
+            'A verification link has been sent to your new email address.',
         },
       },
     },
@@ -137,6 +149,7 @@ export class UsersController {
   }
 
   @Patch('me/password')
+  @Throttle({ default: { limit: 5, ttl: 3600000 } })
   @ApiOperation({ summary: 'Change own password (authenticated users)' })
   @ApiResponse({
     status: 200,
@@ -210,8 +223,8 @@ export class UsersController {
     return {
       data,
       meta: {
-        page: pagination.page,
-        limit: pagination.limit,
+        page: pagination.page ?? 1,
+        limit: pagination.limit ?? 20,
         total,
       },
     };

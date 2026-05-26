@@ -1,11 +1,11 @@
 import {
-  Injectable,
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Injectable,
 } from '@nestjs/common';
-import { Role } from '../enums/role.enum';
 import { UsersService } from '../../modules/users/users.service';
+import { Role } from '../enums/role.enum';
 import type { RequestWithUser } from '../interfaces/request-with-user.interface';
 
 @Injectable()
@@ -35,7 +35,9 @@ export class HierarchyGuard implements CanActivate {
     }
 
     if (currentUser.sub === targetUserId) {
-      return true;
+      throw new ForbiddenException(
+        'You cannot perform this action on your own account',
+      );
     }
 
     const targetUser = await this.usersService.findById(targetUserId);

@@ -1,3 +1,7 @@
+import { Role } from '@common/enums/role.enum';
+import { MailService } from '@modules/mail/mail.service';
+import { User } from '@modules/users/entities/user.entity';
+import { UsersService } from '@modules/users/users.service';
 import {
   BadRequestException,
   ConflictException,
@@ -8,20 +12,16 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { UsersService } from '@modules/users/users.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-import { RolePermissionsMap } from './role-permissions.map';
-import { Role } from '@common/enums/role.enum';
-import { User } from '@modules/users/entities/user.entity';
-import { RegisterDto } from './dto/register.dto';
-import { MailService } from '@modules/mail/mail.service';
 import { AuthRepository } from './auth.repository';
+import { RegisterDto } from './dto/register.dto';
 import { PasswordResetRepository } from './password-reset.repository';
 import { PendingEmailChangeRepository } from './pending-email-change.repository';
+import { RolePermissionsMap } from './role-permissions.map';
 
 @Injectable()
 export class AuthService {
@@ -42,8 +42,14 @@ export class AuthService {
     email: string,
     pass: string,
   ): Promise<Partial<User> | null> {
-    const user = await this.usersService.findByEmail(email);
+    const user = await this.usersService.findByEmailIncludingDeleted(email);
     if (!user) return null;
+
+    if (user.deletedAt !== null) {
+      throw new ForbiddenException(
+        'This account has been deleted. Please contact support for account recovery.',
+      );
+    }
 
     if (!user.isActive) {
       throw new ForbiddenException({
@@ -90,9 +96,15 @@ export class AuthService {
   async register(data: RegisterDto) {
     const email = data.email.toLowerCase();
 
-    // Check if user already exists
-    const existingUser = await this.usersService.findByEmail(email);
+    // Check if user already exists (including soft-deleted accounts)
+    const existingUser =
+      await this.usersService.findByEmailIncludingDeleted(email);
     if (existingUser) {
+      if (existingUser.deletedAt !== null) {
+        throw new ForbiddenException(
+          'This account has been deleted. Please contact support for account recovery.',
+        );
+      }
       throw new ConflictException('User with this email already exists');
     }
 
@@ -454,8 +466,9 @@ export class AuthService {
    * Called by the daily cleanup cron.
    */
   async cleanupExpiredPendingEmailChanges(): Promise<{ deleted: number }> {
-    const deleted =
-      await this.pendingEmailChangeRepository.deleteExpiredBefore(new Date());
+    const deleted = await this.pendingEmailChangeRepository.deleteExpiredBefore(
+      new Date(),
+    );
     return { deleted };
   }
 }

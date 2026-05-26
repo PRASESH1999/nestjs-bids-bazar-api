@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { DataSource, Repository, QueryRunner } from 'typeorm';
 import { User } from '@modules/users/entities/user.entity';
+import { Injectable } from '@nestjs/common';
+import { DataSource, QueryRunner, Repository } from 'typeorm';
 
 @Injectable()
 export class UsersRepository {
@@ -15,6 +15,10 @@ export class UsersRepository {
       .createQueryBuilder('user')
       .where('LOWER(user.email) = :email', { email: email.toLowerCase() })
       .getOne();
+  }
+
+  async findByEmailIncludingDeleted(email: string): Promise<User | null> {
+    return this.repo.findOne({ where: { email }, withDeleted: true });
   }
 
   async findById(id: string): Promise<User | null> {

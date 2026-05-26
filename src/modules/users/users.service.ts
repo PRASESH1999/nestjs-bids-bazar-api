@@ -1,3 +1,11 @@
+import { PaginationDto } from '@common/dto/pagination.dto';
+import { Role } from '@common/enums/role.enum';
+import { PendingEmailChange } from '@modules/auth/entities/pending-email-change.entity';
+import { PendingEmailChangeRepository } from '@modules/auth/pending-email-change.repository';
+import { KycVerification } from '@modules/kyc/entities/kyc-verification.entity';
+import { MailService } from '@modules/mail/mail.service';
+import { User } from '@modules/users/entities/user.entity';
+import { UsersRepository } from '@modules/users/users.repository';
 import {
   BadRequestException,
   ConflictException,
@@ -9,17 +17,9 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { DataSource } from 'typeorm';
 import type { QueryRunner } from 'typeorm';
-import { User } from '@modules/users/entities/user.entity';
-import { UsersRepository } from '@modules/users/users.repository';
-import { Role } from '@common/enums/role.enum';
-import { PaginationDto } from '@common/dto/pagination.dto';
+import { DataSource } from 'typeorm';
 import { CreateAdminDto } from './dto/create-admin.dto';
-import { MailService } from '@modules/mail/mail.service';
-import { KycVerification } from '@modules/kyc/entities/kyc-verification.entity';
-import { PendingEmailChange } from '@modules/auth/entities/pending-email-change.entity';
-import { PendingEmailChangeRepository } from '@modules/auth/pending-email-change.repository';
 import type {
   KycSummary,
   OwnProfileResponse,
@@ -62,10 +62,15 @@ export class UsersService {
 
   async createAdmin(data: CreateAdminDto): Promise<User> {
     const { password, email, ...rest } = data;
+    const normalizedEmail = email.toLowerCase();
+    const existing = await this.usersRepository.findByEmail(normalizedEmail);
+    if (existing) {
+      throw new ConflictException('User with this email already exists');
+    }
     const hashedPassword = await bcrypt.hash(password, 12);
     const user = this.usersRepository.createEntity({
       ...rest,
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       password: hashedPassword,
       isActive: true,
     });
@@ -76,6 +81,10 @@ export class UsersService {
     return this.usersRepository.findByEmail(email);
   }
 
+  async findByEmailIncludingDeleted(email: string): Promise<User | null> {
+    return this.usersRepository.findByEmailIncludingDeleted(email);
+  }
+
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findById(id);
   }
@@ -84,6 +93,13 @@ export class UsersService {
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+    if (
+      data.role !== undefined &&
+      user.role === Role.SUPERADMIN &&
+      data.role !== Role.SUPERADMIN
+    ) {
+      throw new ForbiddenException('SUPERADMIN role cannot be downgraded');
     }
     if (data.email) {
       data.email = data.email.toLowerCase();
@@ -98,6 +114,7 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
     user.isActive = false;
+    user.hashedRefreshToken = null;
     return this.usersRepository.saveUser(user);
   }
 
@@ -248,6 +265,12 @@ export class UsersService {
     if (user.nameChangedAt !== null) {
       throw new ForbiddenException(
         'Display name can only be changed once. Please contact support.',
+      );
+    }
+
+    if (newName.trim() === user.name.trim()) {
+      throw new BadRequestException(
+        'New display name must be different from your current name.',
       );
     }
 
