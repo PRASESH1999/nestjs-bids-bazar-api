@@ -29,6 +29,15 @@ let AuthCleanupCron = AuthCleanupCron_1 = class AuthCleanupCron {
             this.logger.error('[Cron] cleanupExpiredPasswordResetTokens failed', err instanceof Error ? err.stack : String(err));
         }
     }
+    async cleanupExpiredPendingEmailChanges() {
+        try {
+            const result = await this.authService.cleanupExpiredPendingEmailChanges();
+            this.logger.log(`[Cron] cleanupExpiredPendingEmailChanges: deleted=${result.deleted}`);
+        }
+        catch (err) {
+            this.logger.error('[Cron] cleanupExpiredPendingEmailChanges failed', err instanceof Error ? err.stack : String(err));
+        }
+    }
 };
 exports.AuthCleanupCron = AuthCleanupCron;
 __decorate([
@@ -37,6 +46,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], AuthCleanupCron.prototype, "cleanupExpiredPasswordResetTokens", null);
+__decorate([
+    (0, schedule_1.Cron)('0 3 * * *'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], AuthCleanupCron.prototype, "cleanupExpiredPendingEmailChanges", null);
 exports.AuthCleanupCron = AuthCleanupCron = AuthCleanupCron_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [auth_service_1.AuthService])

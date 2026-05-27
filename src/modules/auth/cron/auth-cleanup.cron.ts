@@ -26,8 +26,7 @@ export class AuthCleanupCron {
   @Cron('0 3 * * *') // Every day at 03:00
   async cleanupExpiredPendingEmailChanges(): Promise<void> {
     try {
-      const result =
-        await this.authService.cleanupExpiredPendingEmailChanges();
+      const result = await this.authService.cleanupExpiredPendingEmailChanges();
       this.logger.log(
         `[Cron] cleanupExpiredPendingEmailChanges: deleted=${result.deleted}`,
       );

@@ -12,6 +12,11 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
+  app.enableCors({
+    origin: ['http://localhost:3001'],
+    credentials: true,
+  });
+
   const prefix = configService.get<string>('API_PREFIX', 'api');
   const version = configService.get<string>('API_VERSION', 'v1');
 

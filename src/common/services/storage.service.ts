@@ -8,7 +8,8 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/png',
   'application/pdf',
 ]);
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+export const MAX_FILE_SIZE_LABEL = '5 MB';
 
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -39,7 +40,7 @@ export class StorageService {
     }
     if (file.size > MAX_FILE_SIZE) {
       throw new BadRequestException(
-        `File '${label}' exceeds the 5 MB size limit`,
+        `File '${label}' exceeds the ${MAX_FILE_SIZE_LABEL} size limit`,
       );
     }
 

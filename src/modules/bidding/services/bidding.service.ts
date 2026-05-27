@@ -6,8 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
+import { EventNames } from '@common/events/event-names';
+import type { BidSubmittedPayload } from '@common/events/event-payloads.type';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { PaginatedResult } from '@common/types/paginated-result.type';
@@ -38,6 +41,7 @@ export class BiddingService {
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ─── Place a bid ──────────────────────────────────────────────────────────
@@ -207,6 +211,24 @@ export class BiddingService {
       );
     }
 
+    // Post-commit event emission — never affects the HTTP response.
+    // Per Rule 7, services emit events; handlers fan out side-effects
+    // (broadcast, notifications, etc.). Failure here is logged, never thrown.
+    try {
+      const payload: BidSubmittedPayload = {
+        productId: productId_,
+        bidId: savedBid.id,
+        bidderId: userId,
+        amount: newBidAmount,
+      };
+      this.eventEmitter.emit(EventNames.BID_SUBMITTED, payload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `placeBid: bid.submitted emission failed for product ${productId_}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
     return savedBid;
   }
 
@@ -260,6 +282,36 @@ export class BiddingService {
         bidderName: bid.bidder?.name ?? '',
       }),
     );
+  }
+
+  // ─── Query: top bidders for a product (public) ───────────────────────────
+
+  /**
+   * Returns up to 5 distinct bidders for the product, ranked by each bidder's
+   * highest bid amount (DESC). Bidder display name is sourced from User.name —
+   * change the SELECT alias below in one place to swap in a future username field.
+   */
+  async getTopBiddersForProduct(
+    productId: string,
+  ): Promise<Array<{ name: string; highestBid: number }>> {
+    const rows = await this.dataSource
+      .getRepository(Bid)
+      .createQueryBuilder('bid')
+      .innerJoin('bid.bidder', 'bidder')
+      .select('bid.bidderId', 'bidderId')
+      .addSelect('MAX(bid.amount)', 'highestBid')
+      .addSelect('bidder.name', 'name')
+      .where('bid.productId = :productId', { productId })
+      .groupBy('bid.bidderId')
+      .addGroupBy('bidder.name')
+      .orderBy('MAX(bid.amount)', 'DESC')
+      .limit(5)
+      .getRawMany<{ bidderId: string; highestBid: string; name: string }>();
+
+    return rows.map((row) => ({
+      name: row.name,
+      highestBid: Number(row.highestBid),
+    }));
   }
 
   // ─── Query: my bids (authenticated user) ─────────────────────────────────

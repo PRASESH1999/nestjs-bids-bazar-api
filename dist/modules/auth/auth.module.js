@@ -19,8 +19,10 @@ const jwt_strategy_1 = require("./strategies/jwt.strategy");
 const local_strategy_1 = require("./strategies/local.strategy");
 const email_verification_token_entity_1 = require("./entities/email-verification-token.entity");
 const password_reset_token_entity_1 = require("./entities/password-reset-token.entity");
+const pending_email_change_entity_1 = require("./entities/pending-email-change.entity");
 const auth_repository_1 = require("./auth.repository");
 const password_reset_repository_1 = require("./password-reset.repository");
+const pending_email_change_repository_1 = require("./pending-email-change.repository");
 const auth_cleanup_cron_1 = require("./cron/auth-cleanup.cron");
 let AuthModule = class AuthModule {
 };
@@ -28,7 +30,11 @@ exports.AuthModule = AuthModule;
 exports.AuthModule = AuthModule = __decorate([
     (0, common_1.Module)({
         imports: [
-            typeorm_1.TypeOrmModule.forFeature([email_verification_token_entity_1.EmailVerificationToken, password_reset_token_entity_1.PasswordResetToken]),
+            typeorm_1.TypeOrmModule.forFeature([
+                email_verification_token_entity_1.EmailVerificationToken,
+                password_reset_token_entity_1.PasswordResetToken,
+                pending_email_change_entity_1.PendingEmailChange,
+            ]),
             users_module_1.UsersModule,
             passport_1.PassportModule,
             jwt_1.JwtModule.registerAsync({
@@ -54,6 +60,7 @@ exports.AuthModule = AuthModule = __decorate([
             jwt_strategy_1.JwtStrategy,
             auth_repository_1.AuthRepository,
             password_reset_repository_1.PasswordResetRepository,
+            pending_email_change_repository_1.PendingEmailChangeRepository,
             auth_cleanup_cron_1.AuthCleanupCron,
         ],
         controllers: [auth_controller_1.AuthController],

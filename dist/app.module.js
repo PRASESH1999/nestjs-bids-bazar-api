@@ -14,6 +14,7 @@ const config_1 = require("@nestjs/config");
 const typeorm_1 = require("@nestjs/typeorm");
 const throttler_1 = require("@nestjs/throttler");
 const schedule_1 = require("@nestjs/schedule");
+const event_emitter_1 = require("@nestjs/event-emitter");
 const core_1 = require("@nestjs/core");
 const users_module_1 = require("./modules/users/users.module");
 const auth_module_1 = require("./modules/auth/auth.module");
@@ -65,6 +66,7 @@ exports.AppModule = AppModule = __decorate([
                 },
             ]),
             schedule_1.ScheduleModule.forRoot(),
+            event_emitter_1.EventEmitterModule.forRoot(),
             common_module_1.CommonModule,
             users_module_1.UsersModule,
             auth_module_1.AuthModule,

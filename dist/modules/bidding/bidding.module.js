@@ -15,7 +15,11 @@ const bid_entity_1 = require("./entities/bid.entity");
 const bidding_controller_1 = require("./bidding.controller");
 const bidding_service_1 = require("./services/bidding.service");
 const auction_lifecycle_service_1 = require("./services/auction-lifecycle.service");
+const auction_broadcast_service_1 = require("./services/auction-broadcast.service");
 const auction_lifecycle_cron_1 = require("./cron/auction-lifecycle.cron");
+const bid_submitted_handler_1 = require("./handlers/bid-submitted.handler");
+const auction_closed_handler_1 = require("./handlers/auction-closed.handler");
+const auction_settled_handler_1 = require("./handlers/auction-settled.handler");
 let BiddingModule = class BiddingModule {
 };
 exports.BiddingModule = BiddingModule;
@@ -23,8 +27,16 @@ exports.BiddingModule = BiddingModule = __decorate([
     (0, common_1.Module)({
         imports: [typeorm_1.TypeOrmModule.forFeature([bid_entity_1.Bid, product_entity_1.Product]), users_module_1.UsersModule],
         controllers: [bidding_controller_1.BiddingController],
-        providers: [bidding_service_1.BiddingService, auction_lifecycle_service_1.AuctionLifecycleService, auction_lifecycle_cron_1.AuctionLifecycleCron],
-        exports: [auction_lifecycle_service_1.AuctionLifecycleService],
+        providers: [
+            bidding_service_1.BiddingService,
+            auction_lifecycle_service_1.AuctionLifecycleService,
+            auction_broadcast_service_1.AuctionBroadcastService,
+            auction_lifecycle_cron_1.AuctionLifecycleCron,
+            bid_submitted_handler_1.BidSubmittedHandler,
+            auction_closed_handler_1.AuctionClosedHandler,
+            auction_settled_handler_1.AuctionSettledHandler,
+        ],
+        exports: [auction_lifecycle_service_1.AuctionLifecycleService, bidding_service_1.BiddingService],
     })
 ], BiddingModule);
 //# sourceMappingURL=bidding.module.js.map

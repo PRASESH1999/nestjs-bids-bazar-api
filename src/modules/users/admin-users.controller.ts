@@ -12,7 +12,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { R401, R403, R404, SuccessResponse } from '@common/swagger/api-responses';
+import {
+  R401,
+  R403,
+  R404,
+  SuccessResponse,
+} from '@common/swagger/api-responses';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
 import { Permission } from '@common/enums/permission.enum';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
@@ -27,11 +32,12 @@ export class AdminUsersController {
 
   @Post('users/:id/reset-name-change')
   @ApiOperation({
-    summary: 'Reset a user\'s one-time name-change quota (SuperAdmin only)',
+    summary: "Reset a user's one-time name-change quota (SuperAdmin only)",
   })
   @ApiResponse({
     status: 200,
-    description: 'Name-change quota reset. The user can change their name once more.',
+    description:
+      'Name-change quota reset. The user can change their name once more.',
     ...SuccessResponse,
   })
   @ApiResponse(R401)

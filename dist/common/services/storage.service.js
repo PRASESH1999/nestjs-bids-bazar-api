@@ -9,7 +9,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.StorageService = void 0;
+exports.StorageService = exports.MAX_FILE_SIZE_LABEL = exports.MAX_FILE_SIZE = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const path_1 = require("path");
@@ -19,7 +19,8 @@ const ALLOWED_MIME_TYPES = new Set([
     'image/png',
     'application/pdf',
 ]);
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+exports.MAX_FILE_SIZE = 5 * 1024 * 1024;
+exports.MAX_FILE_SIZE_LABEL = '5 MB';
 const MIME_TO_EXT = {
     'image/jpeg': '.jpg',
     'image/png': '.png',
@@ -36,8 +37,8 @@ let StorageService = class StorageService {
         if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
             throw new common_1.BadRequestException(`File type '${file.mimetype}' is not allowed. Accepted: JPEG, PNG, PDF`);
         }
-        if (file.size > MAX_FILE_SIZE) {
-            throw new common_1.BadRequestException(`File '${label}' exceeds the 5 MB size limit`);
+        if (file.size > exports.MAX_FILE_SIZE) {
+            throw new common_1.BadRequestException(`File '${label}' exceeds the ${exports.MAX_FILE_SIZE_LABEL} size limit`);
         }
         const ext = (0, path_1.extname)(file.originalname).toLowerCase() ||
             MIME_TO_EXT[file.mimetype] ||

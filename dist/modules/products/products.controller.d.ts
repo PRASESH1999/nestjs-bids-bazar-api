@@ -32,7 +32,7 @@ export declare class ProductsController {
             total: number;
         };
     }>;
-    getPublicProduct(id: string, req: RequestWithUser): Promise<import("./products.service").ProductResponse>;
+    getPublicProduct(id: string, req: RequestWithUser): Promise<import("./products.service").ProductDetailResponse>;
     getProductImage(productId: string, imageId: string, req: RequestWithUser, res: Response): Promise<StreamableFile>;
     createProduct(req: RequestWithUser, dto: CreateProductDto, files: Express.Multer.File[]): Promise<import("./products.service").ProductResponse>;
     updateProduct(req: RequestWithUser, id: string, dto: UpdateProductDto, files: Express.Multer.File[]): Promise<import("./products.service").ProductResponse>;

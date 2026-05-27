@@ -66,6 +66,10 @@ const payment_confirmed_buyer_template_1 = require("./templates/payment-confirme
 const auction_abandoned_template_1 = require("./templates/auction-abandoned.template");
 const password_reset_template_1 = require("./templates/password-reset.template");
 const password_changed_confirmation_template_1 = require("./templates/password-changed-confirmation.template");
+const name_changed_template_1 = require("./templates/name-changed.template");
+const email_change_verification_template_1 = require("./templates/email-change-verification.template");
+const email_changed_old_address_template_1 = require("./templates/email-changed-old-address.template");
+const email_changed_new_address_template_1 = require("./templates/email-changed-new-address.template");
 let MailService = MailService_1 = class MailService {
     configService;
     logger = new common_1.Logger(MailService_1.name);
@@ -253,6 +257,47 @@ let MailService = MailService_1 = class MailService {
         const { subject, html } = (0, password_changed_confirmation_template_1.passwordChangedConfirmationTemplate)(userName, changedAt, supportEmail);
         await this.send(to, subject, html);
         this.logger.log('Password changed confirmation email dispatched', { to });
+    }
+    async sendNameChangedConfirmation(to, userName) {
+        const changedAt = new Date().toLocaleString('en-US', {
+            timeZone: 'Asia/Kathmandu',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        });
+        const { subject, html } = (0, name_changed_template_1.nameChangedTemplate)(userName, changedAt);
+        await this.send(to, subject, html);
+        this.logger.log('Name changed confirmation email dispatched', { to });
+    }
+    async sendEmailChangeVerification(to, userName, rawToken) {
+        const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');
+        const verificationLink = `${frontendUrl}/auth/verify-email-change?token=${rawToken}`;
+        const { subject, html } = (0, email_change_verification_template_1.emailChangeVerificationTemplate)(userName, verificationLink, 1);
+        await this.send(to, subject, html);
+        this.logger.log('Email change verification dispatched', { to });
+    }
+    async sendEmailChangedNotificationToOld(to, userName, newEmail) {
+        const changedAt = new Date().toLocaleString('en-US', {
+            timeZone: 'Asia/Kathmandu',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        });
+        const { subject, html } = (0, email_changed_old_address_template_1.emailChangedOldAddressTemplate)(userName, newEmail, changedAt);
+        await this.send(to, subject, html);
+        this.logger.log('Email changed (old address) notification dispatched', {
+            to,
+        });
+    }
+    async sendEmailChangedNotificationToNew(to, userName) {
+        const changedAt = new Date().toLocaleString('en-US', {
+            timeZone: 'Asia/Kathmandu',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        });
+        const { subject, html } = (0, email_changed_new_address_template_1.emailChangedNewAddressTemplate)(userName, changedAt);
+        await this.send(to, subject, html);
+        this.logger.log('Email changed (new address) confirmation dispatched', {
+            to,
+        });
     }
     async send(to, subject, html) {
         const from = this.configService.getOrThrow('MAIL_FROM');

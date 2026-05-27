@@ -34,6 +34,9 @@ export declare class AuthController {
     refresh(req: RefreshRequest, res: Response): Promise<{
         accessToken: string;
     }>;
+    verifyEmailChange(query: VerifyEmailQueryDto): Promise<{
+        message: string;
+    }>;
     forgotPassword(dto: ForgotPasswordDto): Promise<{
         message: string;
     }>;

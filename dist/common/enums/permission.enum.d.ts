@@ -26,5 +26,6 @@ export declare enum Permission {
     ADMIN_VIEW = "admin:view",
     ADMIN_MANAGE = "admin:manage",
     ROLE_ASSIGN = "role:assign",
-    SYSTEM_CONFIG = "system:config"
+    SYSTEM_CONFIG = "system:config",
+    NAME_CHANGE_RESET = "name_change:reset"
 }

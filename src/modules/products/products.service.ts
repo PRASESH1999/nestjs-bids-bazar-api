@@ -8,6 +8,7 @@ import { KycService } from '@modules/kyc/kyc.service';
 import { MailService } from '@modules/mail/mail.service';
 import { UsersService } from '@modules/users/users.service';
 import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
+import { BiddingService } from '@modules/bidding/services/bidding.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -36,6 +37,12 @@ export type ProductResponse = Omit<Product, 'images'> & {
   images: ProductImageResponse[];
 };
 
+export type TopBidder = { name: string; highestBid: number };
+
+export type ProductDetailResponse = ProductResponse & {
+  topBidders: TopBidder[];
+};
+
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
   ProductStatus.ACTIVE,
   ProductStatus.CLOSED,
@@ -57,6 +64,7 @@ export class ProductsService {
     private readonly categoriesService: CategoriesService,
     private readonly mailService: MailService,
     private readonly auctionLifecycleService: AuctionLifecycleService,
+    private readonly biddingService: BiddingService,
   ) {}
 
   // ─── Create ───────────────────────────────────────────────────────────────
@@ -340,7 +348,7 @@ export class ProductsService {
   async getPublicProductById(
     id: string,
     requesterId: string | null = null,
-  ): Promise<ProductResponse> {
+  ): Promise<ProductDetailResponse> {
     let product = await this.productsRepository.findById(id);
     if (!product) throw new NotFoundException('Product not found');
 
@@ -373,7 +381,8 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.mapProduct(product);
+    const topBidders = await this.biddingService.getTopBiddersForProduct(id);
+    return { ...this.mapProduct(product), topBidders };
   }
 
   async getProductImageFile(

@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { PaginatedResult } from "../../../common/types/paginated-result.type";
 import { PaginationDto } from "../../../common/dto/pagination.dto";
@@ -12,10 +13,15 @@ export declare class BiddingService {
     private readonly dataSource;
     private readonly configService;
     private readonly mailService;
+    private readonly eventEmitter;
     private readonly logger;
-    constructor(dataSource: DataSource, configService: ConfigService, mailService: MailService);
+    constructor(dataSource: DataSource, configService: ConfigService, mailService: MailService, eventEmitter: EventEmitter2);
     placeBid(userId: string, productId: string, dto: PlaceBidDto): Promise<Bid>;
     getBidsForProduct(productId: string, viewerType: 'authenticated' | 'admin'): Promise<BidListItemDto[] | BidListItemAdminDto[]>;
+    getTopBiddersForProduct(productId: string): Promise<Array<{
+        name: string;
+        highestBid: number;
+    }>>;
     getMyBids(userId: string, query: PaginationDto): Promise<PaginatedResult<Bid>>;
     listAllBids(query: ListBidsAdminQueryDto): Promise<PaginatedResult<Bid>>;
     private computeValidBidRange;

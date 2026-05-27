@@ -11,8 +11,8 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HierarchyGuard = void 0;
 const common_1 = require("@nestjs/common");
-const role_enum_1 = require("../enums/role.enum");
 const users_service_1 = require("../../modules/users/users.service");
+const role_enum_1 = require("../enums/role.enum");
 let HierarchyGuard = class HierarchyGuard {
     usersService;
     constructor(usersService) {
@@ -36,7 +36,7 @@ let HierarchyGuard = class HierarchyGuard {
             throw new common_1.ForbiddenException('Target user ID not provided');
         }
         if (currentUser.sub === targetUserId) {
-            return true;
+            throw new common_1.ForbiddenException('You cannot perform this action on your own account');
         }
         const targetUser = await this.usersService.findById(targetUserId);
         if (!targetUser) {

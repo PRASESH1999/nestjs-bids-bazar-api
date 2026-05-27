@@ -8,4 +8,5 @@ export declare class User extends BaseEntity {
     isActive: boolean;
     isEmailVerified: boolean;
     hashedRefreshToken: string | null;
+    nameChangedAt: Date | null;
 }

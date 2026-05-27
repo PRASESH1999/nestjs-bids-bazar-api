@@ -3,19 +3,28 @@ import {
   Controller,
   Get,
   Logger,
+  NotFoundException,
   Param,
   Post,
   Query,
   Request,
+  Sse,
   UseGuards,
+  type MessageEvent,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { DataSource } from 'typeorm';
+import { Observable, concat, defer, from, map } from 'rxjs';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
+import { Public } from '@common/decorators/public.decorator';
 import { Permission } from '@common/enums/permission.enum';
+import { PUBLICLY_VISIBLE_STATUSES } from '@common/enums/product-status.enum';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
 import { PaginationDto } from '@common/dto/pagination.dto';
+import { Product } from '@modules/products/entities/product.entity';
 import { AuctionLifecycleService } from './services/auction-lifecycle.service';
+import { AuctionBroadcastService } from './services/auction-broadcast.service';
 import { BiddingService } from './services/bidding.service';
 import { PlaceBidDto } from './dto/place-bid.dto';
 import { ListBidsAdminQueryDto } from './dto/list-bids-admin.query.dto';
@@ -30,6 +39,8 @@ export class BiddingController {
   constructor(
     private readonly biddingService: BiddingService,
     private readonly auctionLifecycleService: AuctionLifecycleService,
+    private readonly auctionBroadcastService: AuctionBroadcastService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ─── USER: place a bid ────────────────────────────────────────────────────
@@ -56,6 +67,41 @@ export class BiddingController {
     }
 
     return this.biddingService.placeBid(req.user.sub, productId, dto);
+  }
+
+  // ─── PUBLIC: SSE live-update stream for the product detail page ──────────
+
+  @Sse('products/:id/events')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Server-Sent Events stream of live auction updates for the product detail page (public; unauthenticated visitors may connect).',
+  })
+  async streamProductEvents(
+    @Param('id') productId: string,
+  ): Promise<Observable<MessageEvent>> {
+    // Visibility guard: never open a stream for a non-publicly-visible product.
+    // Query the Product repo directly via DataSource to match the existing
+    // pattern in this module (bidding services already read Product this way),
+    // avoiding a circular ProductsModule ↔ BiddingModule import.
+    const product = await this.dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: productId } });
+
+    if (!product || !PUBLICLY_VISIBLE_STATUSES.includes(product.status)) {
+      throw new NotFoundException('Product not found');
+    }
+
+    // Initial snapshot — emitted once on connect so a freshly-connected client
+    // is never blank until the next event fires. `defer` keeps the build lazy
+    // per-subscriber, then `concat` continues with the live stream.
+    const initial$ = defer(() =>
+      from(this.auctionBroadcastService.buildPayload(productId)).pipe(
+        map((payload): MessageEvent => ({ data: payload })),
+      ),
+    );
+
+    return concat(initial$, this.auctionBroadcastService.streamFor(productId));
   }
 
   // ─── USER: bid history for a product ─────────────────────────────────────

@@ -10,9 +10,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersRepository = void 0;
+const user_entity_1 = require("./entities/user.entity");
 const common_1 = require("@nestjs/common");
 const typeorm_1 = require("typeorm");
-const user_entity_1 = require("./entities/user.entity");
 let UsersRepository = class UsersRepository {
     dataSource;
     repo;
@@ -25,6 +25,9 @@ let UsersRepository = class UsersRepository {
             .createQueryBuilder('user')
             .where('LOWER(user.email) = :email', { email: email.toLowerCase() })
             .getOne();
+    }
+    async findByEmailIncludingDeleted(email) {
+        return this.repo.findOne({ where: { email }, withDeleted: true });
     }
     async findById(id) {
         return this.repo.findOneBy({ id });

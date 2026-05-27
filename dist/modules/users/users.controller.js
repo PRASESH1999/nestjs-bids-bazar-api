@@ -18,13 +18,15 @@ const pagination_dto_1 = require("../../common/dto/pagination.dto");
 const permission_enum_1 = require("../../common/enums/permission.enum");
 const hierarchy_guard_1 = require("../../common/guards/hierarchy.guard");
 const permissions_guard_1 = require("../../common/guards/permissions.guard");
+const api_responses_1 = require("../../common/swagger/api-responses");
 const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
-const api_responses_1 = require("../../common/swagger/api-responses");
+const throttler_1 = require("@nestjs/throttler");
 const assign_role_dto_1 = require("./dto/assign-role.dto");
+const change_email_dto_1 = require("./dto/change-email.dto");
 const change_password_dto_1 = require("./dto/change-password.dto");
 const create_admin_dto_1 = require("./dto/create-admin.dto");
-const update_user_dto_1 = require("./dto/update-user.dto");
+const update_self_dto_1 = require("./dto/update-self.dto");
 const users_service_1 = require("./users.service");
 let UsersController = class UsersController {
     usersService;
@@ -37,16 +39,17 @@ let UsersController = class UsersController {
         return result;
     }
     async getProfile(req) {
-        const user = await this.usersService.findById(req.user.sub);
-        if (!user)
-            return null;
-        const { password: _, hashedRefreshToken: __, ...result } = user;
-        return result;
+        return this.usersService.getOwnProfile(req.user.sub);
     }
-    async updateProfile(req, updateData) {
-        const user = await this.usersService.updateUser(req.user.sub, updateData);
-        const { password: _, hashedRefreshToken: __, ...result } = user;
-        return result;
+    async updateProfile(req, dto) {
+        await this.usersService.updateSelfName(req.user.sub, dto.name);
+        return { message: 'Display name updated successfully.' };
+    }
+    async requestEmailChange(req, dto) {
+        await this.usersService.requestEmailChange(req.user.sub, dto.newEmail, dto.currentPassword);
+        return {
+            message: 'A verification link has been sent to your new email address.',
+        };
     }
     async changePassword(req, dto) {
         await this.usersService.changePassword(req.user.sub, dto.currentPassword, dto.newPassword);
@@ -62,8 +65,8 @@ let UsersController = class UsersController {
         return {
             data,
             meta: {
-                page: pagination.page,
-                limit: pagination.limit,
+                page: pagination.page ?? 1,
+                limit: pagination.limit ?? 20,
                 total,
             },
         };
@@ -108,11 +111,12 @@ __decorate([
 ], UsersController.prototype, "createAdmin", null);
 __decorate([
     (0, common_1.Get)('me'),
-    (0, swagger_1.ApiOperation)({ summary: 'Get current user profile' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Get own profile with KYC summary and pending email-change info',
+    }),
     (0, swagger_1.ApiResponse)({
         status: 200,
-        description: 'Current authenticated user object.',
-        schema: api_responses_1.UserSchema,
+        description: 'Rich own-profile including KYC summary and pending email change (if any).',
     }),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
     (0, swagger_1.ApiResponse)(api_responses_1.R403),
@@ -124,11 +128,19 @@ __decorate([
 ], UsersController.prototype, "getProfile", null);
 __decorate([
     (0, common_1.Patch)('me'),
-    (0, swagger_1.ApiOperation)({ summary: 'Update current user profile' }),
+    (0, swagger_1.ApiOperation)({ summary: 'Change display name (one-time only)' }),
     (0, swagger_1.ApiResponse)({
         status: 200,
-        description: 'Updated user object.',
-        schema: api_responses_1.UserSchema,
+        description: 'Name updated. This can only be done once.',
+        schema: {
+            type: 'object',
+            properties: {
+                message: {
+                    type: 'string',
+                    example: 'Display name updated successfully.',
+                },
+            },
+        },
     }),
     (0, swagger_1.ApiResponse)(api_responses_1.R400),
     (0, swagger_1.ApiResponse)(api_responses_1.R401),
@@ -137,11 +149,42 @@ __decorate([
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, update_user_dto_1.UpdateUserDto]),
+    __metadata("design:paramtypes", [Object, update_self_dto_1.UpdateSelfDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "updateProfile", null);
 __decorate([
+    (0, common_1.Patch)('me/email'),
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 3600000 } }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Request an email address change (sends verification to new address)',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Verification email sent to the new address.',
+        schema: {
+            type: 'object',
+            properties: {
+                message: {
+                    type: 'string',
+                    example: 'A verification link has been sent to your new email address.',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R409),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PROFILE_EDIT),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, change_email_dto_1.ChangeEmailDto]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "requestEmailChange", null);
+__decorate([
     (0, common_1.Patch)('me/password'),
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 3600000 } }),
     (0, swagger_1.ApiOperation)({ summary: 'Change own password (authenticated users)' }),
     (0, swagger_1.ApiResponse)({
         status: 200,

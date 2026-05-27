@@ -216,7 +216,10 @@ export class AuthController {
   }
 
   @Public()
-  @ApiOperation({ summary: 'Verify a new email address using the token from the verification link' })
+  @ApiOperation({
+    summary:
+      'Verify a new email address using the token from the verification link',
+  })
   @ApiResponse({
     status: 200,
     description:

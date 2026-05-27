@@ -14,6 +14,10 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
     const configService = app.get(config_1.ConfigService);
+    app.enableCors({
+        origin: ['http://localhost:3001'],
+        credentials: true,
+    });
     const prefix = configService.get('API_PREFIX', 'api');
     const version = configService.get('API_VERSION', 'v1');
     app.setGlobalPrefix(`${prefix}/${version}`);

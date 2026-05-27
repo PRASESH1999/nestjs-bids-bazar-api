@@ -3,6 +3,7 @@ import { KycService } from "../kyc/kyc.service";
 import { MailService } from "../mail/mail.service";
 import { UsersService } from "../users/users.service";
 import { AuctionLifecycleService } from "../bidding/services/auction-lifecycle.service";
+import { BiddingService } from "../bidding/services/bidding.service";
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -25,6 +26,13 @@ export type ProductResponse = Omit<Product, 'images'> & {
     } | null;
     images: ProductImageResponse[];
 };
+export type TopBidder = {
+    name: string;
+    highestBid: number;
+};
+export type ProductDetailResponse = ProductResponse & {
+    topBidders: TopBidder[];
+};
 export declare class ProductsService {
     private readonly productsRepository;
     private readonly productStorage;
@@ -33,8 +41,9 @@ export declare class ProductsService {
     private readonly categoriesService;
     private readonly mailService;
     private readonly auctionLifecycleService;
+    private readonly biddingService;
     private readonly logger;
-    constructor(productsRepository: ProductsRepository, productStorage: ProductStorageService, kycService: KycService, usersService: UsersService, categoriesService: CategoriesService, mailService: MailService, auctionLifecycleService: AuctionLifecycleService);
+    constructor(productsRepository: ProductsRepository, productStorage: ProductStorageService, kycService: KycService, usersService: UsersService, categoriesService: CategoriesService, mailService: MailService, auctionLifecycleService: AuctionLifecycleService, biddingService: BiddingService);
     createProduct(userId: string, dto: CreateProductDto, imageFiles: Express.Multer.File[]): Promise<ProductResponse>;
     updateProduct(userId: string, productId: string, dto: UpdateProductDto, newImageFiles?: Express.Multer.File[]): Promise<ProductResponse>;
     submitProduct(userId: string, productId: string): Promise<ProductResponse>;
@@ -56,7 +65,7 @@ export declare class ProductsService {
             total: number;
         };
     }>;
-    getPublicProductById(id: string, requesterId?: string | null): Promise<ProductResponse>;
+    getPublicProductById(id: string, requesterId?: string | null): Promise<ProductDetailResponse>;
     getProductImageFile(productId: string, imageId: string, requesterId: string | null, requesterIsAdmin: boolean): Promise<{
         absolutePath: string;
         mimeType: string;

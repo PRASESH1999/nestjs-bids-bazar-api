@@ -21,6 +21,7 @@ let User = class User extends base_entity_1.BaseEntity {
     isActive;
     isEmailVerified;
     hashedRefreshToken;
+    nameChangedAt;
 };
 exports.User = User;
 __decorate([
@@ -55,6 +56,10 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'varchar', nullable: true }),
     __metadata("design:type", Object)
 ], User.prototype, "hashedRefreshToken", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true, default: null }),
+    __metadata("design:type", Object)
+], User.prototype, "nameChangedAt", void 0);
 exports.User = User = __decorate([
     (0, typeorm_1.Entity)('users')
 ], User);

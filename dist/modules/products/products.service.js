@@ -17,6 +17,7 @@ const kyc_service_1 = require("../kyc/kyc.service");
 const mail_service_1 = require("../mail/mail.service");
 const users_service_1 = require("../users/users.service");
 const auction_lifecycle_service_1 = require("../bidding/services/auction-lifecycle.service");
+const bidding_service_1 = require("../bidding/services/bidding.service");
 const common_1 = require("@nestjs/common");
 const product_storage_service_1 = require("./product-storage.service");
 const products_repository_1 = require("./products.repository");
@@ -36,8 +37,9 @@ let ProductsService = ProductsService_1 = class ProductsService {
     categoriesService;
     mailService;
     auctionLifecycleService;
+    biddingService;
     logger = new common_1.Logger(ProductsService_1.name);
-    constructor(productsRepository, productStorage, kycService, usersService, categoriesService, mailService, auctionLifecycleService) {
+    constructor(productsRepository, productStorage, kycService, usersService, categoriesService, mailService, auctionLifecycleService, biddingService) {
         this.productsRepository = productsRepository;
         this.productStorage = productStorage;
         this.kycService = kycService;
@@ -45,6 +47,7 @@ let ProductsService = ProductsService_1 = class ProductsService {
         this.categoriesService = categoriesService;
         this.mailService = mailService;
         this.auctionLifecycleService = auctionLifecycleService;
+        this.biddingService = biddingService;
     }
     async createProduct(userId, dto, imageFiles) {
         await this.assertKycApproved(userId);
@@ -239,7 +242,8 @@ let ProductsService = ProductsService_1 = class ProductsService {
         if (!product_status_enum_1.PUBLICLY_VISIBLE_STATUSES.includes(product.status) && !isOwner) {
             throw new common_1.NotFoundException('Product not found');
         }
-        return this.mapProduct(product);
+        const topBidders = await this.biddingService.getTopBiddersForProduct(id);
+        return { ...this.mapProduct(product), topBidders };
     }
     async getProductImageFile(productId, imageId, requesterId, requesterIsAdmin) {
         const image = await this.productsRepository.findImageById(imageId);
@@ -447,6 +451,7 @@ exports.ProductsService = ProductsService = ProductsService_1 = __decorate([
         users_service_1.UsersService,
         categories_service_1.CategoriesService,
         mail_service_1.MailService,
-        auction_lifecycle_service_1.AuctionLifecycleService])
+        auction_lifecycle_service_1.AuctionLifecycleService,
+        bidding_service_1.BiddingService])
 ], ProductsService);
 //# sourceMappingURL=products.service.js.map

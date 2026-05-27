@@ -44,18 +44,19 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var AuthService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
-const common_1 = require("@nestjs/common");
-const jwt_1 = require("@nestjs/jwt");
-const users_service_1 = require("../users/users.service");
-const bcrypt = __importStar(require("bcrypt"));
-const crypto = __importStar(require("crypto"));
-const config_1 = require("@nestjs/config");
-const typeorm_1 = require("typeorm");
-const role_permissions_map_1 = require("./role-permissions.map");
 const role_enum_1 = require("../../common/enums/role.enum");
 const mail_service_1 = require("../mail/mail.service");
+const users_service_1 = require("../users/users.service");
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const jwt_1 = require("@nestjs/jwt");
+const bcrypt = __importStar(require("bcrypt"));
+const crypto = __importStar(require("crypto"));
+const typeorm_1 = require("typeorm");
 const auth_repository_1 = require("./auth.repository");
 const password_reset_repository_1 = require("./password-reset.repository");
+const pending_email_change_repository_1 = require("./pending-email-change.repository");
+const role_permissions_map_1 = require("./role-permissions.map");
 let AuthService = AuthService_1 = class AuthService {
     usersService;
     jwtService;
@@ -63,21 +64,26 @@ let AuthService = AuthService_1 = class AuthService {
     mailService;
     authRepository;
     passwordResetRepository;
+    pendingEmailChangeRepository;
     dataSource;
     logger = new common_1.Logger(AuthService_1.name);
-    constructor(usersService, jwtService, configService, mailService, authRepository, passwordResetRepository, dataSource) {
+    constructor(usersService, jwtService, configService, mailService, authRepository, passwordResetRepository, pendingEmailChangeRepository, dataSource) {
         this.usersService = usersService;
         this.jwtService = jwtService;
         this.configService = configService;
         this.mailService = mailService;
         this.authRepository = authRepository;
         this.passwordResetRepository = passwordResetRepository;
+        this.pendingEmailChangeRepository = pendingEmailChangeRepository;
         this.dataSource = dataSource;
     }
     async validateUser(email, pass) {
-        const user = await this.usersService.findByEmail(email);
+        const user = await this.usersService.findByEmailIncludingDeleted(email);
         if (!user)
             return null;
+        if (user.deletedAt !== null) {
+            throw new common_1.ForbiddenException('This account has been deleted. Please contact support for account recovery.');
+        }
         if (!user.isActive) {
             throw new common_1.ForbiddenException({
                 statusCode: 403,
@@ -115,8 +121,11 @@ let AuthService = AuthService_1 = class AuthService {
     }
     async register(data) {
         const email = data.email.toLowerCase();
-        const existingUser = await this.usersService.findByEmail(email);
+        const existingUser = await this.usersService.findByEmailIncludingDeleted(email);
         if (existingUser) {
+            if (existingUser.deletedAt !== null) {
+                throw new common_1.ForbiddenException('This account has been deleted. Please contact support for account recovery.');
+            }
             throw new common_1.ConflictException('User with this email already exists');
         }
         const { password, ...rest } = data;
@@ -280,6 +289,57 @@ let AuthService = AuthService_1 = class AuthService {
         const deleted = await this.passwordResetRepository.deleteExpiredBefore(cutoff);
         return { deleted };
     }
+    async verifyEmailChange(rawToken) {
+        const tokenHash = crypto
+            .createHash('sha256')
+            .update(rawToken)
+            .digest('hex');
+        const pending = await this.pendingEmailChangeRepository.findByTokenHash(tokenHash);
+        if (!pending) {
+            throw new common_1.NotFoundException('Invalid or expired link');
+        }
+        if (pending.expiresAt < new Date()) {
+            await this.pendingEmailChangeRepository.deleteById(pending.id);
+            throw new common_1.NotFoundException('Invalid or expired link');
+        }
+        const user = await this.usersService.findById(pending.userId);
+        if (!user || !user.isActive) {
+            throw new common_1.NotFoundException('Invalid or expired link');
+        }
+        const oldEmail = user.email;
+        const newEmail = pending.newEmail;
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+        try {
+            await this.usersService.updateUserInTransaction(user.id, { email: newEmail, isEmailVerified: true, hashedRefreshToken: null }, queryRunner);
+            await this.pendingEmailChangeRepository.deleteById(pending.id, queryRunner);
+            await queryRunner.commitTransaction();
+        }
+        catch (err) {
+            await queryRunner.rollbackTransaction();
+            throw err;
+        }
+        finally {
+            await queryRunner.release();
+        }
+        try {
+            await this.mailService.sendEmailChangedNotificationToOld(oldEmail, user.name, newEmail);
+        }
+        catch (err) {
+            this.logger.error('[verifyEmailChange] Failed to dispatch old-address notification', err instanceof Error ? err.stack : String(err));
+        }
+        try {
+            await this.mailService.sendEmailChangedNotificationToNew(newEmail, user.name);
+        }
+        catch (err) {
+            this.logger.error('[verifyEmailChange] Failed to dispatch new-address confirmation', err instanceof Error ? err.stack : String(err));
+        }
+    }
+    async cleanupExpiredPendingEmailChanges() {
+        const deleted = await this.pendingEmailChangeRepository.deleteExpiredBefore(new Date());
+        return { deleted };
+    }
 };
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = AuthService_1 = __decorate([
@@ -290,6 +350,7 @@ exports.AuthService = AuthService = AuthService_1 = __decorate([
         mail_service_1.MailService,
         auth_repository_1.AuthRepository,
         password_reset_repository_1.PasswordResetRepository,
+        pending_email_change_repository_1.PendingEmailChangeRepository,
         typeorm_1.DataSource])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map

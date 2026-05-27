@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, QueryRunner } from 'typeorm';
 import { Product } from "../../products/entities/product.entity";
 import { MailService } from "../../mail/mail.service";
@@ -6,8 +7,9 @@ export declare class AuctionLifecycleService {
     private readonly dataSource;
     private readonly configService;
     private readonly mailService;
+    private readonly eventEmitter;
     private readonly logger;
-    constructor(dataSource: DataSource, configService: ConfigService, mailService: MailService);
+    constructor(dataSource: DataSource, configService: ConfigService, mailService: MailService, eventEmitter: EventEmitter2);
     closeIfExpired(productId: string, externalQueryRunner?: QueryRunner): Promise<void>;
     handlePaymentExpiry(productId: string, externalQueryRunner?: QueryRunner): Promise<void>;
     confirmPaymentManual(adminId: string, productId: string): Promise<Product>;

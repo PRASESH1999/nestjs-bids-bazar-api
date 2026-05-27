@@ -5,10 +5,16 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, QueryRunner } from 'typeorm';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { PaymentConfirmationMethod } from '@common/enums/payment-confirmation-method.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
+import { EventNames } from '@common/events/event-names';
+import type {
+  AuctionClosedPayload,
+  AuctionSettledPayload,
+} from '@common/events/event-payloads.type';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
 import { MailService } from '@modules/mail/mail.service';
@@ -22,6 +28,7 @@ export class AuctionLifecycleService {
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ─── Core transition: close an active auction whose timer has expired ─────
@@ -39,13 +46,14 @@ export class AuctionLifecycleService {
       await qr.startTransaction();
     }
 
-    // Captured inside transaction — used for post-commit emails
+    // Captured inside transaction — used for post-commit emails and event emission
     let winnerId: string | null = null;
     let sellerId: string | null = null;
     let winningAmount: number | null = null;
     let paymentDeadline: Date | null = null;
     let capturedProductTitle: string | null = null;
     let capturedProductId: string | null = null;
+    let capturedWinningBidId: string | null = null;
     let transitioned = false;
 
     try {
@@ -113,6 +121,7 @@ export class AuctionLifecycleService {
       paymentDeadline = computedDeadline;
       capturedProductTitle = product.title;
       capturedProductId = product.id;
+      capturedWinningBidId = highestBid.id;
       transitioned = true;
     } catch (err: unknown) {
       if (isOwnQr) await qr.rollbackTransaction();
@@ -155,6 +164,23 @@ export class AuctionLifecycleService {
     } catch (err: unknown) {
       this.logger.error(
         `closeIfExpired: post-commit email failed for product ${capturedProductId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    // Post-commit event emission — never affects the caller. Failure is
+    // logged so a flaky listener never blocks lifecycle progression.
+    try {
+      const payload: AuctionClosedPayload = {
+        productId: capturedProductId,
+        winningBidId: capturedWinningBidId,
+        winnerId: winnerId,
+        winningAmount: winningAmount,
+      };
+      this.eventEmitter.emit(EventNames.AUCTION_CLOSED, payload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `closeIfExpired: auction.closed emission failed for product ${capturedProductId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -362,6 +388,7 @@ export class AuctionLifecycleService {
     let buyerId: string | null = null;
     let confirmedAmount: number | null = null;
     let capturedProductTitle: string | null = null;
+    let capturedWinningBidId: string | null = null;
     let savedProduct: Product;
 
     try {
@@ -418,11 +445,12 @@ export class AuctionLifecycleService {
 
       await qr.commitTransaction();
 
-      // Capture for post-commit emails
+      // Capture for post-commit emails and event emission
       sellerId = product.ownerId;
       buyerId = responsibleBid.bidderId;
       confirmedAmount = Number(responsibleBid.amount);
       capturedProductTitle = product.title;
+      capturedWinningBidId = responsibleBid.id;
     } catch (err: unknown) {
       await qr.rollbackTransaction();
       throw err;
@@ -458,6 +486,23 @@ export class AuctionLifecycleService {
     } catch (err: unknown) {
       this.logger.error(
         `confirmPaymentManual: post-commit email failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    // Post-commit event emission — never affects the caller. Failure is
+    // logged so a flaky listener never blocks the admin confirmation flow.
+    try {
+      const payload: AuctionSettledPayload = {
+        productId,
+        winningBidId: capturedWinningBidId,
+        buyerId: buyerId,
+        amount: confirmedAmount,
+      };
+      this.eventEmitter.emit(EventNames.AUCTION_SETTLED, payload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `confirmPaymentManual: auction.settled emission failed for product ${productId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }

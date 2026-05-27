@@ -13,6 +13,19 @@ description: >
 
 # Skill: create-event-handler
 
+> **Note on examples below.** Several worked examples reference
+> `AuctionsService`, `AuctionStatus`, and an `auctions/` module. In this
+> codebase the equivalents are `BiddingService` / `AuctionLifecycleService`,
+> the `ProductStatus` enum (auction state lives on the `Product` row, not a
+> separate auction entity), and the `src/modules/bidding/` folder. Treat the
+> templates as structure-only — substitute the real names when generating
+> handlers. The handler shape, idempotency rules, logging pattern, and
+> "never swallow errors" guidance still apply verbatim.
+>
+> Already-implemented handlers under `src/modules/bidding/handlers/`
+> (`bid-submitted`, `auction-closed`, `auction-settled`) are the canonical
+> references for this codebase.
+
 ## References — Read Before Starting
 
 - [SKILL.md] — project context, open decisions

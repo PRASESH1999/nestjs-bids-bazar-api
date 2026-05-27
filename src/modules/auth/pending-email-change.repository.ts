@@ -25,9 +25,7 @@ export class PendingEmailChangeRepository {
     await this.repo.save(record);
   }
 
-  async findByTokenHash(
-    tokenHash: string,
-  ): Promise<PendingEmailChange | null> {
+  async findByTokenHash(tokenHash: string): Promise<PendingEmailChange | null> {
     return this.repo.findOne({ where: { tokenHash } });
   }
 

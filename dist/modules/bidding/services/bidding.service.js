@@ -16,8 +16,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BiddingService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
+const event_emitter_1 = require("@nestjs/event-emitter");
 const typeorm_1 = require("typeorm");
 const decimal_js_1 = __importDefault(require("decimal.js"));
+const event_names_1 = require("../../../common/events/event-names");
 const bid_payment_status_enum_1 = require("../../../common/enums/bid-payment-status.enum");
 const product_status_enum_1 = require("../../../common/enums/product-status.enum");
 const product_entity_1 = require("../../products/entities/product.entity");
@@ -29,11 +31,13 @@ let BiddingService = BiddingService_1 = class BiddingService {
     dataSource;
     configService;
     mailService;
+    eventEmitter;
     logger = new common_1.Logger(BiddingService_1.name);
-    constructor(dataSource, configService, mailService) {
+    constructor(dataSource, configService, mailService, eventEmitter) {
         this.dataSource = dataSource;
         this.configService = configService;
         this.mailService = mailService;
+        this.eventEmitter = eventEmitter;
     }
     async placeBid(userId, productId, dto) {
         const qr = this.dataSource.createQueryRunner();
@@ -157,6 +161,18 @@ let BiddingService = BiddingService_1 = class BiddingService {
         catch (err) {
             this.logger.error(`placeBid: post-commit email failed for product ${productId_}`, err instanceof Error ? err.stack : String(err));
         }
+        try {
+            const payload = {
+                productId: productId_,
+                bidId: savedBid.id,
+                bidderId: userId,
+                amount: newBidAmount,
+            };
+            this.eventEmitter.emit(event_names_1.EventNames.BID_SUBMITTED, payload);
+        }
+        catch (err) {
+            this.logger.error(`placeBid: bid.submitted emission failed for product ${productId_}`, err instanceof Error ? err.stack : String(err));
+        }
         return savedBid;
     }
     async getBidsForProduct(productId, viewerType) {
@@ -195,6 +211,25 @@ let BiddingService = BiddingService_1 = class BiddingService {
             amount: Number(bid.amount),
             placedAt: bid.placedAt.toISOString(),
             bidderName: bid.bidder?.name ?? '',
+        }));
+    }
+    async getTopBiddersForProduct(productId) {
+        const rows = await this.dataSource
+            .getRepository(bid_entity_1.Bid)
+            .createQueryBuilder('bid')
+            .innerJoin('bid.bidder', 'bidder')
+            .select('bid.bidderId', 'bidderId')
+            .addSelect('MAX(bid.amount)', 'highestBid')
+            .addSelect('bidder.name', 'name')
+            .where('bid.productId = :productId', { productId })
+            .groupBy('bid.bidderId')
+            .addGroupBy('bidder.name')
+            .orderBy('MAX(bid.amount)', 'DESC')
+            .limit(5)
+            .getRawMany();
+        return rows.map((row) => ({
+            name: row.name,
+            highestBid: Number(row.highestBid),
         }));
     }
     async getMyBids(userId, query) {
@@ -283,6 +318,7 @@ exports.BiddingService = BiddingService = BiddingService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [typeorm_1.DataSource,
         config_1.ConfigService,
-        mail_service_1.MailService])
+        mail_service_1.MailService,
+        event_emitter_1.EventEmitter2])
 ], BiddingService);
 //# sourceMappingURL=bidding.service.js.map

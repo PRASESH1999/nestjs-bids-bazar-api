@@ -31,5 +31,6 @@ var Permission;
     Permission["ADMIN_MANAGE"] = "admin:manage";
     Permission["ROLE_ASSIGN"] = "role:assign";
     Permission["SYSTEM_CONFIG"] = "system:config";
+    Permission["NAME_CHANGE_RESET"] = "name_change:reset";
 })(Permission || (exports.Permission = Permission = {}));
 //# sourceMappingURL=permission.enum.js.map

@@ -13,10 +13,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuctionLifecycleService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
+const event_emitter_1 = require("@nestjs/event-emitter");
 const typeorm_1 = require("typeorm");
 const bid_payment_status_enum_1 = require("../../../common/enums/bid-payment-status.enum");
 const payment_confirmation_method_enum_1 = require("../../../common/enums/payment-confirmation-method.enum");
 const product_status_enum_1 = require("../../../common/enums/product-status.enum");
+const event_names_1 = require("../../../common/events/event-names");
 const product_entity_1 = require("../../products/entities/product.entity");
 const user_entity_1 = require("../../users/entities/user.entity");
 const mail_service_1 = require("../../mail/mail.service");
@@ -25,11 +27,13 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
     dataSource;
     configService;
     mailService;
+    eventEmitter;
     logger = new common_1.Logger(AuctionLifecycleService_1.name);
-    constructor(dataSource, configService, mailService) {
+    constructor(dataSource, configService, mailService, eventEmitter) {
         this.dataSource = dataSource;
         this.configService = configService;
         this.mailService = mailService;
+        this.eventEmitter = eventEmitter;
     }
     async closeIfExpired(productId, externalQueryRunner) {
         const isOwnQr = externalQueryRunner === undefined;
@@ -44,6 +48,7 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
         let paymentDeadline = null;
         let capturedProductTitle = null;
         let capturedProductId = null;
+        let capturedWinningBidId = null;
         let transitioned = false;
         try {
             const product = await qr.manager
@@ -96,6 +101,7 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
             paymentDeadline = computedDeadline;
             capturedProductTitle = product.title;
             capturedProductId = product.id;
+            capturedWinningBidId = highestBid.id;
             transitioned = true;
         }
         catch (err) {
@@ -138,6 +144,18 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
         }
         catch (err) {
             this.logger.error(`closeIfExpired: post-commit email failed for product ${capturedProductId}`, err instanceof Error ? err.stack : String(err));
+        }
+        try {
+            const payload = {
+                productId: capturedProductId,
+                winningBidId: capturedWinningBidId,
+                winnerId: winnerId,
+                winningAmount: winningAmount,
+            };
+            this.eventEmitter.emit(event_names_1.EventNames.AUCTION_CLOSED, payload);
+        }
+        catch (err) {
+            this.logger.error(`closeIfExpired: auction.closed emission failed for product ${capturedProductId}`, err instanceof Error ? err.stack : String(err));
         }
     }
     async handlePaymentExpiry(productId, externalQueryRunner) {
@@ -302,6 +320,7 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
         let buyerId = null;
         let confirmedAmount = null;
         let capturedProductTitle = null;
+        let capturedWinningBidId = null;
         let savedProduct;
         try {
             const product = await qr.manager
@@ -346,6 +365,7 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
             buyerId = responsibleBid.bidderId;
             confirmedAmount = Number(responsibleBid.amount);
             capturedProductTitle = product.title;
+            capturedWinningBidId = responsibleBid.id;
         }
         catch (err) {
             await qr.rollbackTransaction();
@@ -379,6 +399,18 @@ let AuctionLifecycleService = AuctionLifecycleService_1 = class AuctionLifecycle
         }
         catch (err) {
             this.logger.error(`confirmPaymentManual: post-commit email failed for product ${productId}`, err instanceof Error ? err.stack : String(err));
+        }
+        try {
+            const payload = {
+                productId,
+                winningBidId: capturedWinningBidId,
+                buyerId: buyerId,
+                amount: confirmedAmount,
+            };
+            this.eventEmitter.emit(event_names_1.EventNames.AUCTION_SETTLED, payload);
+        }
+        catch (err) {
+            this.logger.error(`confirmPaymentManual: auction.settled emission failed for product ${productId}`, err instanceof Error ? err.stack : String(err));
         }
         return savedProduct;
     }
@@ -480,6 +512,7 @@ exports.AuctionLifecycleService = AuctionLifecycleService = AuctionLifecycleServ
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [typeorm_1.DataSource,
         config_1.ConfigService,
-        mail_service_1.MailService])
+        mail_service_1.MailService,
+        event_emitter_1.EventEmitter2])
 ], AuctionLifecycleService);
 //# sourceMappingURL=auction-lifecycle.service.js.map

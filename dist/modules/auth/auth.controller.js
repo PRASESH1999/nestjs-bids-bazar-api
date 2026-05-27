@@ -74,6 +74,12 @@ let AuthController = class AuthController {
         this.setRefreshTokenCookie(res, tokens.refreshToken);
         return { accessToken: tokens.accessToken };
     }
+    async verifyEmailChange(query) {
+        await this.authService.verifyEmailChange(query.token);
+        return {
+            message: 'Email address changed successfully. Please log in with your new email.',
+        };
+    }
     async forgotPassword(dto) {
         await this.authService.requestPasswordReset(dto.email);
         return {
@@ -231,6 +237,24 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "refresh", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Verify a new email address using the token from the verification link',
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Email address changed. All sessions invalidated — user must log in again.',
+        ...(0, api_responses_1.MessageResponse)('Email address changed successfully. Please log in with your new email.'),
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R404),
+    (0, common_1.Get)('verify-email-change'),
+    __param(0, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [verify_email_query_dto_1.VerifyEmailQueryDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "verifyEmailChange", null);
 __decorate([
     (0, public_decorator_1.Public)(),
     (0, swagger_1.ApiOperation)({ summary: 'Request a password reset email' }),

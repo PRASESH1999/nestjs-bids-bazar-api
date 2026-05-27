@@ -10,10 +10,10 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Product = void 0;
-const typeorm_1 = require("typeorm");
 const base_entity_1 = require("../../../common/entities/base.entity");
 const item_condition_enum_1 = require("../../../common/enums/item-condition.enum");
 const product_status_enum_1 = require("../../../common/enums/product-status.enum");
+const typeorm_1 = require("typeorm");
 const product_image_entity_1 = require("./product-image.entity");
 let Product = class Product extends base_entity_1.BaseEntity {
     ownerId;

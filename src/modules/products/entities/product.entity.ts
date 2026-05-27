@@ -1,7 +1,7 @@
-import { Column, Entity, Index, OneToMany } from 'typeorm';
 import { BaseEntity } from '@common/entities/base.entity';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
+import { Column, Entity, Index, OneToMany } from 'typeorm';
 import { ProductImage } from './product-image.entity';
 
 @Entity('products')

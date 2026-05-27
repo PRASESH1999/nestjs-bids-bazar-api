@@ -18,7 +18,11 @@ import { AuthCleanupCron } from './cron/auth-cleanup.cron';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EmailVerificationToken, PasswordResetToken, PendingEmailChange]),
+    TypeOrmModule.forFeature([
+      EmailVerificationToken,
+      PasswordResetToken,
+      PendingEmailChange,
+    ]),
     UsersModule,
     PassportModule,
     JwtModule.registerAsync({

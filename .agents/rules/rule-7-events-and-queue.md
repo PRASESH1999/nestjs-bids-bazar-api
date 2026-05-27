@@ -36,18 +36,22 @@ Choose one and remove the others before going to production:
     - No persistence, no retries, no dead-letter — NOT suitable for production
     - Use only during early development until a queue system is decided
 
-Until decided: use NestJS EventEmitter as a temporary in-process solution.
+Until decided: use NestJS EventEmitter as a temporary in-process solution
+(`EventEmitterModule.forRoot()` is wired in `AppModule`).
 Design all event handlers to be swappable — abstract behind an EventBus interface
 so the underlying system can be replaced without rewriting handlers.
 
-## [DECISION NEEDED]: Real-Time Client Broadcasting
-Choose one when ready:
+## Real-Time Client Broadcasting — Chosen: Option B (SSE)
+
+The pilot uses **Server-Sent Events (SSE)** for live client updates. The
+product detail page subscribes to `GET /products/:id/events`, an SSE stream
+served by `BiddingController` and produced by `AuctionBroadcastService`.
 
   Option A — WebSockets via @nestjs/websockets + Socket.io
     - Full duplex, best for live bid updates and auction countdowns
     - Requires sticky sessions or Redis adapter for multi-instance deployments
 
-  Option B — Server-Sent Events (SSE)
+  Option B — Server-Sent Events (SSE) — CHOSEN
     - Simpler, unidirectional, HTTP-based
     - Good for auction status and bid feed updates
     - No special infrastructure needed
@@ -57,65 +61,79 @@ Choose one when ready:
     - Acceptable only for low-frequency updates
     - Not recommended for a live bidding experience
 
-Until decided: do not implement real-time broadcasting. Design event emission so
-broadcasting can be plugged into existing event handlers later with no restructuring.
+Current implementation:
+- `AuctionBroadcastService` holds a single in-memory `RxJS Subject`, filtered
+  per `productId` for each subscriber.
+- Consumed only on the product detail page via the public SSE endpoint above.
+- The Subject is **single-instance only**. Scaling to multiple Node instances
+  requires swapping it for a pub/sub adapter (e.g. Redis Pub/Sub) so events
+  emitted on one instance reach SSE subscribers on another. This is the
+  single change required at scale; handlers do not need to be rewritten.
 
 ## Event Naming Conventions
 - All event names in dot.notation, lowercase, past tense (something that happened):
-    bid.submitted
-    bid.accepted
-    bid.rejected
-    auction.activated       (first bid placed, timer started)
-    auction.closed          (timer expired)
-    auction.settled         (payment confirmed, winner finalized)
-    auction.abandoned       (all bidders defaulted)
-    payment.window.started  (winner notified, 18hr clock started)
-    payment.window.expired  (winner failed to pay, fallback triggered)
-    payment.confirmed       (payment received)
-    user.account.locked
+    bid.submitted             — implemented (emitted by `BiddingService.placeBid` after commit)
+    bid.accepted              — planned
+    bid.rejected              — planned
+    auction.activated         — planned (first bid placed, timer started)
+    auction.closed            — implemented (emitted by `AuctionLifecycleService.closeIfExpired` after commit)
+    auction.settled           — implemented (emitted by `AuctionLifecycleService.confirmPaymentManual` after commit)
+    auction.abandoned         — planned (all bidders defaulted)
+    payment.window.started    — planned (winner notified, payment clock started)
+    payment.window.expired    — planned (winner failed to pay, fallback triggered)
+    payment.confirmed         — planned
+    user.account.locked       — planned
 
-- Event names are defined as constants in common/events/event-names.ts — never
-  hardcoded as raw strings anywhere in the codebase.
+  Only `bid.submitted`, `auction.closed`, and `auction.settled` are wired
+  today. The rest are reserved names — they will appear in
+  `EventNames` once the corresponding service emit points are added.
+
+- Event names are defined as constants in `src/common/events/event-names.ts` — never
+  hardcoded as raw strings anywhere in the codebase. Payload types live in
+  `src/common/events/event-payloads.type.ts`.
 
 ## Async Operations (All of the below must be handled via queue/events)
 
 ### Bid Placement & Validation
 - HTTP request accepts the bid synchronously, persists it, returns 201 immediately.
 - Post-acceptance side effects are async:
-    Notify outbid bidder (email/push)
-    Update auction leaderboard cache
-    Broadcast new leading bid to clients (when real-time is implemented)
+    Notify outbid bidder (email/push) — currently sent inline in `BiddingService.placeBid` post-commit
+    Update auction leaderboard cache — not yet implemented
+    Broadcast new leading bid to clients — implemented via `bid.submitted` → `BidSubmittedHandler` → `AuctionBroadcastService.broadcastUpdate`
 
 ### Auction Closing & Winner Determination
-- Auction closing is triggered by a scheduled job (delayed job or cron):
-    Job scheduled at auction activation for closesAt timestamp
-    On trigger: transition auction ACTIVE → CLOSED
-    Rank all ACCEPTED bids, lock fallback chain
-    Emit auction.closed event
-- Winner determination is handled by auction.closed event handler:
-    Transition auction CLOSED → AWAITING_PAYMENT
-    Assign paymentDeadline = closedAt + 18hrs
-    Emit payment.window.started event
-    Notify winner (email/push) — async
+- Auction closing today runs via:
+    `AuctionLifecycleCron` (every 1 minute) calling `AuctionLifecycleService.closeAllExpiredAuctions`
+    Lazy closure inside `ProductsService.getPublicProductById` and `BiddingController.placeBid`
+- Both paths call the same idempotent `AuctionLifecycleService.closeIfExpired(productId)`:
+    Transition product `ACTIVE` → `AWAITING_PAYMENT` (the `CLOSED` enum value is a transient audit state — the
+    product moves directly to `AWAITING_PAYMENT` inside the same transaction)
+    Pick highest bid as winner (tiebreaker: earliest `placedAt`)
+    Assign `paymentDeadline = now + PAYMENT_WINDOW_HOURS` (config-driven, see Rule 14)
+    Emit `auction.closed` event after commit
+- When a queue is added, the cron path will be replaced by a delayed job scheduled at
+  `product.biddingEndsAt`. The lazy-closure defense-in-depth remains.
 
 ### Payment Window Tracking & Fallback
-- On payment.window.started: schedule a delayed job for 18hrs.
-- On job trigger (payment window expired):
-    If payment confirmed → do nothing (already SETTLED)
-    If payment not confirmed:
-      Mark current winner bid as PAYMENT_DEFAULTED
-      Emit payment.window.expired event
-      Payment.window.expired handler:
-        Promote next bidder in fallback chain
-        If next bidder exists → restart AWAITING_PAYMENT, schedule new 18hr job
-        If no bidders remain → transition auction to ABANDONED, emit auction.abandoned
-- Payment confirmation is always triggered by an explicit payment service call —
-  never assumed or auto-confirmed.
+- Payment-window expiry today runs via:
+    `AuctionLifecycleCron` calling `expireAllOverduePaymentWindows`
+    Lazy expiry inside `ProductsService.getPublicProductById` when status is `AWAITING_PAYMENT`
+- Both paths call `AuctionLifecycleService.handlePaymentExpiry(productId)` which:
+    Marks the responsible bid `EXPIRED` and `isCurrentlyPaymentResponsible = false`
+    Promotes the next-highest `NOT_RESPONSIBLE` bid to responsible, with a fresh
+    `paymentDeadline = now + PAYMENT_WINDOW_HOURS`
+    If no remaining bids → product transitions to `ABANDONED`
+- `payment.window.expired` and `auction.abandoned` events are not yet emitted —
+  they are planned event names reserved for when this flow is converted to an
+  event-driven pipeline.
+- Payment confirmation is always triggered by an explicit admin call
+  (`AuctionLifecycleService.confirmPaymentManual`) — never assumed or auto-confirmed.
+  It emits `auction.settled` after commit.
 
 ## Queue & Job Conventions
 - Every job type has a dedicated processor class in its feature module:
-    e.g. auctions/processors/auction-close.processor.ts
-    e.g. auctions/processors/payment-window.processor.ts
+    e.g. bidding/processors/auction-close.processor.ts (planned)
+    e.g. bidding/processors/payment-window.processor.ts (planned)
 - Job names defined as constants — never raw strings.
 - All jobs must have:
     Retry policy     : minimum 3 retries with exponential backoff
@@ -131,26 +149,43 @@ broadcasting can be plugged into existing event handlers later with no restructu
   (e.g. PagerDuty, Slack alert, email to admin)
 
 ## Event Handler Rules
-- Event handlers live in their respective feature module under handlers/:
-    e.g. auctions/handlers/auction-closed.handler.ts
-    e.g. auctions/handlers/payment-window-expired.handler.ts
+- Event handlers live in their respective feature module under `handlers/`:
+    e.g. bidding/handlers/bid-submitted.handler.ts
+    e.g. bidding/handlers/auction-closed.handler.ts
+    e.g. bidding/handlers/auction-settled.handler.ts
 - Handlers must be idempotent — processing the same event twice must not cause
-  duplicate side effects. Always check current state before acting.
-- Handlers must not throw unhandled exceptions — catch, log, and let the queue
-  retry policy take over.
+  duplicate side effects. Always check current state before acting. Broadcast-only
+  handlers (whose sole effect is pushing current state to subscribers) are naturally
+  safe to replay and may skip the state-guard; a comment must call this out.
+- Handlers must not throw unhandled exceptions silently — they must log AND rethrow
+  so the queue retry policy can take over once a queue is in place.
 - Never put business logic in handlers — call the appropriate service method instead.
 - Handlers are thin orchestrators: receive event → call service → done.
+
+## Service-Side Emission Rules
+- Services emit events; services must NOT call the broadcast layer (or any
+  handler) directly. The event bus is the only handoff.
+- Events are emitted **after** `commitTransaction()` succeeds — never inside the
+  transaction. An event for a rolled-back change is a correctness bug.
+- Emission failure must never affect the HTTP response: wrap each emit in a
+  try/catch and log, mirroring how post-commit emails are handled today.
 
 ## Folder Structure
 src/
 └── modules/
-    └── auctions/
+    └── bidding/
         ├── handlers/
+        │   ├── bid-submitted.handler.ts
         │   ├── auction-closed.handler.ts
-        │   └── payment-window-expired.handler.ts
-        └── processors/
-            ├── auction-close.processor.ts
-            └── payment-window.processor.ts
+        │   └── auction-settled.handler.ts
+        ├── processors/                           # planned, not yet present
+        │   ├── auction-close.processor.ts
+        │   └── payment-window.processor.ts
+        └── services/
+            ├── bidding.service.ts                # emits bid.submitted
+            ├── auction-lifecycle.service.ts      # emits auction.closed, auction.settled
+            └── auction-broadcast.service.ts      # SSE broadcast layer
 └── common/
     └── events/
-        └── event-names.ts      # Single source of truth for all event name constants
+        ├── event-names.ts          # Single source of truth for all event name constants
+        └── event-payloads.type.ts  # Typed payload interface per event

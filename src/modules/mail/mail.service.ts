@@ -485,7 +485,10 @@ export class MailService implements OnModuleInit {
       dateStyle: 'medium',
       timeStyle: 'short',
     });
-    const { subject, html } = emailChangedNewAddressTemplate(userName, changedAt);
+    const { subject, html } = emailChangedNewAddressTemplate(
+      userName,
+      changedAt,
+    );
     await this.send(to, subject, html);
     this.logger.log('Email changed (new address) confirmation dispatched', {
       to,
