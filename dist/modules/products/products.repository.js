@@ -45,11 +45,21 @@ let ProductsRepository = class ProductsRepository {
     async findPaginated(page, limit, filters) {
         const qb = this.buildFilterQuery(filters);
         qb.leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0');
-        if (filters.priceSort) {
-            qb.orderBy('product.basePrice', filters.priceSort.toUpperCase());
-        }
-        else {
-            qb.orderBy('product.createdAt', 'DESC');
+        const sortBy = filters.sortBy ?? 'newest';
+        const order = (filters.order ?? 'desc').toUpperCase();
+        switch (sortBy) {
+            case 'price':
+                qb.orderBy('product.biddingStartPrice', order);
+                qb.addOrderBy('product.createdAt', 'DESC');
+                break;
+            case 'endingSoon':
+                qb.orderBy('product.biddingEndsAt', 'ASC', 'NULLS LAST');
+                qb.addOrderBy('product.createdAt', 'DESC');
+                break;
+            case 'newest':
+            default:
+                qb.orderBy('product.createdAt', 'DESC');
+                break;
         }
         return qb
             .skip((page - 1) * limit)
@@ -157,12 +167,12 @@ let ProductsRepository = class ProductsRepository {
             qb.andWhere('(LOWER(product.title) LIKE :kw OR LOWER(product.description) LIKE :kw)', { kw: `%${filters.keyword.toLowerCase()}%` });
         }
         if (filters.minPrice !== undefined) {
-            qb.andWhere('product.basePrice >= :minPrice', {
+            qb.andWhere('product.biddingStartPrice >= :minPrice', {
                 minPrice: filters.minPrice,
             });
         }
         if (filters.maxPrice !== undefined) {
-            qb.andWhere('product.basePrice <= :maxPrice', {
+            qb.andWhere('product.biddingStartPrice <= :maxPrice', {
                 maxPrice: filters.maxPrice,
             });
         }

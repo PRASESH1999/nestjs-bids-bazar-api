@@ -13,7 +13,8 @@ export interface ProductFilters {
     statuses?: ProductStatus[];
     minPrice?: number;
     maxPrice?: number;
-    priceSort?: 'asc' | 'desc';
+    sortBy?: 'price' | 'endingSoon' | 'newest';
+    order?: 'asc' | 'desc';
 }
 export declare class ProductsRepository {
     private readonly dataSource;

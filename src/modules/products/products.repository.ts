@@ -19,7 +19,8 @@ export interface ProductFilters {
   statuses?: ProductStatus[];
   minPrice?: number;
   maxPrice?: number;
-  priceSort?: 'asc' | 'desc';
+  sortBy?: 'price' | 'endingSoon' | 'newest';
+  order?: 'asc' | 'desc';
 }
 
 @Injectable()
@@ -65,13 +66,25 @@ export class ProductsRepository {
 
     qb.leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0');
 
-    if (filters.priceSort) {
-      qb.orderBy(
-        'product.basePrice',
-        filters.priceSort.toUpperCase() as 'ASC' | 'DESC',
-      );
-    } else {
-      qb.orderBy('product.createdAt', 'DESC');
+    const sortBy = filters.sortBy ?? 'newest';
+    const order = (filters.order ?? 'desc').toUpperCase() as 'ASC' | 'DESC';
+
+    switch (sortBy) {
+      case 'price':
+        qb.orderBy('product.biddingStartPrice', order);
+        qb.addOrderBy('product.createdAt', 'DESC');
+        break;
+      case 'endingSoon':
+        // biddingEndsAt is NULL for PENDING products (no bids yet). Postgres
+        // sorts NULLs first on ASC by default, which would float not-yet-started
+        // auctions to the top — force NULLS LAST so soonest-ending shows first.
+        qb.orderBy('product.biddingEndsAt', 'ASC', 'NULLS LAST');
+        qb.addOrderBy('product.createdAt', 'DESC');
+        break;
+      case 'newest':
+      default:
+        qb.orderBy('product.createdAt', 'DESC');
+        break;
     }
 
     return qb
@@ -238,13 +251,13 @@ export class ProductsRepository {
     }
 
     if (filters.minPrice !== undefined) {
-      qb.andWhere('product.basePrice >= :minPrice', {
+      qb.andWhere('product.biddingStartPrice >= :minPrice', {
         minPrice: filters.minPrice,
       });
     }
 
     if (filters.maxPrice !== undefined) {
-      qb.andWhere('product.basePrice <= :maxPrice', {
+      qb.andWhere('product.biddingStartPrice <= :maxPrice', {
         maxPrice: filters.maxPrice,
       });
     }

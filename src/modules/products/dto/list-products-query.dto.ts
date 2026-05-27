@@ -1,6 +1,5 @@
 import {
   IsEnum,
-  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,6 +10,17 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 import { PaginationDto } from '@common/dto/pagination.dto';
+
+export enum ProductSortBy {
+  PRICE = 'price',
+  ENDING_SOON = 'endingSoon',
+  NEWEST = 'newest',
+}
+
+export enum ProductSortOrder {
+  ASC = 'asc',
+  DESC = 'desc',
+}
 
 export class ListProductsQueryDto extends PaginationDto {
   @ApiPropertyOptional()
@@ -36,7 +46,7 @@ export class ListProductsQueryDto extends PaginationDto {
   keyword?: string;
 
   @ApiPropertyOptional({
-    description: 'Minimum base price (inclusive)',
+    description: 'Minimum bidding start price (inclusive)',
     minimum: 0,
   })
   @Type(() => Number)
@@ -46,7 +56,7 @@ export class ListProductsQueryDto extends PaginationDto {
   minPrice?: number;
 
   @ApiPropertyOptional({
-    description: 'Maximum base price (inclusive)',
+    description: 'Maximum bidding start price (inclusive)',
     minimum: 0,
   })
   @Type(() => Number)
@@ -56,10 +66,22 @@ export class ListProductsQueryDto extends PaginationDto {
   maxPrice?: number;
 
   @ApiPropertyOptional({
-    description: 'Sort by base price',
-    enum: ['asc', 'desc'],
+    description:
+      'Sort field. `newest` (default) → createdAt DESC; `price` → biddingStartPrice (use `order`); `endingSoon` → soonest-ending first (NULLS LAST; `order` ignored).',
+    enum: ProductSortBy,
+    default: ProductSortBy.NEWEST,
   })
-  @IsIn(['asc', 'desc'])
+  @IsEnum(ProductSortBy)
   @IsOptional()
-  priceSort?: 'asc' | 'desc';
+  sortBy?: ProductSortBy = ProductSortBy.NEWEST;
+
+  @ApiPropertyOptional({
+    description:
+      'Sort direction. Applied to `sortBy=price`; ignored for `endingSoon` and `newest`.',
+    enum: ProductSortOrder,
+    default: ProductSortOrder.DESC,
+  })
+  @IsEnum(ProductSortOrder)
+  @IsOptional()
+  order?: ProductSortOrder = ProductSortOrder.DESC;
 }

@@ -143,9 +143,20 @@ OWNER_EDITABLE_STATUSES   = [DRAFT, REJECTED]
 - Products do not auto-expire (current scope).
 
 ## Search & Filters (current scope)
-- Filter by: `categoryId`, `subcategoryId`, `condition`, `keyword` (matches
-  `title` and `description`, case-insensitive).
-- Sort by: newest first (`createdAt DESC`) — default and only option.
+- Filter by:
+  - `categoryId`, `subcategoryId`
+  - `condition`
+  - `keyword` (matches `title` and `description`, case-insensitive)
+  - `minPrice` / `maxPrice` — inclusive range, applied against
+    `biddingStartPrice` (the buyer-facing entry price, not the seller's
+    pre-margin `basePrice`).
+- Sort params follow Rule 2 (`?sortBy=...&order=asc|desc`):
+  - `sortBy=newest` *(default)* — `createdAt DESC`. `order` ignored.
+  - `sortBy=price` — orders by `biddingStartPrice` in the requested `order`
+    (default `desc`). Tiebreaker `createdAt DESC` for stable pagination.
+  - `sortBy=endingSoon` — soonest-ending first: `biddingEndsAt ASC NULLS LAST`
+    (NULLS LAST ensures PENDING products without a started auction do not
+    float to the top). `order` is ignored — soonest-ending is always first.
 
 ## Endpoint Access Matrix
 
