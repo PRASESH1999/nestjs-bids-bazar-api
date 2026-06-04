@@ -5,4 +5,7 @@ export declare class AdminUsersController {
     resetNameChange(id: string): Promise<{
         success: boolean;
     }>;
+    resetUsernameChange(id: string): Promise<{
+        success: boolean;
+    }>;
 }

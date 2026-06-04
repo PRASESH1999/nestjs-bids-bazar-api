@@ -13,11 +13,13 @@ export interface PendingEmailChangeSummary {
 export interface OwnProfileResponse {
     id: string;
     name: string;
+    username: string;
     email: string;
     role: Role;
     isActive: boolean;
     isEmailVerified: boolean;
     nameChangedAt: Date | null;
+    usernameChangedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
     kyc: KycSummary | null;

@@ -29,6 +29,26 @@ let UsersRepository = class UsersRepository {
     async findByEmailIncludingDeleted(email) {
         return this.repo.findOne({ where: { email }, withDeleted: true });
     }
+    async findByUsername(username, excludeUserId) {
+        const qb = this.repo
+            .createQueryBuilder('user')
+            .where('LOWER(user.username) = :username', {
+            username: username.trim().toLowerCase(),
+        });
+        if (excludeUserId) {
+            qb.andWhere('user.id != :excludeUserId', { excludeUserId });
+        }
+        return qb.getOne();
+    }
+    async findByUsernameIncludingDeleted(username) {
+        return this.repo
+            .createQueryBuilder('user')
+            .withDeleted()
+            .where('LOWER(user.username) = :username', {
+            username: username.trim().toLowerCase(),
+        })
+            .getOne();
+    }
     async findById(id) {
         return this.repo.findOneBy({ id });
     }

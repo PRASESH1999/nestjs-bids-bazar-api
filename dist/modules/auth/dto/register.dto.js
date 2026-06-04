@@ -12,8 +12,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RegisterDto = void 0;
 const class_validator_1 = require("class-validator");
 const swagger_1 = require("@nestjs/swagger");
+const username_validator_1 = require("../../users/username.validator");
 class RegisterDto {
     name;
+    username;
     email;
     password;
 }
@@ -24,6 +26,16 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "name", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({
+        example: 'john_doe',
+        description: 'Unique public username (3–30 chars; lowercase letters, digits, . _ -). Shown to other users instead of your name.',
+    }),
+    (0, class_validator_1.IsNotEmpty)(),
+    (0, class_validator_1.IsString)(),
+    (0, username_validator_1.IsValidUsername)(),
+    __metadata("design:type", String)
+], RegisterDto.prototype, "username", void 0);
 __decorate([
     (0, swagger_1.ApiProperty)({
         example: 'john@example.com',

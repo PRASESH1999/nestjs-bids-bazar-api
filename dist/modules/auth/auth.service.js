@@ -128,11 +128,20 @@ let AuthService = AuthService_1 = class AuthService {
             }
             throw new common_1.ConflictException('User with this email already exists');
         }
+        const existingUsername = await this.usersService.findByUsernameIncludingDeleted(data.username);
+        if (existingUsername) {
+            throw new common_1.ConflictException({
+                statusCode: 409,
+                code: 'USERNAME_TAKEN',
+                message: 'This username is already taken.',
+            });
+        }
         const { password, ...rest } = data;
         const hashedPassword = await bcrypt.hash(password, 12);
         const user = await this.usersService.create({
             ...rest,
             email,
+            username: data.username.trim(),
             password: hashedPassword,
             role: role_enum_1.Role.USER,
         });

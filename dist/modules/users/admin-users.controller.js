@@ -29,6 +29,10 @@ let AdminUsersController = class AdminUsersController {
         await this.usersService.resetNameChangeQuota(id);
         return { success: true };
     }
+    async resetUsernameChange(id) {
+        await this.usersService.resetUsernameChangeQuota(id);
+        return { success: true };
+    }
 };
 exports.AdminUsersController = AdminUsersController;
 __decorate([
@@ -51,6 +55,26 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AdminUsersController.prototype, "resetNameChange", null);
+__decorate([
+    (0, common_1.Post)('users/:id/reset-username-change'),
+    (0, swagger_1.ApiOperation)({
+        summary: "Reset a user's one-time username-change quota (SuperAdmin only)",
+    }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Username-change quota reset. The user can change their username once more.',
+        ...api_responses_1.SuccessResponse,
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R404),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.USERNAME_CHANGE_RESET),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], AdminUsersController.prototype, "resetUsernameChange", null);
 exports.AdminUsersController = AdminUsersController = __decorate([
     (0, swagger_1.ApiTags)('admin'),
     (0, swagger_1.ApiBearerAuth)(),

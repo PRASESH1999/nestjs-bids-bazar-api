@@ -108,11 +108,24 @@ export class AuthService {
       throw new ConflictException('User with this email already exists');
     }
 
+    // Parallel username-duplicate check (case-insensitive, incl. soft-deleted
+    // rows since the DB unique constraint covers them too).
+    const existingUsername =
+      await this.usersService.findByUsernameIncludingDeleted(data.username);
+    if (existingUsername) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'USERNAME_TAKEN',
+        message: 'This username is already taken.',
+      });
+    }
+
     const { password, ...rest } = data;
     const hashedPassword = await bcrypt.hash(password, 12);
     const user = await this.usersService.create({
       ...rest,
       email,
+      username: data.username.trim(), // store as-typed, sans surrounding whitespace
       password: hashedPassword,
       role: Role.USER, // Force USER role for public registration
     });

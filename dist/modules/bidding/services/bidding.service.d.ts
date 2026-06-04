@@ -19,7 +19,7 @@ export declare class BiddingService {
     placeBid(userId: string, productId: string, dto: PlaceBidDto): Promise<Bid>;
     getBidsForProduct(productId: string, viewerType: 'authenticated' | 'admin'): Promise<BidListItemDto[] | BidListItemAdminDto[]>;
     getTopBiddersForProduct(productId: string): Promise<Array<{
-        name: string;
+        username: string;
         highestBid: number;
     }>>;
     getMyBids(userId: string, query: PaginationDto): Promise<PaginatedResult<Bid>>;

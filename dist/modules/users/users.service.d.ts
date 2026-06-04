@@ -8,6 +8,11 @@ import type { QueryRunner } from 'typeorm';
 import { DataSource } from 'typeorm';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import type { OwnProfileResponse } from './interfaces/own-profile.interface';
+import { UsernameValidationError } from './username.validator';
+export interface UsernameAvailabilityResult {
+    available: boolean;
+    reason?: UsernameValidationError | 'TAKEN';
+}
 export declare class UsersService {
     private readonly usersRepository;
     private readonly dataSource;
@@ -21,6 +26,8 @@ export declare class UsersService {
     findByEmail(email: string): Promise<User | null>;
     findByEmailIncludingDeleted(email: string): Promise<User | null>;
     findById(id: string): Promise<User | null>;
+    findByUsername(username: string, excludeUserId?: string): Promise<User | null>;
+    findByUsernameIncludingDeleted(username: string): Promise<User | null>;
     updateUser(id: string, data: Partial<User>): Promise<User>;
     suspendUser(id: string): Promise<User>;
     deleteUser(id: string): Promise<void>;
@@ -29,6 +36,9 @@ export declare class UsersService {
     changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void>;
     getOwnProfile(userId: string): Promise<OwnProfileResponse>;
     updateSelfName(userId: string, newName: string): Promise<void>;
+    checkUsernameAvailability(username: string): Promise<UsernameAvailabilityResult>;
+    updateSelfUsername(userId: string, newUsername: string): Promise<void>;
     requestEmailChange(userId: string, newEmail: string, currentPassword: string): Promise<void>;
     resetNameChangeQuota(targetUserId: string): Promise<void>;
+    resetUsernameChangeQuota(targetUserId: string): Promise<void>;
 }

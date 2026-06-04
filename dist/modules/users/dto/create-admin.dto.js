@@ -13,8 +13,10 @@ exports.CreateAdminDto = void 0;
 const class_validator_1 = require("class-validator");
 const swagger_1 = require("@nestjs/swagger");
 const role_enum_1 = require("../../../common/enums/role.enum");
+const username_validator_1 = require("../username.validator");
 class CreateAdminDto {
     name;
+    username;
     email;
     password;
     role;
@@ -26,6 +28,16 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], CreateAdminDto.prototype, "name", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({
+        example: 'admin_jane',
+        description: 'Unique public username (3–30 chars; lowercase letters, digits, . _ -).',
+    }),
+    (0, class_validator_1.IsNotEmpty)(),
+    (0, class_validator_1.IsString)(),
+    (0, username_validator_1.IsValidUsername)(),
+    __metadata("design:type", String)
+], CreateAdminDto.prototype, "username", void 0);
 __decorate([
     (0, swagger_1.ApiProperty)({
         example: 'admin@test.com',

@@ -32,5 +32,6 @@ var Permission;
     Permission["ROLE_ASSIGN"] = "role:assign";
     Permission["SYSTEM_CONFIG"] = "system:config";
     Permission["NAME_CHANGE_RESET"] = "name_change:reset";
+    Permission["USERNAME_CHANGE_RESET"] = "username_change:reset";
 })(Permission || (exports.Permission = Permission = {}));
 //# sourceMappingURL=permission.enum.js.map

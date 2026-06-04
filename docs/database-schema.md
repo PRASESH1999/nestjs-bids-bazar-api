@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-05-20 by agent (User Self-Profile module — nameChangedAt on USER, PendingEmailChange entity added)_
+_Last updated: 2026-06-02 by agent (Username feature — username + usernameChangedAt on USER; public surfaces now expose username instead of name)_
 
 ---
 
@@ -35,6 +35,7 @@ erDiagram
     USER {
         uuid id PK
         string name
+        string username UK
         string email UK
         string password
         enum role
@@ -42,6 +43,7 @@ erDiagram
         boolean isEmailVerified
         string hashedRefreshToken
         timestamp nameChangedAt
+        timestamp usernameChangedAt
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -221,6 +223,8 @@ erDiagram
 - `role` enum values: `SUPERADMIN`, `ADMIN`, `USER`. Default: `USER`.
 - `isActive` soft-disables the account without deletion. Checked on every authenticated request.
 - `nameChangedAt` is `null` until the user exercises their one-time display-name change. Once set it cannot be cleared except by a SUPERADMIN via `POST /admin/users/:id/reset-name-change`.
+- `username` is the public-facing handle (3–30 chars). It is **unique case-insensitively** — uniqueness is enforced on `LOWER(username)` in the service layer, backed by a column-level `unique` constraint. Stored as-typed for display; all lookups/comparisons are lowercased. `name` is private (emails, admin views, own profile only).
+- `usernameChangedAt` mirrors `nameChangedAt` semantics: `null` means the one-time username-change quota is available. Once set it cannot be cleared except by a SUPERADMIN via `POST /admin/users/:id/reset-username-change`.
 - `deletedAt` enables TypeORM soft-delete via `@DeleteDateColumn`. Queries exclude soft-deleted rows by default.
 
 ### EMAILVERIFICATIONTOKEN

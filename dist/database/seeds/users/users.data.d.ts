@@ -12,6 +12,7 @@ export interface SeedUser {
     id: string;
     email: string;
     name: string;
+    username: string;
     role: Role;
     isEmailVerified: boolean;
 }

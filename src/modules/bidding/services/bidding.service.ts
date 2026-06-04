@@ -279,7 +279,7 @@ export class BiddingService {
         id: bid.id,
         amount: Number(bid.amount),
         placedAt: bid.placedAt.toISOString(),
-        bidderName: bid.bidder?.name ?? '',
+        bidderUsername: bid.bidder?.username ?? '',
       }),
     );
   }
@@ -288,28 +288,28 @@ export class BiddingService {
 
   /**
    * Returns up to 5 distinct bidders for the product, ranked by each bidder's
-   * highest bid amount (DESC). Bidder display name is sourced from User.name —
-   * change the SELECT alias below in one place to swap in a future username field.
+   * highest bid amount (DESC). Bidder identity is the public-facing
+   * User.username — name is private and never exposed to other users.
    */
   async getTopBiddersForProduct(
     productId: string,
-  ): Promise<Array<{ name: string; highestBid: number }>> {
+  ): Promise<Array<{ username: string; highestBid: number }>> {
     const rows = await this.dataSource
       .getRepository(Bid)
       .createQueryBuilder('bid')
       .innerJoin('bid.bidder', 'bidder')
       .select('bid.bidderId', 'bidderId')
       .addSelect('MAX(bid.amount)', 'highestBid')
-      .addSelect('bidder.name', 'name')
+      .addSelect('bidder.username', 'username')
       .where('bid.productId = :productId', { productId })
       .groupBy('bid.bidderId')
-      .addGroupBy('bidder.name')
+      .addGroupBy('bidder.username')
       .orderBy('MAX(bid.amount)', 'DESC')
       .limit(5)
-      .getRawMany<{ bidderId: string; highestBid: string; name: string }>();
+      .getRawMany<{ bidderId: string; highestBid: string; username: string }>();
 
     return rows.map((row) => ({
-      name: row.name,
+      username: row.username,
       highestBid: Number(row.highestBid),
     }));
   }

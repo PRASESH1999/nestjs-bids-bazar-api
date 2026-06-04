@@ -37,7 +37,7 @@ export type ProductResponse = Omit<Product, 'images'> & {
   images: ProductImageResponse[];
 };
 
-export type TopBidder = { name: string; highestBid: number };
+export type TopBidder = { username: string; highestBid: number };
 
 export type ProductDetailResponse = ProductResponse & {
   topBidders: TopBidder[];

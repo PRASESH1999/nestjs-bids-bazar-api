@@ -49,4 +49,24 @@ export class AdminUsersController {
     await this.usersService.resetNameChangeQuota(id);
     return { success: true };
   }
+
+  @Post('users/:id/reset-username-change')
+  @ApiOperation({
+    summary: "Reset a user's one-time username-change quota (SuperAdmin only)",
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Username-change quota reset. The user can change their username once more.',
+    ...SuccessResponse,
+  })
+  @ApiResponse(R401)
+  @ApiResponse(R403)
+  @ApiResponse(R404)
+  @RequirePermissions(Permission.USERNAME_CHANGE_RESET)
+  @HttpCode(HttpStatus.OK)
+  async resetUsernameChange(@Param('id') id: string) {
+    await this.usersService.resetUsernameChangeQuota(id);
+    return { success: true };
+  }
 }

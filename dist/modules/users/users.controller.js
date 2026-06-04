@@ -13,6 +13,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersController = void 0;
+const public_decorator_1 = require("../../common/decorators/public.decorator");
 const require_permissions_decorator_1 = require("../../common/decorators/require-permissions.decorator");
 const pagination_dto_1 = require("../../common/dto/pagination.dto");
 const permission_enum_1 = require("../../common/enums/permission.enum");
@@ -27,6 +28,7 @@ const change_email_dto_1 = require("./dto/change-email.dto");
 const change_password_dto_1 = require("./dto/change-password.dto");
 const create_admin_dto_1 = require("./dto/create-admin.dto");
 const update_self_dto_1 = require("./dto/update-self.dto");
+const update_username_dto_1 = require("./dto/update-username.dto");
 const users_service_1 = require("./users.service");
 let UsersController = class UsersController {
     usersService;
@@ -38,12 +40,19 @@ let UsersController = class UsersController {
         const { password: _, hashedRefreshToken: __, ...result } = user;
         return result;
     }
+    async checkUsernameAvailability(username) {
+        return this.usersService.checkUsernameAvailability(username);
+    }
     async getProfile(req) {
         return this.usersService.getOwnProfile(req.user.sub);
     }
     async updateProfile(req, dto) {
         await this.usersService.updateSelfName(req.user.sub, dto.name);
         return { message: 'Display name updated successfully.' };
+    }
+    async updateUsername(req, dto) {
+        await this.usersService.updateSelfUsername(req.user.sub, dto.username);
+        return { message: 'Username updated successfully.' };
     }
     async requestEmailChange(req, dto) {
         await this.usersService.requestEmailChange(req.user.sub, dto.newEmail, dto.currentPassword);
@@ -110,6 +119,37 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "createAdmin", null);
 __decorate([
+    (0, common_1.Get)('username-available'),
+    (0, public_decorator_1.Public)(),
+    (0, throttler_1.Throttle)({ default: { limit: 30, ttl: 60000 } }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Check whether a username is available (public)',
+        description: 'Validates format and reserved-list rules, then performs a case-insensitive ' +
+            'existence check. Always returns 200 — it is an availability query, not a ' +
+            'validation endpoint that throws. Does NOT reserve the username.',
+    }),
+    (0, swagger_1.ApiQuery)({ name: 'username', type: String, required: true }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Availability result.',
+        schema: {
+            type: 'object',
+            properties: {
+                available: { type: 'boolean', example: false },
+                reason: {
+                    type: 'string',
+                    enum: ['INVALID_FORMAT', 'RESERVED', 'TAKEN'],
+                    example: 'TAKEN',
+                },
+            },
+        },
+    }),
+    __param(0, (0, common_1.Query)('username')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "checkUsernameAvailability", null);
+__decorate([
     (0, common_1.Get)('me'),
     (0, swagger_1.ApiOperation)({
         summary: 'Get own profile with KYC summary and pending email-change info',
@@ -152,6 +192,34 @@ __decorate([
     __metadata("design:paramtypes", [Object, update_self_dto_1.UpdateSelfDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "updateProfile", null);
+__decorate([
+    (0, common_1.Patch)('me/username'),
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 3600000 } }),
+    (0, swagger_1.ApiOperation)({ summary: 'Change username (one-time only)' }),
+    (0, swagger_1.ApiResponse)({
+        status: 200,
+        description: 'Username updated. This can only be done once.',
+        schema: {
+            type: 'object',
+            properties: {
+                message: {
+                    type: 'string',
+                    example: 'Username updated successfully.',
+                },
+            },
+        },
+    }),
+    (0, swagger_1.ApiResponse)(api_responses_1.R400),
+    (0, swagger_1.ApiResponse)(api_responses_1.R401),
+    (0, swagger_1.ApiResponse)(api_responses_1.R403),
+    (0, swagger_1.ApiResponse)(api_responses_1.R409),
+    (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PROFILE_EDIT),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, update_username_dto_1.UpdateUsernameDto]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "updateUsername", null);
 __decorate([
     (0, common_1.Patch)('me/email'),
     (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 3600000 } }),

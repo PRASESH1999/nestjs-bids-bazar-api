@@ -7,12 +7,23 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@common/enums/role.enum';
+import { IsValidUsername } from '../username.validator';
 
 export class CreateAdminDto {
   @ApiProperty({ example: 'Admin User', description: 'The name of the admin' })
   @IsNotEmpty()
   @IsString()
   name: string;
+
+  @ApiProperty({
+    example: 'admin_jane',
+    description:
+      'Unique public username (3–30 chars; lowercase letters, digits, . _ -).',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @IsValidUsername()
+  username: string;
 
   @ApiProperty({
     example: 'admin@test.com',

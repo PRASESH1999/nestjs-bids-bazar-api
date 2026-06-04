@@ -67,6 +67,7 @@ const auction_abandoned_template_1 = require("./templates/auction-abandoned.temp
 const password_reset_template_1 = require("./templates/password-reset.template");
 const password_changed_confirmation_template_1 = require("./templates/password-changed-confirmation.template");
 const name_changed_template_1 = require("./templates/name-changed.template");
+const username_changed_template_1 = require("./templates/username-changed.template");
 const email_change_verification_template_1 = require("./templates/email-change-verification.template");
 const email_changed_old_address_template_1 = require("./templates/email-changed-old-address.template");
 const email_changed_new_address_template_1 = require("./templates/email-changed-new-address.template");
@@ -267,6 +268,16 @@ let MailService = MailService_1 = class MailService {
         const { subject, html } = (0, name_changed_template_1.nameChangedTemplate)(userName, changedAt);
         await this.send(to, subject, html);
         this.logger.log('Name changed confirmation email dispatched', { to });
+    }
+    async sendUsernameChangedConfirmation(to, newUsername) {
+        const changedAt = new Date().toLocaleString('en-US', {
+            timeZone: 'Asia/Kathmandu',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        });
+        const { subject, html } = (0, username_changed_template_1.usernameChangedTemplate)(newUsername, changedAt);
+        await this.send(to, subject, html);
+        this.logger.log('Username changed confirmation email dispatched', { to });
     }
     async sendEmailChangeVerification(to, userName, rawToken) {
         const frontendUrl = this.configService.getOrThrow('APP_FRONTEND_URL');

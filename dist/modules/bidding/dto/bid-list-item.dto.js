@@ -5,7 +5,7 @@ class BidListItemDto {
     id;
     amount;
     placedAt;
-    bidderName;
+    bidderUsername;
 }
 exports.BidListItemDto = BidListItemDto;
 //# sourceMappingURL=bid-list-item.dto.js.map

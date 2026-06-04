@@ -53,6 +53,7 @@ async function seedUsers(dataSource) {
             email: user.email,
             password: hashedPassword,
             name: user.name,
+            username: user.username,
             role: user.role,
             isActive: true,
         }));

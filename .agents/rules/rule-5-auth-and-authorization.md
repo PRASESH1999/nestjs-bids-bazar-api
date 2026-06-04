@@ -80,6 +80,7 @@ enum Permission {
   ADMIN_MANAGE      = 'admin:manage',
   ROLE_ASSIGN       = 'role:assign',
   SYSTEM_CONFIG     = 'system:config',
+  USERNAME_CHANGE_RESET = 'username_change:reset',
 }
 
 ## Role → Permission Mapping
@@ -89,6 +90,9 @@ enum Permission {
   USER       → [ITEM_BUY, ITEM_SELL, ITEM_VIEW, ITEM_MANAGE_OWN, PROFILE_VIEW, PROFILE_EDIT]
   ADMIN      → [USER_VIEW, USER_MANAGE, CONTENT_MODERATE, ITEM_VIEW, PROFILE_VIEW]
   SUPERADMIN → All permissions (wildcard — bypass all permission checks)
+
+- `USERNAME_CHANGE_RESET` is **SUPERADMIN-only** (mirrors `NAME_CHANGE_RESET`). It is
+  never granted to USER or ADMIN; SUPERADMIN holds it via the wildcard mapping above.
 
 ## Guards & Decorators
 - Implement three guards in common/guards/:
@@ -106,12 +110,15 @@ enum Permission {
 | POST /auth/login                | @Public()           | None           |
 | POST /auth/refresh              | @Public()           | None           |
 | POST /auth/logout               | Authenticated       | None           |
+| GET  /users/username-available  | @Public()           | None           |
 | GET  /users/me                  | PROFILE_VIEW        | None           |
 | PATCH /users/me                 | PROFILE_EDIT        | None           |
+| PATCH /users/me/username        | PROFILE_EDIT        | None           |
 | GET  /users                     | USER_VIEW           | None           |
 | PATCH /users/:id/suspend        | USER_MANAGE         | HierarchyGuard |
 | DELETE /users/:id               | USER_MANAGE         | HierarchyGuard |
 | POST /users/:id/role            | ROLE_ASSIGN         | HierarchyGuard |
+| POST /admin/users/:id/reset-username-change | USERNAME_CHANGE_RESET | None |
 
 ## Ownership Rules
 - Enforce ownership in the service layer — users can only edit their own profile.
@@ -211,6 +218,10 @@ Added to Permission enum (common/enums/permission.enum.ts):
 ## Email Verification
 
 ### Flow
+0. Registration collects `name`, `username`, `email`, and `password`. `username` is
+   **required from day one** — a unique, user-chosen public handle validated against the
+   shared username rules (see Rule 15) and checked for case-insensitive uniqueness
+   (`USERNAME_TAKEN` on conflict, mirroring the email-duplicate check).
 1. User registers → account created with isEmailVerified: false
 2. Verification email sent automatically on registration
 3. JWT is NOT issued on registration — user must verify email first

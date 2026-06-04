@@ -7,7 +7,7 @@ import { Bid } from '../entities/bid.entity';
 import { BiddingService } from './bidding.service';
 
 export interface RecentBidItem {
-  name: string;
+  username: string;
   amount: number;
   placedAt: string;
 }
@@ -19,7 +19,7 @@ export interface AuctionUpdatePayload {
   currentHighestBid: number | null;
   currentHighestBidderId: string | null;
   biddingEndsAt: string | null;
-  topBidders: Array<{ name: string; highestBid: number }>;
+  topBidders: Array<{ username: string; highestBid: number }>;
   recentBids: RecentBidItem[];
 }
 
@@ -117,24 +117,24 @@ export class AuctionBroadcastService {
    * Last 5 bids for the battle feed, ordered newest-first. Repeats of the
    * same bidder are expected — this is a chronological feed, not a leaderboard.
    *
-   * Bidder display name is sourced from User.name. Swap the SELECT alias to
-   * `bidder.username` in one place if a future username field replaces name.
+   * Bidder identity is the public-facing User.username — name is private and
+   * never exposed to other users.
    */
   private async fetchRecentBids(productId: string): Promise<RecentBidItem[]> {
     const rows = await this.dataSource
       .getRepository(Bid)
       .createQueryBuilder('bid')
       .innerJoin('bid.bidder', 'bidder')
-      .select('bidder.name', 'name')
+      .select('bidder.username', 'username')
       .addSelect('bid.amount', 'amount')
       .addSelect('bid.placedAt', 'placedAt')
       .where('bid.productId = :productId', { productId })
       .orderBy('bid.placedAt', 'DESC')
       .limit(5)
-      .getRawMany<{ name: string; amount: string; placedAt: Date }>();
+      .getRawMany<{ username: string; amount: string; placedAt: Date }>();
 
     return rows.map((row) => ({
-      name: row.name,
+      username: row.username,
       amount: Number(row.amount),
       placedAt: new Date(row.placedAt).toISOString(),
     }));

@@ -63,7 +63,7 @@ let AuctionBroadcastService = AuctionBroadcastService_1 = class AuctionBroadcast
             .getRepository(bid_entity_1.Bid)
             .createQueryBuilder('bid')
             .innerJoin('bid.bidder', 'bidder')
-            .select('bidder.name', 'name')
+            .select('bidder.username', 'username')
             .addSelect('bid.amount', 'amount')
             .addSelect('bid.placedAt', 'placedAt')
             .where('bid.productId = :productId', { productId })
@@ -71,7 +71,7 @@ let AuctionBroadcastService = AuctionBroadcastService_1 = class AuctionBroadcast
             .limit(5)
             .getRawMany();
         return rows.map((row) => ({
-            name: row.name,
+            username: row.username,
             amount: Number(row.amount),
             placedAt: new Date(row.placedAt).toISOString(),
         }));

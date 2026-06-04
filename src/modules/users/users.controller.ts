@@ -1,3 +1,4 @@
+import { Public } from '@common/decorators/public.decorator';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
 import { PaginationDto } from '@common/dto/pagination.dto';
 import { Permission } from '@common/enums/permission.enum';
@@ -28,6 +29,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -37,6 +39,7 @@ import { ChangeEmailDto } from './dto/change-email.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateSelfDto } from './dto/update-self.dto';
+import { UpdateUsernameDto } from './dto/update-username.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -64,6 +67,36 @@ export class UsersController {
     const user = await this.usersService.createAdmin(createAdminDto);
     const { password: _, hashedRefreshToken: __, ...result } = user;
     return result;
+  }
+
+  @Get('username-available')
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30/min per IP
+  @ApiOperation({
+    summary: 'Check whether a username is available (public)',
+    description:
+      'Validates format and reserved-list rules, then performs a case-insensitive ' +
+      'existence check. Always returns 200 — it is an availability query, not a ' +
+      'validation endpoint that throws. Does NOT reserve the username.',
+  })
+  @ApiQuery({ name: 'username', type: String, required: true })
+  @ApiResponse({
+    status: 200,
+    description: 'Availability result.',
+    schema: {
+      type: 'object',
+      properties: {
+        available: { type: 'boolean', example: false },
+        reason: {
+          type: 'string',
+          enum: ['INVALID_FORMAT', 'RESERVED', 'TAKEN'],
+          example: 'TAKEN',
+        },
+      },
+    },
+  })
+  async checkUsernameAvailability(@Query('username') username: string) {
+    return this.usersService.checkUsernameAvailability(username);
   }
 
   @Get('me')
@@ -107,6 +140,35 @@ export class UsersController {
   ) {
     await this.usersService.updateSelfName(req.user.sub, dto.name);
     return { message: 'Display name updated successfully.' };
+  }
+
+  @Patch('me/username')
+  @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
+  @ApiOperation({ summary: 'Change username (one-time only)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Username updated. This can only be done once.',
+    schema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'Username updated successfully.',
+        },
+      },
+    },
+  })
+  @ApiResponse(R400)
+  @ApiResponse(R401)
+  @ApiResponse(R403)
+  @ApiResponse(R409)
+  @RequirePermissions(Permission.PROFILE_EDIT)
+  async updateUsername(
+    @Request() req: RequestWithUser,
+    @Body() dto: UpdateUsernameDto,
+  ) {
+    await this.usersService.updateSelfUsername(req.user.sub, dto.username);
+    return { message: 'Username updated successfully.' };
   }
 
   @Patch('me/email')

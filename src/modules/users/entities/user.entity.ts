@@ -7,6 +7,12 @@ export class User extends BaseEntity {
   @Column({ type: 'varchar', length: 255 })
   name: string;
 
+  // Public-facing handle. Stored as-typed for display; uniqueness is enforced
+  // case-insensitively in the service layer (LOWER(username) lookups), backed by
+  // the case-sensitive DB unique constraint declared here. See username.validator.ts.
+  @Column({ type: 'varchar', length: 30, unique: true })
+  username: string;
+
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
@@ -31,4 +37,7 @@ export class User extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   nameChangedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  usernameChangedAt: Date | null;
 }

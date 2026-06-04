@@ -17,9 +17,13 @@ Returns an `OwnProfileResponse` object containing:
 
 | Field | Source |
 |---|---|
-| `id`, `name`, `email`, `role`, `isActive`, `isEmailVerified` | `users` table |
+| `id`, `name`, `username`, `email`, `role`, `isActive`, `isEmailVerified` | `users` table |
 | `nameChangedAt` | `users.nameChangedAt` — `null` = quota available |
+| `usernameChangedAt` | `users.usernameChangedAt` — `null` = quota available |
 | `createdAt`, `updatedAt` | `users` table |
+
+> The owner sees BOTH their `name` (private) and `username` (public handle) on their
+> own profile — no privacy concern, it is their own record.
 | `kyc` | Fetched via `dataSource.getRepository(KycVerification)` — `null` if no KYC record |
 | `pendingEmailChange` | Fetched via `dataSource.getRepository(PendingEmailChange)` — `null` if none |
 
@@ -47,6 +51,78 @@ Returns an `OwnProfileResponse` object containing:
 ### Admin override
 - `POST /admin/users/:id/reset-name-change` calls `UsersService.resetNameChangeQuota`, which sets `nameChangedAt = null`.
 - Requires `Permission.NAME_CHANGE_RESET` (SUPERADMIN-only).
+
+---
+
+## 2a. Username — Public Handle (public vs private split)
+
+`username` is the **only** user-identifying field shown to OTHER users. `name` is
+**private** — it appears solely in emails, admin views, and the user's own profile.
+Every public-facing surface (product detail top-bidders, the live SSE auction feed,
+the non-admin bids list) exposes `username`, never `name`. Admin/moderation surfaces
+keep `name` (and email) because real identity is required for moderation.
+
+### Validation rules (single source of truth)
+
+Centralized in `modules/users/username.validator.ts` and reused by registration, the
+availability endpoint, and the change endpoint. Validation runs on the **lowercased**
+input; the value is **stored as-typed** for display but compared lowercase everywhere.
+
+- Length **3–30** characters.
+- Allowed characters: lowercase `a–z`, digits `0–9`, underscore `_`, period `.`, hyphen `-`.
+- Cannot start or end with `.` or `-`.
+- Cannot contain consecutive `..`, `--`, or `__`.
+- Reserved (rejected case-insensitively): `admin`, `superadmin`, `support`, `bidsbazar`,
+  `null`, `system`, `root`, `api`. **Seeds bypass** this list (they write directly via the
+  repository / DataSource — seeded admins may use reserved handles such as `superadmin`).
+- **Uniqueness is case-insensitive** — `RamSharma` and `ramsharma` cannot coexist.
+  Enforced in the service layer via `LOWER(username)` lookups, backed by the column-level
+  `unique` constraint on `users.username` (the case-insensitive uniqueness is implemented
+  via service-layer lowercase lookup, not an expression index).
+
+---
+
+## 2b. PATCH /users/me/username — One-Time Username Change
+
+**Controller:** `UsersController.updateUsername`
+**Service:** `UsersService.updateSelfUsername`
+**DTO:** `UpdateUsernameDto` — `username` only (`@IsString @IsNotEmpty @IsValidUsername`)
+**Permission:** `PROFILE_EDIT`
+**Throttle:** `@Throttle({ default: { limit: 5, ttl: 3600000 } })` (5/hour per IP, matching email change)
+
+### Logic (order matters)
+1. Load user; throw `404 NotFoundException` if missing.
+2. **Same-value guard FIRST** — if `newUsername.trim().toLowerCase()` equals the current
+   username (lowercased), throw `400 BadRequestException`. Placed **before** the quota guard
+   so a no-op attempt never consumes the one-time quota.
+3. Quota: `usernameChangedAt === null` → available; non-null → throw `403 ForbiddenException`
+   (`'Username can only be changed once. Please contact support.'`).
+4. Case-insensitive uniqueness check against OTHER users → throw `409 ConflictException('USERNAME_TAKEN')` if taken.
+5. On success: update `username` (as-typed) and `usernameChangedAt = now` in the same operation.
+
+### Side effects
+- Confirmation email sent via `MailService.sendUsernameChangedConfirmation`.
+- Email failure is caught, logged, and **never re-thrown** (mirrors the name-change pattern).
+
+### Admin override
+- `POST /admin/users/:id/reset-username-change` calls `UsersService.resetUsernameChangeQuota`,
+  which sets `usernameChangedAt = null`.
+- Requires `Permission.USERNAME_CHANGE_RESET` (SUPERADMIN-only).
+
+---
+
+## 2c. GET /users/username-available — Availability Check
+
+**Controller:** `UsersController.checkUsernameAvailability`
+**Service:** `UsersService.checkUsernameAvailability`
+**Decorator:** `@Public()` (no JWT required)
+**Throttle:** `@Throttle({ default: { limit: 30, ttl: 60000 } })` (30/min per IP — the frontend debounce-checks on keystrokes)
+
+- Query param: `?username=foo`.
+- Validates format + reserved list using the shared validator, then performs a
+  case-insensitive existence check. Does **NOT** reserve the username.
+- **Always returns 200** — it is an availability query, never throws on invalid input.
+- Response: `{ available: true }` or `{ available: false, reason: 'INVALID_FORMAT' | 'RESERVED' | 'TAKEN' }`.
 
 ---
 
@@ -119,12 +195,15 @@ Returns an `OwnProfileResponse` object containing:
 
 | Endpoint | Auth | Permission | Who |
 |---|---|---|---|
+| `GET /users/username-available` | Public | — | Anyone (throttled 30/min per IP) |
 | `GET /users/me` | JWT | `PROFILE_VIEW` | USER, ADMIN, SUPERADMIN |
 | `PATCH /users/me` | JWT | `PROFILE_EDIT` | USER |
+| `PATCH /users/me/username` | JWT | `PROFILE_EDIT` | USER |
 | `PATCH /users/me/email` | JWT | `PROFILE_EDIT` | USER |
 | `PATCH /users/me/password` | JWT | `PROFILE_EDIT` | USER |
 | `GET /auth/verify-email-change` | Public | — | Anyone with the link |
 | `POST /admin/users/:id/reset-name-change` | JWT | `NAME_CHANGE_RESET` | SUPERADMIN only |
+| `POST /admin/users/:id/reset-username-change` | JWT | `USERNAME_CHANGE_RESET` | SUPERADMIN only |
 
 ---
 

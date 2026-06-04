@@ -210,7 +210,7 @@ let BiddingService = BiddingService_1 = class BiddingService {
             id: bid.id,
             amount: Number(bid.amount),
             placedAt: bid.placedAt.toISOString(),
-            bidderName: bid.bidder?.name ?? '',
+            bidderUsername: bid.bidder?.username ?? '',
         }));
     }
     async getTopBiddersForProduct(productId) {
@@ -220,15 +220,15 @@ let BiddingService = BiddingService_1 = class BiddingService {
             .innerJoin('bid.bidder', 'bidder')
             .select('bid.bidderId', 'bidderId')
             .addSelect('MAX(bid.amount)', 'highestBid')
-            .addSelect('bidder.name', 'name')
+            .addSelect('bidder.username', 'username')
             .where('bid.productId = :productId', { productId })
             .groupBy('bid.bidderId')
-            .addGroupBy('bidder.name')
+            .addGroupBy('bidder.username')
             .orderBy('MAX(bid.amount)', 'DESC')
             .limit(5)
             .getRawMany();
         return rows.map((row) => ({
-            name: row.name,
+            username: row.username,
             highestBid: Number(row.highestBid),
         }));
     }

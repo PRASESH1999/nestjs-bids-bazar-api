@@ -15,6 +15,7 @@ const base_entity_1 = require("../../../common/entities/base.entity");
 const role_enum_1 = require("../../../common/enums/role.enum");
 let User = class User extends base_entity_1.BaseEntity {
     name;
+    username;
     email;
     password;
     role;
@@ -22,12 +23,17 @@ let User = class User extends base_entity_1.BaseEntity {
     isEmailVerified;
     hashedRefreshToken;
     nameChangedAt;
+    usernameChangedAt;
 };
 exports.User = User;
 __decorate([
     (0, typeorm_1.Column)({ type: 'varchar', length: 255 }),
     __metadata("design:type", String)
 ], User.prototype, "name", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'varchar', length: 30, unique: true }),
+    __metadata("design:type", String)
+], User.prototype, "username", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: 'varchar', length: 255, unique: true }),
     __metadata("design:type", String)
@@ -60,6 +66,10 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true, default: null }),
     __metadata("design:type", Object)
 ], User.prototype, "nameChangedAt", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true, default: null }),
+    __metadata("design:type", Object)
+], User.prototype, "usernameChangedAt", void 0);
 exports.User = User = __decorate([
     (0, typeorm_1.Entity)('users')
 ], User);

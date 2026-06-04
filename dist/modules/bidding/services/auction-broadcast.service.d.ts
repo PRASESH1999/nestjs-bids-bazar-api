@@ -3,7 +3,7 @@ import { Observable } from 'rxjs';
 import type { MessageEvent } from '@nestjs/common';
 import { BiddingService } from './bidding.service';
 export interface RecentBidItem {
-    name: string;
+    username: string;
     amount: number;
     placedAt: string;
 }
@@ -15,7 +15,7 @@ export interface AuctionUpdatePayload {
     currentHighestBidderId: string | null;
     biddingEndsAt: string | null;
     topBidders: Array<{
-        name: string;
+        username: string;
         highestBid: number;
     }>;
     recentBids: RecentBidItem[];

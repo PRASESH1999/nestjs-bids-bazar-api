@@ -54,6 +54,7 @@ const common_1 = require("@nestjs/common");
 const bcrypt = __importStar(require("bcrypt"));
 const crypto = __importStar(require("crypto"));
 const typeorm_1 = require("typeorm");
+const username_validator_1 = require("./username.validator");
 let UsersService = UsersService_1 = class UsersService {
     usersRepository;
     dataSource;
@@ -85,16 +86,26 @@ let UsersService = UsersService_1 = class UsersService {
         return this.usersRepository.saveUser(user);
     }
     async createAdmin(data) {
-        const { password, email, ...rest } = data;
+        const { password, email, username, ...rest } = data;
         const normalizedEmail = email.toLowerCase();
+        const normalizedUsername = username.trim();
         const existing = await this.usersRepository.findByEmail(normalizedEmail);
         if (existing) {
             throw new common_1.ConflictException('User with this email already exists');
+        }
+        const usernameTaken = await this.usersRepository.findByUsernameIncludingDeleted(normalizedUsername);
+        if (usernameTaken) {
+            throw new common_1.ConflictException({
+                statusCode: 409,
+                code: 'USERNAME_TAKEN',
+                message: 'This username is already taken.',
+            });
         }
         const hashedPassword = await bcrypt.hash(password, 12);
         const user = this.usersRepository.createEntity({
             ...rest,
             email: normalizedEmail,
+            username: normalizedUsername,
             password: hashedPassword,
             isActive: true,
         });
@@ -108,6 +119,12 @@ let UsersService = UsersService_1 = class UsersService {
     }
     async findById(id) {
         return this.usersRepository.findById(id);
+    }
+    async findByUsername(username, excludeUserId) {
+        return this.usersRepository.findByUsername(username, excludeUserId);
+    }
+    async findByUsernameIncludingDeleted(username) {
+        return this.usersRepository.findByUsernameIncludingDeleted(username);
     }
     async updateUser(id, data) {
         const user = await this.findById(id);
@@ -211,11 +228,13 @@ let UsersService = UsersService_1 = class UsersService {
         return {
             id: user.id,
             name: user.name,
+            username: user.username,
             email: user.email,
             role: user.role,
             isActive: user.isActive,
             isEmailVerified: user.isEmailVerified,
             nameChangedAt: user.nameChangedAt,
+            usernameChangedAt: user.usernameChangedAt,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt,
             kyc: kycSummary,
@@ -242,6 +261,44 @@ let UsersService = UsersService_1 = class UsersService {
         }
         catch (err) {
             this.logger.error('[updateSelfName] Failed to dispatch name-changed email', err instanceof Error ? err.stack : String(err));
+        }
+    }
+    async checkUsernameAvailability(username) {
+        const formatError = (0, username_validator_1.validateUsernameFormat)(username);
+        if (formatError) {
+            return { available: false, reason: formatError };
+        }
+        const existing = await this.usersRepository.findByUsername(username);
+        if (existing) {
+            return { available: false, reason: 'TAKEN' };
+        }
+        return { available: true };
+    }
+    async updateSelfUsername(userId, newUsername) {
+        const user = await this.findById(userId);
+        if (!user)
+            throw new common_1.NotFoundException('User not found');
+        if (newUsername.trim().toLowerCase() === user.username.trim().toLowerCase()) {
+            throw new common_1.BadRequestException('New username must be different from your current username.');
+        }
+        if (user.usernameChangedAt !== null) {
+            throw new common_1.ForbiddenException('Username can only be changed once. Please contact support.');
+        }
+        const normalizedUsername = newUsername.trim();
+        const taken = await this.usersRepository.findByUsername(normalizedUsername, userId);
+        if (taken) {
+            throw new common_1.ConflictException('USERNAME_TAKEN');
+        }
+        const now = new Date();
+        await this.usersRepository.updateUser(userId, {
+            username: normalizedUsername,
+            usernameChangedAt: now,
+        });
+        try {
+            await this.mailService.sendUsernameChangedConfirmation(user.email, normalizedUsername);
+        }
+        catch (err) {
+            this.logger.error('[updateSelfUsername] Failed to dispatch username-changed email', err instanceof Error ? err.stack : String(err));
         }
     }
     async requestEmailChange(userId, newEmail, currentPassword) {
@@ -281,6 +338,14 @@ let UsersService = UsersService_1 = class UsersService {
             throw new common_1.NotFoundException('User not found');
         await this.usersRepository.updateUser(targetUserId, {
             nameChangedAt: null,
+        });
+    }
+    async resetUsernameChangeQuota(targetUserId) {
+        const user = await this.findById(targetUserId);
+        if (!user)
+            throw new common_1.NotFoundException('User not found');
+        await this.usersRepository.updateUser(targetUserId, {
+            usernameChangedAt: null,
         });
     }
 };
