@@ -232,6 +232,43 @@ let BiddingService = BiddingService_1 = class BiddingService {
             highestBid: Number(row.highestBid),
         }));
     }
+    async getBidCountsForProduct(productId) {
+        const KATHMANDU_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
+        const kathmanduNow = new Date(Date.now() + KATHMANDU_OFFSET_MS);
+        const startOfTodayUtc = new Date(Date.UTC(kathmanduNow.getUTCFullYear(), kathmanduNow.getUTCMonth(), kathmanduNow.getUTCDate()) - KATHMANDU_OFFSET_MS);
+        const row = await this.dataSource
+            .getRepository(bid_entity_1.Bid)
+            .createQueryBuilder('bid')
+            .select('COUNT(*)', 'total')
+            .addSelect('COUNT(*) FILTER (WHERE bid."placedAt" >= :startOfToday)', 'today')
+            .where('bid.productId = :productId', { productId })
+            .setParameter('startOfToday', startOfTodayUtc)
+            .getRawOne();
+        return {
+            totalBids: Number(row?.total ?? 0),
+            newBidsToday: Number(row?.today ?? 0),
+        };
+    }
+    async getWinningBidder(winningBidId) {
+        if (!winningBidId)
+            return null;
+        const row = await this.dataSource
+            .getRepository(bid_entity_1.Bid)
+            .createQueryBuilder('bid')
+            .innerJoin('bid.bidder', 'bidder')
+            .select('bid.bidderId', 'id')
+            .addSelect('bidder.username', 'username')
+            .addSelect('bid.amount', 'winningBid')
+            .where('bid.id = :winningBidId', { winningBidId })
+            .getRawOne();
+        if (!row)
+            return null;
+        return {
+            id: row.id,
+            username: row.username,
+            winningBid: Number(row.winningBid),
+        };
+    }
     async getMyBids(userId, query) {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;

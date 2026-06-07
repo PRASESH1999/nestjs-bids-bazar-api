@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-06-02 by agent (Username feature — username + usernameChangedAt on USER; public surfaces now expose username instead of name)_
+_Last updated: 2026-06-04 by agent (Product engagement — viewCount on PRODUCT; incremented via POST /products/:id/view, excludes owner & admin viewers)_
 
 ---
 
@@ -148,6 +148,7 @@ erDiagram
         uuid currentHighestBidderId
         timestamp biddingStartedAt
         timestamp biddingEndsAt
+        int viewCount
         timestamp submittedAt
         uuid reviewedById
         timestamp reviewedAt
@@ -287,6 +288,7 @@ erDiagram
 - `basePrice` is the user-entered desired price. `biddingStartPrice` is auto-computed as `basePrice * 1.10` and stored so the bidding module never recomputes it.
 - `biddingDurationHours` — countdown duration (hours) after the first bid is placed; configurable per product, default 72.
 - `currentHighestBid`, `currentHighestBidderId`, `biddingStartedAt`, `biddingEndsAt` — null until the first bid is placed.
+- `viewCount` — detail-page view counter (default `0`). Incremented **atomically** (`UPDATE ... SET "viewCount" = "viewCount" + 1`) by `POST /products/:id/view`. Owner and admin (ADMIN/SUPERADMIN) views are excluded, and only `PUBLICLY_VISIBLE_STATUSES` count. No index — current scope has no view-based sort (Rule 13).
 - `winningBidId` — references the `bids.id` of the bid that is currently payment-responsible (set when auction closes to `AWAITING_PAYMENT`) or the bid that led to `SETTLED`. Nullable; plain UUID column, no TypeORM relation.
 - `closedAt` — timestamp when the auction timer expired and the product transitioned to `AWAITING_PAYMENT`.
 - `settledAt` — timestamp when payment was confirmed and the product transitioned to `SETTLED`.

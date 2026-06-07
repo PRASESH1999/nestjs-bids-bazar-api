@@ -67,6 +67,14 @@ export class Product extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   biddingEndsAt: Date | null;
 
+  // ─── Engagement ───────────────────────────────────────────────────────────
+
+  // Incremented atomically by POST /products/:id/view. Owner and admin views
+  // are excluded; only publicly-visible statuses count. No index — there is no
+  // view-based sort in current scope (Rule 13).
+  @Column({ type: 'int', default: 0 })
+  viewCount: number;
+
   // ─── Moderation ───────────────────────────────────────────────────────────
 
   @Column({ type: 'timestamptz', nullable: true })

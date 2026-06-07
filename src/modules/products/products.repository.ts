@@ -53,6 +53,55 @@ export class ProductsRepository {
     return this.productRepo.findOneBy({ id });
   }
 
+  // Atomic single-statement increment — avoids the read-modify-write race a
+  // load → mutate → save would introduce under concurrent views.
+  async incrementViewCount(id: string): Promise<void> {
+    await this.productRepo
+      .createQueryBuilder()
+      .update(Product)
+      .set({ viewCount: () => '"viewCount" + 1' })
+      .where('id = :id', { id })
+      .execute();
+  }
+
+  // Backs the tiered "similar products" fallback. `scope` selects the matching
+  // strategy; the preview image (displayOrder 0) is joined so cards can render.
+  async findSimilar(
+    scope: 'subcategory' | 'category' | 'random',
+    params: {
+      categoryId: string;
+      subcategoryId: string;
+      excludeIds: string[];
+      limit: number;
+    },
+  ): Promise<Product[]> {
+    const { categoryId, subcategoryId, excludeIds, limit } = params;
+
+    const qb = this.productRepo
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0')
+      .where('product.status IN (:...statuses)', {
+        statuses: [ProductStatus.PENDING, ProductStatus.ACTIVE],
+      });
+
+    if (excludeIds.length > 0) {
+      qb.andWhere('product.id NOT IN (:...excludeIds)', { excludeIds });
+    }
+
+    if (scope === 'subcategory') {
+      qb.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
+      qb.orderBy('product.createdAt', 'DESC');
+    } else if (scope === 'category') {
+      qb.andWhere('product.categoryId = :categoryId', { categoryId });
+      qb.orderBy('product.createdAt', 'DESC');
+    } else {
+      // Tiny result set (≤ 5 rows) — RANDOM() ordering cost is irrelevant here.
+      qb.orderBy('RANDOM()');
+    }
+
+    return qb.take(limit).getMany();
+  }
+
   async deleteProduct(product: Product): Promise<void> {
     await this.productRepo.softRemove(product);
   }

@@ -19,6 +19,7 @@ export declare class Product extends BaseEntity {
     currentHighestBidderId: string | null;
     biddingStartedAt: Date | null;
     biddingEndsAt: Date | null;
+    viewCount: number;
     submittedAt: Date | null;
     reviewedById: string | null;
     reviewedAt: Date | null;

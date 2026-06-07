@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Patch,
@@ -16,6 +18,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -138,6 +141,29 @@ export class ProductsController {
     });
 
     return new StreamableFile(createReadStream(absolutePath));
+  }
+
+  @Post('products/:id/view')
+  @Public()
+  @UseGuards(OptionalJwtGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } }) // 20/min per IP
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Record a product detail-page view (fire-and-forget; owner & admin views are not counted)',
+  })
+  async trackProductView(
+    @Param('id') id: string,
+    @Request() req: RequestWithUser,
+  ): Promise<void> {
+    const requesterId =
+      (req.user as RequestWithUser['user'] | undefined)?.sub ?? null;
+    const isAdmin =
+      (req.user as RequestWithUser['user'] | undefined)?.role === Role.ADMIN ||
+      (req.user as RequestWithUser['user'] | undefined)?.role ===
+        Role.SUPERADMIN;
+
+    await this.productsService.trackView(id, requesterId, isAdmin);
   }
 
   // ─── User endpoints ───────────────────────────────────────────────────────

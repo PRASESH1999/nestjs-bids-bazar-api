@@ -25,6 +25,13 @@ export declare class ProductsRepository {
     saveProduct(product: Product): Promise<Product>;
     findById(id: string): Promise<Product | null>;
     findByIdWithoutImages(id: string): Promise<Product | null>;
+    incrementViewCount(id: string): Promise<void>;
+    findSimilar(scope: 'subcategory' | 'category' | 'random', params: {
+        categoryId: string;
+        subcategoryId: string;
+        excludeIds: string[];
+        limit: number;
+    }): Promise<Product[]>;
     deleteProduct(product: Product): Promise<void>;
     findPaginated(page: number, limit: number, filters: ProductFilters): Promise<[Product[], number]>;
     findPaginatedWithOwner(page: number, limit: number, filters: ProductFilters): Promise<[Product[], number]>;

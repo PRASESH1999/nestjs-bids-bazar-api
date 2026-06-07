@@ -32,6 +32,7 @@ let Product = class Product extends base_entity_1.BaseEntity {
     currentHighestBidderId;
     biddingStartedAt;
     biddingEndsAt;
+    viewCount;
     submittedAt;
     reviewedById;
     reviewedAt;
@@ -115,6 +116,10 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true }),
     __metadata("design:type", Object)
 ], Product.prototype, "biddingEndsAt", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'int', default: 0 }),
+    __metadata("design:type", Number)
+], Product.prototype, "viewCount", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: 'timestamptz', nullable: true }),
     __metadata("design:type", Object)

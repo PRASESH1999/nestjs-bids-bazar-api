@@ -14,8 +14,13 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
     const configService = app.get(config_1.ConfigService);
+    const corsOrigins = configService
+        .get('CORS_ORIGINS', configService.get('APP_FRONTEND_URL', 'http://localhost:3001'))
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0);
     app.enableCors({
-        origin: ['http://localhost:3001'],
+        origin: corsOrigins,
         credentials: true,
     });
     const prefix = configService.get('API_PREFIX', 'api');

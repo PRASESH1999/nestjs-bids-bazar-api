@@ -12,8 +12,20 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
+  // CORS allow-list is env-driven so deployments only change config, not code.
+  // CORS_ORIGINS is a comma-separated list of allowed browser origins; when
+  // unset it falls back to APP_FRONTEND_URL (single origin).
+  const corsOrigins = configService
+    .get<string>(
+      'CORS_ORIGINS',
+      configService.get<string>('APP_FRONTEND_URL', 'http://localhost:3001'),
+    )
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+
   app.enableCors({
-    origin: ['http://localhost:3001'],
+    origin: corsOrigins,
     credentials: true,
   });
 

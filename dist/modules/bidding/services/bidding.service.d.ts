@@ -22,6 +22,15 @@ export declare class BiddingService {
         username: string;
         highestBid: number;
     }>>;
+    getBidCountsForProduct(productId: string): Promise<{
+        totalBids: number;
+        newBidsToday: number;
+    }>;
+    getWinningBidder(winningBidId: string | null): Promise<{
+        id: string;
+        username: string;
+        winningBid: number;
+    } | null>;
     getMyBids(userId: string, query: PaginationDto): Promise<PaginatedResult<Bid>>;
     listAllBids(query: ListBidsAdminQueryDto): Promise<PaginatedResult<Bid>>;
     private computeValidBidRange;

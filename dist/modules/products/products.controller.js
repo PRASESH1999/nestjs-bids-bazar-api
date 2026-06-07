@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProductsController = void 0;
 const common_1 = require("@nestjs/common");
+const throttler_1 = require("@nestjs/throttler");
 const platform_express_1 = require("@nestjs/platform-express");
 const swagger_1 = require("@nestjs/swagger");
 const item_condition_enum_1 = require("../../common/enums/item-condition.enum");
@@ -71,6 +72,13 @@ let ProductsController = class ProductsController {
             'Content-Disposition': 'inline',
         });
         return new common_1.StreamableFile((0, fs_1.createReadStream)(absolutePath));
+    }
+    async trackProductView(id, req) {
+        const requesterId = req.user?.sub ?? null;
+        const isAdmin = req.user?.role === role_enum_1.Role.ADMIN ||
+            req.user?.role ===
+                role_enum_1.Role.SUPERADMIN;
+        await this.productsService.trackView(id, requesterId, isAdmin);
     }
     async createProduct(req, dto, files) {
         return this.productsService.createProduct(req.user.sub, dto, files ?? []);
@@ -171,6 +179,21 @@ __decorate([
     __metadata("design:paramtypes", [String, String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], ProductsController.prototype, "getProductImage", null);
+__decorate([
+    (0, common_1.Post)('products/:id/view'),
+    (0, public_decorator_1.Public)(),
+    (0, common_1.UseGuards)(optional_jwt_guard_1.OptionalJwtGuard),
+    (0, throttler_1.Throttle)({ default: { limit: 20, ttl: 60000 } }),
+    (0, common_1.HttpCode)(common_1.HttpStatus.NO_CONTENT),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Record a product detail-page view (fire-and-forget; owner & admin views are not counted)',
+    }),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], ProductsController.prototype, "trackProductView", null);
 __decorate([
     (0, common_1.Post)('products'),
     (0, require_permissions_decorator_1.RequirePermissions)(permission_enum_1.Permission.PRODUCT_CREATE),

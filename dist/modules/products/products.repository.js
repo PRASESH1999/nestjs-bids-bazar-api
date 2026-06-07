@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProductsRepository = void 0;
 const common_1 = require("@nestjs/common");
 const typeorm_1 = require("typeorm");
+const product_status_enum_1 = require("../../common/enums/product-status.enum");
 const product_entity_1 = require("./entities/product.entity");
 const product_image_entity_1 = require("./entities/product-image.entity");
 let ProductsRepository = class ProductsRepository {
@@ -38,6 +39,38 @@ let ProductsRepository = class ProductsRepository {
     }
     async findByIdWithoutImages(id) {
         return this.productRepo.findOneBy({ id });
+    }
+    async incrementViewCount(id) {
+        await this.productRepo
+            .createQueryBuilder()
+            .update(product_entity_1.Product)
+            .set({ viewCount: () => '"viewCount" + 1' })
+            .where('id = :id', { id })
+            .execute();
+    }
+    async findSimilar(scope, params) {
+        const { categoryId, subcategoryId, excludeIds, limit } = params;
+        const qb = this.productRepo
+            .createQueryBuilder('product')
+            .leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0')
+            .where('product.status IN (:...statuses)', {
+            statuses: [product_status_enum_1.ProductStatus.PENDING, product_status_enum_1.ProductStatus.ACTIVE],
+        });
+        if (excludeIds.length > 0) {
+            qb.andWhere('product.id NOT IN (:...excludeIds)', { excludeIds });
+        }
+        if (scope === 'subcategory') {
+            qb.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
+            qb.orderBy('product.createdAt', 'DESC');
+        }
+        else if (scope === 'category') {
+            qb.andWhere('product.categoryId = :categoryId', { categoryId });
+            qb.orderBy('product.createdAt', 'DESC');
+        }
+        else {
+            qb.orderBy('RANDOM()');
+        }
+        return qb.take(limit).getMany();
     }
     async deleteProduct(product) {
         await this.productRepo.softRemove(product);

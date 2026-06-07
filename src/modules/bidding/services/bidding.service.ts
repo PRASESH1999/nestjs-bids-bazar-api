@@ -314,6 +314,84 @@ export class BiddingService {
     }));
   }
 
+  // ─── Query: bid counts for a product (detail-page metadata) ──────────────
+
+  /**
+   * Returns the total number of bids on a product and how many were placed
+   * "today". "Today" is the current calendar day in Asia/Kathmandu (UTC+5:45),
+   * not raw UTC — Nepal observes no DST so the fixed offset is exact.
+   *
+   * Single round-trip using Postgres conditional aggregation
+   * (`COUNT(*) FILTER (WHERE ...)`).
+   */
+  async getBidCountsForProduct(
+    productId: string,
+  ): Promise<{ totalBids: number; newBidsToday: number }> {
+    // date-fns-tz / luxon are not project dependencies, so the +5:45 Kathmandu
+    // offset is applied by hand: shift "now" into Kathmandu local time, take the
+    // start of that local day, then shift back to UTC for the timestamptz query.
+    const KATHMANDU_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
+    const kathmanduNow = new Date(Date.now() + KATHMANDU_OFFSET_MS);
+    const startOfTodayUtc = new Date(
+      Date.UTC(
+        kathmanduNow.getUTCFullYear(),
+        kathmanduNow.getUTCMonth(),
+        kathmanduNow.getUTCDate(),
+      ) - KATHMANDU_OFFSET_MS,
+    );
+
+    const row = await this.dataSource
+      .getRepository(Bid)
+      .createQueryBuilder('bid')
+      .select('COUNT(*)', 'total')
+      .addSelect(
+        'COUNT(*) FILTER (WHERE bid."placedAt" >= :startOfToday)',
+        'today',
+      )
+      .where('bid.productId = :productId', { productId })
+      .setParameter('startOfToday', startOfTodayUtc)
+      .getRawOne<{ total: string; today: string }>();
+
+    return {
+      totalBids: Number(row?.total ?? 0),
+      newBidsToday: Number(row?.today ?? 0),
+    };
+  }
+
+  // ─── Query: winning bidder for a product (detail-page metadata) ──────────
+
+  /**
+   * Resolves a product's winning bid (the `winningBidId` pointer) into the
+   * public winner: the bidder's `id` + `username` and the winning `amount`.
+   * Returns `null` when there is no winner yet (no `winningBidId`, e.g. the
+   * auction has not closed) or the referenced bid no longer exists.
+   *
+   * `username` is the public-facing handle — `name` is private and never exposed.
+   */
+  async getWinningBidder(
+    winningBidId: string | null,
+  ): Promise<{ id: string; username: string; winningBid: number } | null> {
+    if (!winningBidId) return null;
+
+    const row = await this.dataSource
+      .getRepository(Bid)
+      .createQueryBuilder('bid')
+      .innerJoin('bid.bidder', 'bidder')
+      .select('bid.bidderId', 'id')
+      .addSelect('bidder.username', 'username')
+      .addSelect('bid.amount', 'winningBid')
+      .where('bid.id = :winningBidId', { winningBidId })
+      .getRawOne<{ id: string; username: string; winningBid: string }>();
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      username: row.username,
+      winningBid: Number(row.winningBid),
+    };
+  }
+
   // ─── Query: my bids (authenticated user) ─────────────────────────────────
 
   async getMyBids(

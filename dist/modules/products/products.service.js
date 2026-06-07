@@ -242,8 +242,62 @@ let ProductsService = ProductsService_1 = class ProductsService {
         if (!product_status_enum_1.PUBLICLY_VISIBLE_STATUSES.includes(product.status) && !isOwner) {
             throw new common_1.NotFoundException('Product not found');
         }
-        const topBidders = await this.biddingService.getTopBiddersForProduct(id);
-        return { ...this.mapProduct(product), topBidders };
+        const [topBidders, bidCounts, winningBidder, similarProducts] = await Promise.all([
+            this.biddingService.getTopBiddersForProduct(id),
+            this.biddingService.getBidCountsForProduct(id),
+            this.biddingService.getWinningBidder(product.winningBidId),
+            this.getSimilarProducts(product),
+        ]);
+        const { winningBidId: _winningBidId, ...productBase } = this.mapProduct(product);
+        return {
+            ...productBase,
+            topBidders,
+            totalBids: bidCounts.totalBids,
+            newBidsToday: bidCounts.newBidsToday,
+            viewCount: product.viewCount,
+            winningBidder,
+            similarProducts,
+        };
+    }
+    async trackView(productId, requesterId, isAdmin) {
+        try {
+            const product = await this.productsRepository.findByIdWithoutImages(productId);
+            if (!product)
+                return;
+            if (product.ownerId === requesterId)
+                return;
+            if (isAdmin)
+                return;
+            if (!product_status_enum_1.PUBLICLY_VISIBLE_STATUSES.includes(product.status))
+                return;
+            await this.productsRepository.incrementViewCount(productId);
+        }
+        catch (err) {
+            this.logger.error(`trackView failed for product ${productId}: ` +
+                `${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    async getSimilarProducts(product, limit = 5) {
+        const collected = [];
+        const excludeIds = [product.id];
+        const tiers = [
+            'subcategory',
+            'category',
+            'random',
+        ];
+        for (const scope of tiers) {
+            if (collected.length >= limit)
+                break;
+            const found = await this.productsRepository.findSimilar(scope, {
+                categoryId: product.categoryId,
+                subcategoryId: product.subcategoryId,
+                excludeIds,
+                limit: limit - collected.length,
+            });
+            collected.push(...found);
+            excludeIds.push(...found.map((p) => p.id));
+        }
+        return collected.map((p) => this.mapProduct(p));
     }
     async getProductImageFile(productId, imageId, requesterId, requesterIsAdmin) {
         const image = await this.productsRepository.findImageById(imageId);

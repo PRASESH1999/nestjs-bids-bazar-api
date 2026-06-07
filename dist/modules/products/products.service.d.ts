@@ -18,7 +18,7 @@ export type ProductImageResponse = {
     mimeType: string;
     url: string;
 };
-export type ProductResponse = Omit<Product, 'images'> & {
+export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
     previewImage: {
         id: string;
         url: string;
@@ -30,8 +30,18 @@ export type TopBidder = {
     username: string;
     highestBid: number;
 };
-export type ProductDetailResponse = ProductResponse & {
+export type WinningBidder = {
+    id: string;
+    username: string;
+    winningBid: number;
+};
+export type ProductDetailResponse = Omit<ProductResponse, 'winningBidId'> & {
     topBidders: TopBidder[];
+    totalBids: number;
+    newBidsToday: number;
+    viewCount: number;
+    winningBidder: WinningBidder | null;
+    similarProducts: ProductResponse[];
 };
 export declare class ProductsService {
     private readonly productsRepository;
@@ -66,6 +76,8 @@ export declare class ProductsService {
         };
     }>;
     getPublicProductById(id: string, requesterId?: string | null): Promise<ProductDetailResponse>;
+    trackView(productId: string, requesterId: string | null, isAdmin: boolean): Promise<void>;
+    getSimilarProducts(product: Product, limit?: number): Promise<ProductResponse[]>;
     getProductImageFile(productId: string, imageId: string, requesterId: string | null, requesterIsAdmin: boolean): Promise<{
         absolutePath: string;
         mimeType: string;

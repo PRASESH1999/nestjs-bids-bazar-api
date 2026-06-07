@@ -32,15 +32,30 @@ export type ProductImageResponse = {
   url: string;
 };
 
-export type ProductResponse = Omit<Product, 'images'> & {
+// `viewCount` is omitted from the base response — it is detail-page metadata,
+// surfaced explicitly on ProductDetailResponse rather than on every list item.
+export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
   previewImage: { id: string; url: string; mimeType: string } | null;
   images: ProductImageResponse[];
 };
 
 export type TopBidder = { username: string; highestBid: number };
 
-export type ProductDetailResponse = ProductResponse & {
+export type WinningBidder = {
+  id: string;
+  username: string;
+  winningBid: number;
+};
+
+// On the detail response the raw `winningBidId` pointer is replaced by the
+// resolved `winningBidder` (bidder id + username + winning amount).
+export type ProductDetailResponse = Omit<ProductResponse, 'winningBidId'> & {
   topBidders: TopBidder[];
+  totalBids: number;
+  newBidsToday: number;
+  viewCount: number;
+  winningBidder: WinningBidder | null;
+  similarProducts: ProductResponse[];
 };
 
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
@@ -381,8 +396,93 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    const topBidders = await this.biddingService.getTopBiddersForProduct(id);
-    return { ...this.mapProduct(product), topBidders };
+    // Detail-page metadata fetched in parallel — none depend on each other.
+    const [topBidders, bidCounts, winningBidder, similarProducts] =
+      await Promise.all([
+        this.biddingService.getTopBiddersForProduct(id),
+        this.biddingService.getBidCountsForProduct(id),
+        this.biddingService.getWinningBidder(product.winningBidId),
+        this.getSimilarProducts(product),
+      ]);
+
+    // The raw winningBidId pointer is replaced by the resolved winningBidder.
+    const { winningBidId: _winningBidId, ...productBase } =
+      this.mapProduct(product);
+
+    return {
+      ...productBase,
+      topBidders,
+      totalBids: bidCounts.totalBids,
+      newBidsToday: bidCounts.newBidsToday,
+      viewCount: product.viewCount,
+      winningBidder,
+      similarProducts,
+    };
+  }
+
+  // ─── View tracking ────────────────────────────────────────────────────────
+
+  /**
+   * Fire-and-forget view counter for the product detail page. Never throws —
+   * a tracking failure must not surface to the user. Skips the increment for
+   * the owner, any admin, and non-publicly-visible products.
+   */
+  async trackView(
+    productId: string,
+    requesterId: string | null,
+    isAdmin: boolean,
+  ): Promise<void> {
+    try {
+      const product =
+        await this.productsRepository.findByIdWithoutImages(productId);
+      if (!product) return; // tracking call, not a fetch — stay silent
+
+      if (product.ownerId === requesterId) return; // owner viewing own product
+      if (isAdmin) return; // ADMIN / SUPERADMIN views don't count
+      if (!PUBLICLY_VISIBLE_STATUSES.includes(product.status)) return;
+
+      await this.productsRepository.incrementViewCount(productId);
+    } catch (err: unknown) {
+      this.logger.error(
+        `trackView failed for product ${productId}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // ─── Similar products ─────────────────────────────────────────────────────
+
+  /**
+   * Up to `limit` related products using a tiered fallback, stopping as soon as
+   * the quota is filled: same subcategory → same category → random biddable.
+   * Only PENDING/ACTIVE products are eligible. Returns `[]` if nothing matches.
+   */
+  async getSimilarProducts(
+    product: Product,
+    limit = 5,
+  ): Promise<ProductResponse[]> {
+    const collected: Product[] = [];
+    const excludeIds = [product.id];
+
+    const tiers: Array<'subcategory' | 'category' | 'random'> = [
+      'subcategory',
+      'category',
+      'random',
+    ];
+
+    for (const scope of tiers) {
+      if (collected.length >= limit) break;
+      const found = await this.productsRepository.findSimilar(scope, {
+        categoryId: product.categoryId,
+        subcategoryId: product.subcategoryId,
+        excludeIds,
+        limit: limit - collected.length,
+      });
+      collected.push(...found);
+      excludeIds.push(...found.map((p) => p.id));
+    }
+
+    return collected.map((p) => this.mapProduct(p));
   }
 
   async getProductImageFile(

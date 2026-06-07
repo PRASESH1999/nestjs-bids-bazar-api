@@ -158,6 +158,44 @@ OWNER_EDITABLE_STATUSES   = [DRAFT, REJECTED]
     (NULLS LAST ensures PENDING products without a started auction do not
     float to the top). `order` is ignored — soonest-ending is always first.
 
+## Detail response metadata
+
+`GET /products/:id` returns the standard product shape plus these detail-only
+fields (none appear on list responses, and none are part of the live SSE
+`auction.update` payload — that stream stays focused on the bidding battle):
+
+- `topBidders` — up to 5 leaders by highest bid (existing).
+- `winningBidder` — **replaces** the raw `winningBidId` on this endpoint only
+  (list/admin responses still expose `winningBidId`). The pointer is resolved
+  into `{ id, username, winningBid }` — the winning bidder's user id, public
+  `username`, and the winning bid amount. `null` until the auction has a winner
+  (i.e. no `winningBidId` yet).
+- `viewCount` — total recorded detail-page views (see view tracking below).
+- `totalBids` — count of all bids on the product.
+- `newBidsToday` — count of bids placed **today in Asia/Kathmandu** (UTC+5:45,
+  no DST). "Today" is the start of the current Kathmandu calendar day converted
+  back to UTC — **not** raw UTC midnight.
+- `similarProducts` — up to 5 related products via a **tiered fallback**, each
+  stopping as soon as the quota fills:
+  1. same `subcategoryId`,
+  2. then same `categoryId`,
+  3. then random.
+
+  Only biddable products (`PENDING`, `ACTIVE`) are eligible, the current product
+  and already-picked ids are excluded, and the result is empty (never an error)
+  if nothing matches.
+
+### View tracking (`POST /products/:id/view`)
+
+- Public + throttled (20/min per IP); reads the optional JWT only to apply
+  exclusions. Always returns `204 No Content`.
+- The increment is **atomic** (`SET "viewCount" = "viewCount" + 1`) — no
+  read-modify-write.
+- The view is **not** counted when: the viewer is the owner, the viewer is an
+  ADMIN/SUPERADMIN, or the product is not in `PUBLICLY_VISIBLE_STATUSES`.
+- Tracking is fire-and-forget: failures (including unknown product id) are
+  swallowed and never surfaced to the caller.
+
 ## Endpoint Access Matrix
 
 | Endpoint                           | Public | USER (own) | USER (other) | ADMIN | SUPERADMIN |
@@ -165,6 +203,7 @@ OWNER_EDITABLE_STATUSES   = [DRAFT, REJECTED]
 | GET    /products                   | ✅     | ✅         | ✅           | ✅    | ✅         |
 | GET    /products/:id               | ✅*    | ✅         | ✅*          | ✅    | ✅         |
 | GET    /products/:id/images/:imgId | ✅*    | ✅         | ✅*          | ✅    | ✅         |
+| POST   /products/:id/view          | ✅§    | ✅§        | ✅§          | ✅§   | ✅§        |
 | POST   /products                   | ❌     | ✅†        | ❌           | ❌    | ❌         |
 | PATCH  /products/:id               | ❌     | ✅‡        | ❌           | ❌    | ❌         |
 | POST   /products/:id/submit        | ❌     | ✅‡        | ❌           | ❌    | ❌         |
@@ -180,6 +219,9 @@ OWNER_EDITABLE_STATUSES   = [DRAFT, REJECTED]
   is thrown for others (do not leak existence).
 † Requires email verified AND KYC approved.
 ‡ Only allowed when product status is `DRAFT` or `REJECTED`.
+§ Public + throttled (`@Throttle` 20/min per IP). Fire-and-forget: always
+  returns `204 No Content`, including the skipped cases (owner/admin viewer,
+  non-public status). See **Detail response metadata** below.
 
 ## Permissions
 

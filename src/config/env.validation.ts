@@ -23,6 +23,9 @@ export const envValidationSchema = Joi.object({
   MAIL_PASSWORD: Joi.string().required(),
   MAIL_FROM: Joi.string().required(),
   APP_FRONTEND_URL: Joi.string().uri().required(),
+  // Comma-separated list of browser origins allowed by CORS. Optional — when
+  // omitted, the server falls back to APP_FRONTEND_URL (see main.ts).
+  CORS_ORIGINS: Joi.string().optional(),
 
   // Bidding & Auction Lifecycle
   BIDDING_DURATION_HOURS: Joi.number().integer().min(1).required(),
