@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 import { Product } from './entities/product.entity';
@@ -79,7 +79,7 @@ export class ProductsRepository {
 
     const qb = this.productRepo
       .createQueryBuilder('product')
-      .leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0')
+      .select('product.id', 'id')
       .where('product.status IN (:...statuses)', {
         statuses: [ProductStatus.PENDING, ProductStatus.ACTIVE],
       });
@@ -99,7 +99,18 @@ export class ProductsRepository {
       qb.orderBy('RANDOM()');
     }
 
-    return qb.take(limit).getMany();
+    const rows = await qb.take(limit).getRawMany();
+    const ids = rows.map((row) => row.id as string);
+    if (ids.length === 0) return [];
+
+    const products = await this.productRepo.find({
+      where: { id: In(ids) },
+      relations: ['images'],
+      order: { images: { displayOrder: 'ASC' } },
+    });
+
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    return ids.map((id) => productsById.get(id)!).filter(Boolean);
   }
 
   async deleteProduct(product: Product): Promise<void> {

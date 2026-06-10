@@ -52,7 +52,7 @@ let ProductsRepository = class ProductsRepository {
         const { categoryId, subcategoryId, excludeIds, limit } = params;
         const qb = this.productRepo
             .createQueryBuilder('product')
-            .leftJoinAndSelect('product.images', 'images', 'images.displayOrder = 0')
+            .select('product.id', 'id')
             .where('product.status IN (:...statuses)', {
             statuses: [product_status_enum_1.ProductStatus.PENDING, product_status_enum_1.ProductStatus.ACTIVE],
         });
@@ -70,7 +70,17 @@ let ProductsRepository = class ProductsRepository {
         else {
             qb.orderBy('RANDOM()');
         }
-        return qb.take(limit).getMany();
+        const rows = await qb.take(limit).getRawMany();
+        const ids = rows.map((row) => row.id);
+        if (ids.length === 0)
+            return [];
+        const products = await this.productRepo.find({
+            where: { id: (0, typeorm_1.In)(ids) },
+            relations: ['images'],
+            order: { images: { displayOrder: 'ASC' } },
+        });
+        const productsById = new Map(products.map((product) => [product.id, product]));
+        return ids.map((id) => productsById.get(id)).filter(Boolean);
     }
     async deleteProduct(product) {
         await this.productRepo.softRemove(product);
