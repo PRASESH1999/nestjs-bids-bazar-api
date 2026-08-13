@@ -41,8 +41,8 @@ export const dataSourceOptions: DataSourceOptions = {
     UserRewards,
     PointsTransaction,
   ],
-  migrations: ['src/migrations/*.ts'],
-  synchronize: true,
+  migrations: ['src/database/migrations/*.ts'],
+  synchronize: false,
 };
 
 const dataSource = new DataSource(dataSourceOptions);

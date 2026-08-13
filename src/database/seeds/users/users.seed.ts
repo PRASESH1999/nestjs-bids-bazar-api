@@ -1,7 +1,7 @@
-import { DataSource } from 'typeorm';
-import * as bcrypt from 'bcrypt';
 import { User } from '@modules/users/entities/user.entity';
-import { SEED_USERS, SEED_PASSWORD } from './users.data';
+import * as bcrypt from 'bcrypt';
+import { DataSource } from 'typeorm';
+import { SEED_PASSWORD, SEED_USERS } from './users.data';
 
 export async function seedUsers(dataSource: DataSource): Promise<void> {
   const repo = dataSource.getRepository(User);
@@ -27,6 +27,7 @@ export async function seedUsers(dataSource: DataSource): Promise<void> {
         username: user.username,
         role: user.role,
         isActive: true,
+        isEmailVerified: user.isEmailVerified,
       }),
     );
     created++;

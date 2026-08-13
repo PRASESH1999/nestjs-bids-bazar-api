@@ -29,7 +29,8 @@
       "Bash(node md2html.js \"e:/Kusa/BidsBazar/nestjs-bids-bazar-api/docs/feature-enhancement-gap-analysis.md\" \"e:/Kusa/BidsBazar/nestjs-bids-bazar-api/docs/feature-enhancement-gap-analysis.html\")",
       "Bash(node scripts/backfill-instant-buy-price.js)",
       "Bash(npm ls *)",
-      "Bash(git status *)"
+      "Bash(git status *)",
+      "Bash(where psql *)"
     ],
     "additionalDirectories": [
       "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\payments\\actions",
@@ -39,7 +40,8 @@
       "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\app\\auctions\\[id]\\checkout",
       "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\config",
       "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\auctions\\components",
-      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\app\\(dashboard)\\dashboard\\wins"
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\app\\(dashboard)\\dashboard\\wins",
+      "e:\\Kusa\\BidsBazar\\nestjs-bids-bazar-api"
     ]
   }
 }
