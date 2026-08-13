@@ -85,6 +85,37 @@ AuctionLifecycleService.closeIfExpired(productId)
 - Notify winner and seller (Phase 3).
 - **Idempotent**: if status is already past `ACTIVE`, return without changes.
 
+## Instant Buy
+
+- Every product has a mandatory `instantBuyPrice` (see Rule 13 for the
+  `1.4 × basePrice` formula and visibility rule). `AuctionLifecycleService
+  .executeInstantBuy(productId, buyerId)` is the purchase action:
+  `POST /products/:id/instant-buy`.
+- Preconditions, re-validated **inside** a `pessimistic_write` lock on the
+  product row (never from a pre-lock read, to close the race against a
+  concurrent bid or a concurrent `closeIfExpired`/expiry): product status
+  is `PENDING` or `ACTIVE`; caller is not the owner; `showInstantBuy` is
+  still true at lock time.
+- On success: creates a synthetic `Bid` at `instantBuyPrice` with
+  `isInstantBuy = true`, `isOriginalWinner = true`, `fallbackRank = 0`,
+  `isCurrentlyPaymentResponsible = true`; every other bid on the product
+  is permanently set `NOT_RESPONSIBLE`; product transitions straight to
+  `AWAITING_PAYMENT` (`biddingEndsAt = now`, `closedAt = now`,
+  `winningBidId` set). Emits `AUCTION_CLOSED` so `AuctionClosedHandler`
+  re-broadcasts current state — the same event a normal auction-timer
+  close emits.
+- **No fallback, ever.** Once Instant Buy is used, that buyer is the sole
+  eligible party for the product. `handlePaymentExpiry` checks
+  `isInstantBuy` on the expiring responsible bid and, if true, skips the
+  next-bidder search entirely and goes straight to `ABANDONED` — even
+  though other (now `NOT_RESPONSIBLE`) bids may exist below it. This is
+  the one place in the lifecycle where the fallback chain deliberately
+  does not apply.
+- Instant Buy still goes through the same `AWAITING_PAYMENT` /
+  `PAYMENT_WINDOW_HOURS` / gateway-payment path as a normal win (see
+  below) — the window exists only because Fonepay is a scan-and-wait QR
+  flow, not because Instant Buy tolerates non-payment.
+
 ## Payment Window & Fallback Chain
 
 When a bid is the currently-responsible bid:
@@ -109,16 +140,48 @@ Two paths trigger payment-window expiry — same dual pattern as closing (Phase 
 
 ## Payment Confirmation
 
+- **Gateway payment (Fonepay) is now the primary path for every sale** —
+  normal auction wins and Instant Buy alike. The item price is paid in
+  full via `POST /payments/:productId/initiate` → Fonepay intent QR →
+  `PaymentsService.confirmSuccess` → `AuctionLifecycleService
+  .confirmPaymentGateway(productId)`. The `AWAITING_PAYMENT` state and
+  fallback chain are unchanged by this — only the confirmation mechanism
+  moved from admin-manual to gateway for the common case.
 - An admin-only endpoint `POST /admin/products/:productId/confirm-payment` (implemented in
-  Phase 2) calls `AuctionLifecycleService.confirmPaymentManual(adminId, productId)`.
+  Phase 2) calls `AuctionLifecycleService.confirmPaymentManual(adminId, productId, deliveryZone)`.
 - This endpoint is kept long-term as a backup mechanism even after bank API integration,
-  for cases where the API fails or admin intervention is needed.
-- On confirmation:
+  for cases where the API fails or admin intervention is needed. Since this
+  path bypasses the buyer-facing checkout that would normally capture the
+  delivery zone, the admin supplies it in the request body on the buyer's
+  behalf.
+- On confirmation (either path):
     - Responsible bid: `paymentStatus = CONFIRMED`, `paymentConfirmedAt`, `paymentConfirmedById`,
-      `paymentConfirmationMethod = ADMIN_MANUAL`.
+      `paymentConfirmationMethod = ADMIN_MANUAL` or `BANK_API`.
     - Product: `status = SETTLED`, `settledAt = now`.
     - All other bids on this product: `paymentStatus = NOT_RESPONSIBLE` (clean final state).
     - Notify seller and buyer (Phase 3).
+    - **Manual path only**: since it has no Fonepay-originated `Payment`
+      row, `confirmPaymentManual` creates one directly (`status = SUCCESS`,
+      `terminalId = 'ADMIN-MANUAL'`, a locally-generated `referenceLabel`,
+      `deliveryZone`/`deliveryCharge` from the admin's input) so this sale
+      flows through the same seller-settlement + points/commission
+      pipeline as a gateway-paid sale (see Rule 16). `sellerPaidAt` stays
+      null — settlement-to-seller is a separate, later admin action.
+
+## Delivery Fee (all sales, cash on delivery)
+
+- Fixed, two-zone fee — never calculated dynamically, never charged
+  through the gateway: `DELIVERY_CHARGE_INSIDE_VALLEY` /
+  `DELIVERY_CHARGE_OUTSIDE_VALLEY` (env-configured, see below).
+- The buyer **selects** the zone (`DeliveryZone.INSIDE_VALLEY |
+  OUTSIDE_VALLEY`) at checkout — a plain choice on the
+  `POST /payments/:productId/initiate` request body, not derived from any
+  address or the product's (currently out-of-scope) location fields.
+- The resolved amount is snapshotted onto `Payment.deliveryCharge` at
+  initiation time (same reasoning as `Payment.paymentDeadline` — immune to
+  a later env change), collected in cash at the point of delivery.
+- **Never counted toward points** — the 1% buyer/seller points calculation
+  (Rule 16) is computed on the item price only.
 
 ## Concurrency Rules
 - All bid placement, closure, and fallback operations must run inside a database transaction.
@@ -153,6 +216,7 @@ Two paths trigger payment-window expiry — same dual pattern as closing (Phase 
 | Endpoint                                   | Public | USER | ADMIN | SUPERADMIN |
 |--------------------------------------------|--------|------|-------|------------|
 | POST   /products/:id/bids                  | ❌     | ✅   | ❌    | ❌         |
+| POST   /products/:id/instant-buy           | ❌     | ✅   | ❌    | ❌         |
 | GET    /products/:id/bids                  | ❌     | ✅†  | ✅†   | ✅†        |
 | GET    /bids/me                            | ❌     | ✅   | ❌    | ❌         |
 | GET    /admin/products/:id/bids            | ❌     | ❌   | ✅‡   | ✅‡        |
@@ -187,6 +251,8 @@ Role → Permission additions in `auth/role-permissions.map.ts`:
 | `PAYMENT_WINDOW_HOURS`  | `18`    | Hours the winner has to complete payment       |
 | `BID_INCREMENT_MIN_FLAT`| `5`     | Minimum flat increment in NPR                  |
 | `BID_INCREMENT_PERCENT` | `0.10`  | Minimum increment as a fraction of current bid |
+| `DELIVERY_CHARGE_INSIDE_VALLEY`  | `100` | Fixed COD delivery fee, Inside Valley zone |
+| `DELIVERY_CHARGE_OUTSIDE_VALLEY` | `250` | Fixed COD delivery fee, Outside Valley zone |
 
 Until Phase 2 adds env validation, `ConfigService` must use the defaults above as runtime fallbacks.
 

@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npm install *)",
+      "Bash(ls -la \"e:\\\\Kusa\\\\BidsBazar\\\\\" 2>&1 | head -50)",
+      "Read(//e/Kusa/**)",
+      "Bash(find \"e:\\\\Kusa\\\\BidsBazar\\\\\" -maxdepth 2 -name \"package.json\" -type f 2>&1)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/features/auth/hooks/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/features/auth/actions/**)",
+      "Bash(cat \"E:/Kusa/BidsBazar/bids-bazar/src/app/\\(dashboard\\)/bids/page.tsx\" 2>/dev/null | head -40)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/app/\\(dashboard\\)/bids/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/features/auctions/components/auction-detail/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/lib/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/features/auctions/actions/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/features/bids/queries/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/types/**)",
+      "Read(//e/Kusa/BidsBazar/bids-bazar/src/features/auctions/queries/**)",
+      "WebSearch",
+      "Bash(grep -n -iE '\"terminalId\"|\"username\"|\"password\"|terminal|merchant' \"c:\\\\Users\\\\physc\\\\Downloads\\\\API collection.json\" | grep -v -i \"private\" | head -50)",
+      "Read(//c/Users/physc/Downloads/**)",
+      "WebFetch(domain:blog.bwishernepal.com)",
+      "Bash(npx eslint *)",
+      "Bash(npm run *)",
+      "Bash(nslookup -type=AAAA thirdparty-merchantapi.fonepay.com)",
+      "Bash(node -e \"const dns=require\\('dns'\\); dns.lookup\\('thirdparty-merchantapi.fonepay.com', {all:true}, \\(err,addrs\\)=>{ if\\(err\\) console.error\\('ERR',err\\); else console.log\\(addrs\\); }\\);\")",
+      "Bash(unzip -p feature-enhancement-gap-analysis.docx word/document.xml)",
+      "Bash(node md2html.js \"e:/Kusa/BidsBazar/nestjs-bids-bazar-api/docs/feature-enhancement-gap-analysis.md\" \"e:/Kusa/BidsBazar/nestjs-bids-bazar-api/docs/feature-enhancement-gap-analysis.html\")",
+      "Bash(node scripts/backfill-instant-buy-price.js)",
+      "Bash(npm ls *)",
+      "Bash(git status *)"
+    ],
+    "additionalDirectories": [
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\payments\\actions",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\payments\\queries",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\hooks",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\payments\\components",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\app\\auctions\\[id]\\checkout",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\config",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\auctions\\components",
+      "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\app\\(dashboard)\\dashboard\\wins"
+    ]
+  }
+}

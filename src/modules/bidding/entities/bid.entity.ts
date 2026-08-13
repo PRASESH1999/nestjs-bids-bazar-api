@@ -73,6 +73,12 @@ export class Bid extends BaseEntity {
   @Column({ type: 'boolean', default: false })
   isCurrentlyPaymentResponsible: boolean;
 
+  // True only for the synthetic bid created by AuctionLifecycleService.executeInstantBuy.
+  // Instant Buy sales never enter the fallback chain: handlePaymentExpiry checks this
+  // flag and goes straight to ABANDONED instead of promoting the next bid.
+  @Column({ type: 'boolean', default: false })
+  isInstantBuy: boolean;
+
   // ─── Payment ──────────────────────────────────────────────────────────────
 
   @Column({

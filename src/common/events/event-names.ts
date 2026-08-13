@@ -14,6 +14,16 @@ export const EventNames = {
   BID_SUBMITTED: 'bid.submitted',
   AUCTION_CLOSED: 'auction.closed',
   AUCTION_SETTLED: 'auction.settled',
+
+  // Fonepay payment lifecycle
+  PAYMENT_INITIATED: 'payment.initiated',
+  PAYMENT_SUCCEEDED: 'payment.succeeded',
+  PAYMENT_FAILED: 'payment.failed',
+  WIN_TRANSFERRED: 'win.transferred',
+
+  // Rewards (Rule 16) — fired once per sale, when an admin flags the seller
+  // as paid. The sole points/commission trigger.
+  SELLER_MARKED_PAID: 'seller.marked_paid',
 } as const;
 
 export type EventName = (typeof EventNames)[keyof typeof EventNames];

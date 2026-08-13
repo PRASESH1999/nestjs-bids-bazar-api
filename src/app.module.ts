@@ -15,6 +15,9 @@ import { MailModule } from '@modules/mail/mail.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
 import { ProductsModule } from '@modules/products/products.module';
 import { BiddingModule } from '@modules/bidding/bidding.module';
+import { PaymentsModule } from '@modules/payments/payments.module';
+import { FonepayModule } from '@modules/fonepay/fonepay.module';
+import { RewardsModule } from '@modules/rewards/rewards.module';
 import { CommonModule } from '@common/common.module';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
@@ -64,6 +67,9 @@ import { envValidationSchema } from './config/env.validation';
     CategoriesModule,
     ProductsModule,
     BiddingModule,
+    PaymentsModule,
+    FonepayModule,
+    RewardsModule,
   ],
   controllers: [AppController],
   providers: [

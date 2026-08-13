@@ -4,6 +4,8 @@ import { PendingEmailChange } from '@modules/auth/entities/pending-email-change.
 import { PendingEmailChangeRepository } from '@modules/auth/pending-email-change.repository';
 import { KycVerification } from '@modules/kyc/entities/kyc-verification.entity';
 import { MailService } from '@modules/mail/mail.service';
+import { SellerTier } from '@common/enums/seller-tier.enum';
+import { RewardsService } from '@modules/rewards/rewards.service';
 import { User } from '@modules/users/entities/user.entity';
 import { UsersRepository } from '@modules/users/users.repository';
 import {
@@ -24,6 +26,7 @@ import type {
   KycSummary,
   OwnProfileResponse,
   PendingEmailChangeSummary,
+  RewardsSummary,
 } from './interfaces/own-profile.interface';
 import {
   UsernameValidationError,
@@ -44,6 +47,7 @@ export class UsersService {
     private readonly dataSource: DataSource,
     private readonly mailService: MailService,
     private readonly pendingEmailChangeRepository: PendingEmailChangeRepository,
+    private readonly rewardsService: RewardsService,
   ) {}
 
   async findAll(
@@ -274,6 +278,14 @@ export class UsersService {
       ? { newEmail: pending.newEmail, expiresAt: pending.expiresAt }
       : null;
 
+    // No UserRewards row yet = zeros/BRONZE, not an error (Rule 16).
+    const rewards = await this.rewardsService.getOwnRewards(userId);
+    const rewardsSummary: RewardsSummary = {
+      buyerPoints: rewards?.buyerPoints ?? 0,
+      sellerPoints: rewards?.sellerPoints ?? 0,
+      sellerTier: rewards?.sellerTier ?? SellerTier.BRONZE,
+    };
+
     return {
       id: user.id,
       name: user.name,
@@ -288,6 +300,7 @@ export class UsersService {
       updatedAt: user.updatedAt,
       kyc: kycSummary,
       pendingEmailChange: pendingEmailChangeSummary,
+      rewards: rewardsSummary,
     };
   }
 

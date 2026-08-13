@@ -36,6 +36,9 @@ yarn-error.log
 *.tsbuildinfo
 /.nx/workspace-data
 
+# build output
+/dist
+
 # example
 /quick-start
 /example_dist

@@ -32,4 +32,19 @@ export const envValidationSchema = Joi.object({
   PAYMENT_WINDOW_HOURS: Joi.number().integer().min(1).required(),
   BID_INCREMENT_MIN_FLAT: Joi.number().min(0.01).required(),
   BID_INCREMENT_PERCENT: Joi.number().min(0.001).max(1).required(),
+
+  // Delivery (fixed, two-zone, cash on delivery)
+  DELIVERY_CHARGE_INSIDE_VALLEY: Joi.number().min(0).required(),
+  DELIVERY_CHARGE_OUTSIDE_VALLEY: Joi.number().min(0).required(),
+
+  // Fonepay Intent Checkout
+  FONEPAY_BASE_URL: Joi.string().uri().required(),
+  FONEPAY_BASE_PATH: Joi.string().required(),
+  FONEPAY_USERNAME: Joi.string().required(),
+  FONEPAY_PASSWORD: Joi.string().required(),
+  FONEPAY_TERMINAL_ID: Joi.string().max(16).required(),
+  // PKCS#8 private key, base64-encoded, no PEM header/footer, single line.
+  FONEPAY_PRIVATE_KEY: Joi.string().required(),
+  // How long to trust a cached Fonepay access token before proactive re-login (minutes).
+  FONEPAY_TOKEN_TTL_MINUTES: Joi.number().integer().min(1).default(10),
 });

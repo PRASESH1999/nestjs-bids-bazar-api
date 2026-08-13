@@ -80,6 +80,20 @@ export class ProductsController {
     return { basePrice: price, biddingStartPrice };
   }
 
+  @Get('products/calculate-instant-buy-price')
+  @Public()
+  @ApiOperation({
+    summary: 'Calculate the instant-buy price for a given base price',
+  })
+  calculateInstantBuyPrice(@Query('basePrice') basePrice: string) {
+    const price = parseFloat(basePrice);
+    if (isNaN(price) || price <= 0) {
+      throw new BadRequestException('basePrice must be a positive number');
+    }
+    const instantBuyPrice = this.productsService.computeInstantBuyPrice(price);
+    return { basePrice: price, instantBuyPrice };
+  }
+
   @Get('products/me')
   @RequirePermissions(Permission.PRODUCT_VIEW_OWN)
   @ApiOperation({ summary: 'List own products (all statuses)' })

@@ -33,7 +33,12 @@ export enum Permission {
   BID_PLACE = 'bid:place',
   BID_VIEW_OWN = 'bid:view_own',
   BID_VIEW_ALL = 'bid:view_all',
+  PAYMENT_INITIATE = 'payment:initiate',
   PAYMENT_CONFIRM_MANUAL = 'payment:confirm_manual',
+
+  // Rewards permissions (Rule 16)
+  SETTLEMENT_MANAGE = 'settlement:manage',
+  POINTS_ADJUST = 'points:adjust',
 
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',

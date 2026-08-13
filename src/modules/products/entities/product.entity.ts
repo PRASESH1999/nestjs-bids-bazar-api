@@ -46,6 +46,11 @@ export class Product extends BaseEntity {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   biddingStartPrice: number;
 
+  // Fixed buy-now price = 1.4 × basePrice. Mandatory on every listing.
+  // Stored, not recomputed on read, same reasoning as biddingStartPrice.
+  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  instantBuyPrice: number;
+
   @Column({ type: 'varchar', length: 10, default: 'NPR' })
   currency: string;
 

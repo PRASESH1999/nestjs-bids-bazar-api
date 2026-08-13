@@ -7,9 +7,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, QueryRunner } from 'typeorm';
+import * as crypto from 'crypto';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { PaymentConfirmationMethod } from '@common/enums/payment-confirmation-method.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
+import { PaymentStatus } from '@common/enums/payment-status.enum';
+import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { EventNames } from '@common/events/event-names';
 import type {
   AuctionClosedPayload,
@@ -17,6 +20,7 @@ import type {
 } from '@common/events/event-payloads.type';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
+import { Payment } from '@modules/payments/entities/payment.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { Bid } from '../entities/bid.entity';
 
@@ -186,6 +190,201 @@ export class AuctionLifecycleService {
     }
   }
 
+  // ─── Instant Buy: immediate purchase, no fallback chain ────────────────────
+
+  /**
+   * Executes an Instant Buy: creates a synthetic winning bid at
+   * product.instantBuyPrice, closes the auction immediately, and makes the
+   * buyer the SOLE eligible party. Unlike a normal auction win, this never
+   * enters the fallback chain — handlePaymentExpiry checks isInstantBuy and
+   * goes straight to ABANDONED if this buyer doesn't pay in time.
+   */
+  async executeInstantBuy(
+    productId: string,
+    buyerId: string,
+  ): Promise<Product> {
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    let winnerId: string | null = null;
+    let sellerId: string | null = null;
+    let winningAmount: number | null = null;
+    let paymentDeadline: Date | null = null;
+    let capturedProductTitle: string | null = null;
+    let capturedProductId: string | null = null;
+    let capturedWinningBidId: string | null = null;
+    let savedProduct: Product;
+
+    try {
+      const product = await qr.manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .setLock('pessimistic_write')
+        .where('product.id = :id', { id: productId })
+        .getOne();
+
+      if (!product) {
+        throw new BadRequestException('Product not found');
+      }
+
+      if (
+        product.status !== ProductStatus.PENDING &&
+        product.status !== ProductStatus.ACTIVE
+      ) {
+        throw new BadRequestException('Product is not open for Instant Buy');
+      }
+
+      if (product.ownerId === buyerId) {
+        throw new BadRequestException(
+          'Owner cannot Instant Buy their own product',
+        );
+      }
+
+      // Re-validate visibility INSIDE the lock — a concurrent bid could have
+      // crossed instantBuyPrice between an earlier (pre-lock) check and now.
+      const currentBid = Number(
+        product.currentHighestBid ?? product.biddingStartPrice,
+      );
+      const instantBuyPrice = Number(product.instantBuyPrice);
+
+      if (currentBid >= instantBuyPrice) {
+        throw new BadRequestException(
+          'Instant Buy is no longer available for this product',
+        );
+      }
+
+      const existingResponsible = await qr.manager.getRepository(Bid).findOne({
+        where: { productId, isCurrentlyPaymentResponsible: true },
+      });
+      if (existingResponsible) {
+        throw new InternalServerErrorException(
+          'A payment-responsible bid already exists — data inconsistency',
+        );
+      }
+
+      const now = new Date();
+      const paymentWindowHours = this.configService.getOrThrow<number>(
+        'PAYMENT_WINDOW_HOURS',
+      );
+      const computedDeadline = new Date(
+        now.getTime() + paymentWindowHours * 60 * 60 * 1000,
+      );
+
+      const instantBid = qr.manager.getRepository(Bid).create({
+        productId,
+        bidderId: buyerId,
+        amount: instantBuyPrice,
+        placedAt: now,
+        previousHighestAmount: product.currentHighestBid,
+        wasFirstBid: product.currentHighestBid === null,
+        isOriginalWinner: true,
+        isInstantBuy: true,
+        fallbackRank: 0,
+        isCurrentlyPaymentResponsible: true,
+        paymentStatus: BidPaymentStatus.PENDING,
+        paymentDeadline: computedDeadline,
+      });
+      const savedBid = await qr.manager.getRepository(Bid).save(instantBid);
+
+      // No fallback pool: every other bid on this product is permanently
+      // NOT_RESPONSIBLE. Instant Buy must never fall back to another bidder,
+      // even if this buyer never pays (see handlePaymentExpiry).
+      await qr.manager
+        .createQueryBuilder()
+        .update(Bid)
+        .set({ paymentStatus: BidPaymentStatus.NOT_RESPONSIBLE })
+        .where('productId = :productId AND id != :id', {
+          productId,
+          id: savedBid.id,
+        })
+        .execute();
+
+      product.status = ProductStatus.AWAITING_PAYMENT;
+      product.currentHighestBid = instantBuyPrice;
+      product.currentHighestBidderId = buyerId;
+      if (!product.biddingStartedAt) product.biddingStartedAt = now;
+      product.biddingEndsAt = now;
+      product.closedAt = now;
+      product.winningBidId = savedBid.id;
+
+      savedProduct = await qr.manager.getRepository(Product).save(product);
+
+      await qr.commitTransaction();
+
+      winnerId = buyerId;
+      sellerId = product.ownerId;
+      winningAmount = instantBuyPrice;
+      paymentDeadline = computedDeadline;
+      capturedProductTitle = product.title;
+      capturedProductId = product.id;
+      capturedWinningBidId = savedBid.id;
+    } catch (err: unknown) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
+
+    // Post-commit email notifications — failures are non-fatal. Reuses the
+    // same templates as a normal auction win (buyer/seller framing is
+    // identical from their point of view).
+    try {
+      const [winner, seller] = await Promise.all([
+        this.dataSource
+          .getRepository(User)
+          .findOne({ where: { id: winnerId } }),
+        this.dataSource
+          .getRepository(User)
+          .findOne({ where: { id: sellerId } }),
+      ]);
+
+      if (winner) {
+        await this.mailService.sendAuctionWon(winner.email, {
+          bidderName: winner.name,
+          productTitle: capturedProductTitle,
+          productId: capturedProductId,
+          winningAmount: winningAmount,
+          paymentDeadline: paymentDeadline,
+        });
+      }
+
+      if (seller) {
+        await this.mailService.sendAuctionClosedSeller(seller.email, {
+          sellerName: seller.name,
+          productTitle: capturedProductTitle,
+          winningAmount: winningAmount,
+          winnerName: winner?.name ?? 'Unknown',
+        });
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `executeInstantBuy: post-commit email failed for product ${capturedProductId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    // Reuse AUCTION_CLOSED — AuctionClosedHandler re-broadcasts current state,
+    // which is exactly what's needed to make showInstantBuy/status flip in
+    // real time for connected SSE clients.
+    try {
+      const payload: AuctionClosedPayload = {
+        productId: capturedProductId,
+        winningBidId: capturedWinningBidId,
+        winnerId: winnerId,
+        winningAmount: winningAmount,
+      };
+      this.eventEmitter.emit(EventNames.AUCTION_CLOSED, payload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `executeInstantBuy: auction.closed emission failed for product ${capturedProductId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    return savedProduct;
+  }
+
   // ─── Core transition: expire a payment window and advance the fallback chain
 
   async handlePaymentExpiry(
@@ -201,9 +400,10 @@ export class AuctionLifecycleService {
       await qr.startTransaction();
     }
 
-    // Captured for post-commit emails
+    // Captured for post-commit emails and events
     let outcome: 'fallback' | 'abandoned' | 'noop' = 'noop';
     let newWinnerId: string | null = null;
+    let failedBidderId: string | null = null;
     let sellerId: string | null = null;
     let capturedProductTitle: string | null = null;
     let capturedProductId: string | null = null;
@@ -246,23 +446,30 @@ export class AuctionLifecycleService {
       }
 
       failedBidderRank = responsibleBid.fallbackRank;
+      failedBidderId = responsibleBid.bidderId;
       responsibleBid.paymentStatus = BidPaymentStatus.EXPIRED;
       responsibleBid.isCurrentlyPaymentResponsible = false;
 
-      const nextBid = await qr.manager
-        .getRepository(Bid)
-        .createQueryBuilder('bid')
-        .where(
-          'bid.productId = :productId AND bid.paymentStatus = :status AND bid.id != :id',
-          {
-            productId,
-            status: BidPaymentStatus.NOT_RESPONSIBLE,
-            id: responsibleBid.id,
-          },
-        )
-        .orderBy('bid.amount', 'DESC')
-        .addOrderBy('bid.placedAt', 'ASC')
-        .getOne();
+      // Instant Buy never falls back to another bidder — the auction closed
+      // to exactly one buyer at click time, even if other (now
+      // NOT_RESPONSIBLE) bids exist below it. Skip the fallback search
+      // entirely and go straight to ABANDONED.
+      const nextBid = responsibleBid.isInstantBuy
+        ? null
+        : await qr.manager
+            .getRepository(Bid)
+            .createQueryBuilder('bid')
+            .where(
+              'bid.productId = :productId AND bid.paymentStatus = :status AND bid.id != :id',
+              {
+                productId,
+                status: BidPaymentStatus.NOT_RESPONSIBLE,
+                id: responsibleBid.id,
+              },
+            )
+            .orderBy('bid.amount', 'DESC')
+            .addOrderBy('bid.placedAt', 'ASC')
+            .getOne();
 
       if (nextBid) {
         const paymentWindowHours = this.configService.getOrThrow<number>(
@@ -372,13 +579,61 @@ export class AuctionLifecycleService {
         err instanceof Error ? err.stack : String(err),
       );
     }
+
+    // Emit WIN_TRANSFERRED so SSE subscribers (and the PaymentsModule handler)
+    // learn the win moved to a new bidder. Non-fatal — never blocks the expiry flow.
+    if (outcome === 'fallback') {
+      try {
+        this.eventEmitter.emit(EventNames.WIN_TRANSFERRED, {
+          productId: capturedProductId,
+          fromUserId: failedBidderId,
+          toUserId: newWinnerId,
+          newPaymentDeadline: newWinnerDeadline!.toISOString(),
+        });
+      } catch (err: unknown) {
+        this.logger.error(
+          `handlePaymentExpiry: win.transferred emission failed for product ${capturedProductId}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
   }
 
   // ─── Admin-initiated payment confirmation ─────────────────────────────────
 
+  private resolveDeliveryCharge(zone: DeliveryZone): number {
+    const key =
+      zone === DeliveryZone.INSIDE_VALLEY
+        ? 'DELIVERY_CHARGE_INSIDE_VALLEY'
+        : 'DELIVERY_CHARGE_OUTSIDE_VALLEY';
+    return this.configService.getOrThrow<number>(key);
+  }
+
+  // Mirrors PaymentsService.generateUniqueReferenceLabel — duplicated locally
+  // rather than injecting PaymentsService here, which would create a circular
+  // dependency (PaymentsService already depends on AuctionLifecycleService).
+  private async generateManualReferenceLabel(qr: QueryRunner): Promise<string> {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const bytes = crypto.randomBytes(22);
+      let label = '';
+      for (let i = 0; i < 22; i++) {
+        label += chars[bytes[i] % chars.length];
+      }
+      const exists = await qr.manager
+        .getRepository(Payment)
+        .findOne({ where: { referenceLabel: label } });
+      if (!exists) return label;
+    }
+    throw new Error(
+      'Failed to generate a unique referenceLabel after 5 attempts',
+    );
+  }
+
   async confirmPaymentManual(
     adminId: string,
     productId: string,
+    deliveryZone: DeliveryZone,
   ): Promise<Product> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -443,6 +698,29 @@ export class AuctionLifecycleService {
 
       savedProduct = await qr.manager.getRepository(Product).save(product);
 
+      // Create a matching Payment/settlement record so this sale flows
+      // through the same seller-settlement + points/commission pipeline as
+      // a gateway-paid sale (RewardsModule queries Payment for pending
+      // settlements — this path has no Fonepay-generated Payment row
+      // otherwise). sellerPaidAt stays null: settlement-to-seller is a
+      // separate, later admin action (see RewardsService.markSellerPaid).
+      const referenceLabel = await this.generateManualReferenceLabel(qr);
+      const manualPayment = qr.manager.getRepository(Payment).create({
+        productId,
+        winnerUserId: responsibleBid.bidderId,
+        amount: Number(responsibleBid.amount),
+        referenceLabel,
+        terminalId: 'ADMIN-MANUAL',
+        qrString: null,
+        qrMessage: null,
+        websocketUrl: null,
+        status: PaymentStatus.SUCCESS,
+        paymentDeadline: responsibleBid.paymentDeadline ?? now,
+        deliveryZone,
+        deliveryCharge: this.resolveDeliveryCharge(deliveryZone),
+      });
+      await qr.manager.getRepository(Payment).save(manualPayment);
+
       await qr.commitTransaction();
 
       // Capture for post-commit emails and event emission
@@ -503,6 +781,146 @@ export class AuctionLifecycleService {
     } catch (err: unknown) {
       this.logger.error(
         `confirmPaymentManual: auction.settled emission failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    return savedProduct;
+  }
+
+  // ─── Gateway-initiated payment confirmation (Fonepay) ─────────────────────
+
+  /**
+   * Settle a product after a Fonepay payment is confirmed programmatically.
+   * Identical to confirmPaymentManual but uses BANK_API as the confirmation
+   * method and leaves paymentConfirmedById null (no human admin).
+   *
+   * Throws BadRequestException if the product is not in AWAITING_PAYMENT status
+   * (callers should handle this as a no-op if the product is already SETTLED).
+   */
+  async confirmPaymentGateway(productId: string): Promise<Product> {
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    let sellerId: string | null = null;
+    let buyerId: string | null = null;
+    let confirmedAmount: number | null = null;
+    let capturedProductTitle: string | null = null;
+    let capturedWinningBidId: string | null = null;
+    let savedProduct: Product;
+
+    try {
+      const product = await qr.manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .setLock('pessimistic_write')
+        .where('product.id = :id', { id: productId })
+        .getOne();
+
+      if (!product) {
+        throw new BadRequestException('Product not found');
+      }
+
+      if (product.status !== ProductStatus.AWAITING_PAYMENT) {
+        throw new BadRequestException(
+          `Product is not awaiting payment (status: ${product.status})`,
+        );
+      }
+
+      const responsibleBid = await qr.manager.getRepository(Bid).findOne({
+        where: { productId, isCurrentlyPaymentResponsible: true },
+      });
+
+      if (!responsibleBid) {
+        throw new InternalServerErrorException(
+          'No responsible bid found — data inconsistency',
+        );
+      }
+
+      const now = new Date();
+
+      responsibleBid.paymentStatus = BidPaymentStatus.CONFIRMED;
+      responsibleBid.paymentConfirmedAt = now;
+      responsibleBid.paymentConfirmedById = null;
+      responsibleBid.paymentConfirmationMethod =
+        PaymentConfirmationMethod.BANK_API;
+
+      product.status = ProductStatus.SETTLED;
+      product.settledAt = now;
+
+      await qr.manager.getRepository(Bid).save(responsibleBid);
+
+      await qr.manager
+        .createQueryBuilder()
+        .update(Bid)
+        .set({ paymentStatus: BidPaymentStatus.NOT_RESPONSIBLE })
+        .where('productId = :productId AND id != :id', {
+          productId,
+          id: responsibleBid.id,
+        })
+        .execute();
+
+      savedProduct = await qr.manager.getRepository(Product).save(product);
+
+      await qr.commitTransaction();
+
+      sellerId = product.ownerId;
+      buyerId = responsibleBid.bidderId;
+      confirmedAmount = Number(responsibleBid.amount);
+      capturedProductTitle = product.title;
+      capturedWinningBidId = responsibleBid.id;
+    } catch (err: unknown) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
+
+    // Post-commit emails — reuse the same templates as manual confirmation
+    try {
+      const [seller, buyer] = await Promise.all([
+        this.dataSource
+          .getRepository(User)
+          .findOne({ where: { id: sellerId } }),
+        this.dataSource.getRepository(User).findOne({ where: { id: buyerId } }),
+      ]);
+
+      if (seller) {
+        await this.mailService.sendPaymentConfirmedSeller(seller.email, {
+          sellerName: seller.name,
+          productTitle: capturedProductTitle,
+          amount: confirmedAmount,
+          buyerName: buyer?.name ?? 'Unknown',
+        });
+      }
+
+      if (buyer) {
+        await this.mailService.sendPaymentConfirmedBuyer(buyer.email, {
+          buyerName: buyer.name,
+          productTitle: capturedProductTitle,
+          amount: confirmedAmount,
+        });
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `confirmPaymentGateway: post-commit email failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    // Emit AUCTION_SETTLED so AuctionSettledHandler broadcasts the SSE update
+    try {
+      const payload: AuctionSettledPayload = {
+        productId,
+        winningBidId: capturedWinningBidId,
+        buyerId,
+        amount: confirmedAmount,
+      };
+      this.eventEmitter.emit(EventNames.AUCTION_SETTLED, payload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `confirmPaymentGateway: auction.settled emission failed for product ${productId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }

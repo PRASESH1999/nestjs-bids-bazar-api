@@ -28,6 +28,7 @@ import { AuctionBroadcastService } from './services/auction-broadcast.service';
 import { BiddingService } from './services/bidding.service';
 import { PlaceBidDto } from './dto/place-bid.dto';
 import { ListBidsAdminQueryDto } from './dto/list-bids-admin.query.dto';
+import { ConfirmPaymentManualDto } from './dto/confirm-payment-manual.dto';
 
 @ApiTags('bidding')
 @ApiBearerAuth()
@@ -69,6 +70,24 @@ export class BiddingController {
     return this.biddingService.placeBid(req.user.sub, productId, dto);
   }
 
+  // ─── USER: instant buy ────────────────────────────────────────────────────
+
+  @Post('products/:id/instant-buy')
+  @RequirePermissions(Permission.BID_PLACE)
+  @ApiOperation({
+    summary:
+      'Instant Buy: immediately purchase at instantBuyPrice, closing the auction. No fallback to other bidders under any circumstance.',
+  })
+  async instantBuy(
+    @Param('id') productId: string,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.auctionLifecycleService.executeInstantBuy(
+      productId,
+      req.user.sub,
+    );
+  }
+
   // ─── PUBLIC: SSE live-update stream for the product detail page ──────────
 
   @Sse('products/:id/events')
@@ -107,7 +126,7 @@ export class BiddingController {
   // ─── USER: bid history for a product ─────────────────────────────────────
 
   @Get('products/:id/bids')
-  @RequirePermissions(Permission.BID_VIEW_OWN)
+  @RequirePermissions(Permission.BID_VIEW_OWN, Permission.BID_VIEW_ALL)
   @ApiOperation({
     summary:
       'Get bid history for a product. Admins receive full metadata; users see names only.',
@@ -156,11 +175,13 @@ export class BiddingController {
   })
   async confirmPayment(
     @Param('id') productId: string,
+    @Body() dto: ConfirmPaymentManualDto,
     @Request() req: RequestWithUser,
   ) {
     return this.auctionLifecycleService.confirmPaymentManual(
       req.user.sub,
       productId,
+      dto.deliveryZone,
     );
   }
 

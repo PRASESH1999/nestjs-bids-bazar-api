@@ -19,13 +19,28 @@ export interface AuctionUpdatePayload {
   currentHighestBid: number | null;
   currentHighestBidderId: string | null;
   biddingEndsAt: string | null;
+  instantBuyPrice: number;
+  showInstantBuy: boolean;
   topBidders: Array<{ username: string; highestBid: number }>;
   recentBids: RecentBidItem[];
 }
 
+// Payment-specific SSE event shapes (discriminated by `type`).
+export interface PaymentSseEvent {
+  type:
+    | 'payment.initiated'
+    | 'payment.succeeded'
+    | 'payment.failed'
+    | 'win.transferred';
+  productId: string;
+  [key: string]: unknown;
+}
+
+type SubjectPayload = AuctionUpdatePayload | PaymentSseEvent;
+
 interface SubjectMessage {
   productId: string;
-  payload: AuctionUpdatePayload;
+  payload: SubjectPayload;
 }
 
 /**
@@ -61,6 +76,18 @@ export class AuctionBroadcastService {
   }
 
   /**
+   * Push a typed payment event directly to all SSE subscribers of a product.
+   * Unlike broadcastUpdate() this does NOT re-fetch product state — the caller
+   * supplies the exact event object to send.
+   */
+  broadcastPaymentEvent(productId: string, event: PaymentSseEvent): void {
+    this.subject.next({ productId, payload: event });
+    this.logger.debug(
+      `broadcastPaymentEvent: pushed ${event.type} for product ${productId}`,
+    );
+  }
+
+  /**
    * Builds the full live-view payload for a product. Combines top-bidders
    * (leaderboard) and recent-bids (battle feed) into a single envelope so the
    * frontend can toggle views from one event.
@@ -83,6 +110,10 @@ export class AuctionBroadcastService {
 
     const recentBids = await this.fetchRecentBids(productId);
 
+    const currentBid = Number(
+      product.currentHighestBid ?? product.biddingStartPrice,
+    );
+
     return {
       type: 'auction.update',
       productId: product.id,
@@ -95,6 +126,8 @@ export class AuctionBroadcastService {
       biddingEndsAt: product.biddingEndsAt
         ? product.biddingEndsAt.toISOString()
         : null,
+      instantBuyPrice: Number(product.instantBuyPrice),
+      showInstantBuy: currentBid < Number(product.instantBuyPrice),
       topBidders,
       recentBids,
     };

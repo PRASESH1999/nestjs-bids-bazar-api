@@ -12,16 +12,47 @@ trigger: always_on
 
 ## Pricing Model
 - User sets a base price (their desired sale price).
-- Platform applies a 10% margin: bidding starts at `basePrice * 1.10`.
+- The platform applies a **tiered margin** on top of `basePrice` — the lower the
+  base price, the higher the margin. The markup is selected by which band the
+  `basePrice` (in NPR) falls into:
+
+  | `basePrice` (NPR)   | Markup |
+  |---------------------|--------|
+  | ≤ 10,000            | 20%    |
+  | 10,001 – 20,000     | 18%    |
+  | 20,001 – 30,000     | 16%    |
+  | 30,001 – 40,000     | 14%    |
+  | 40,001 – 50,000     | 12%    |
+  | > 50,000            | 10%    |
+
+- `biddingStartPrice = round(basePrice × (1 + markup), 2)` — rounded to 2 decimal
+  places. The single source of truth is `ProductsService.computeBiddingStartPrice`.
 - Both values are stored on the product:
     `basePrice`          : user-entered desired price
-    `biddingStartPrice`  : auto-computed = `basePrice * 1.10`
+    `biddingStartPrice`  : auto-computed via the tiered markup above
 - First bid must be ≥ `biddingStartPrice`.
 - Bidding logic, countdown, and increments are governed by Rule 3: Bidding Domain
   Logic — do NOT duplicate that logic here.
 - For the full bidding mechanics including increment rules, payment windows, auction
   closing logic, and the fallback payment chain, see
   **Rule 14: Bidding & Auction Lifecycle**.
+
+### Instant Buy
+- Every product also gets a fixed, **mandatory** Instant Buy price — not
+  seller-set, not optional, present on every listing:
+  `instantBuyPrice = round(basePrice × 1.4, 2)`, computed alongside
+  `biddingStartPrice` via `ProductsService.computeInstantBuyPrice`
+  (`GET /products/calculate-instant-buy-price` exposes it the same way
+  `GET /products/calculate-bidding-price` does).
+- `instantBuyPrice` is always strictly above `biddingStartPrice` — the
+  markup table above tops out at 1.20× `basePrice`, well under 1.40×.
+- Visibility (derived, never stored): `showInstantBuy = currentBid <
+  instantBuyPrice`, where `currentBid = currentHighestBid ??
+  biddingStartPrice`. Hidden once the current bid meets or exceeds it.
+- The actual Instant Buy purchase action, its no-fallback fulfillment
+  rule, and its interaction with the bidding state machine are owned by
+  **Rule 14: Bidding & Auction Lifecycle** — do not duplicate that logic
+  here.
 
 ## Required Pre-conditions to Sell
 - User must have `isEmailVerified === true` (enforced via login gate).

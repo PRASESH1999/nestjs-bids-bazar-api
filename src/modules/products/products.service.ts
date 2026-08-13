@@ -37,6 +37,8 @@ export type ProductImageResponse = {
 export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
   previewImage: { id: string; url: string; mimeType: string } | null;
   images: ProductImageResponse[];
+  // Derived, not stored: currentBid < instantBuyPrice. See Rule 13/14.
+  showInstantBuy: boolean;
 };
 
 export type TopBidder = { username: string; highestBid: number };
@@ -112,6 +114,7 @@ export class ProductsService {
     ];
 
     const biddingStartPrice = this.computeBiddingStartPrice(dto.basePrice);
+    const instantBuyPrice = this.computeInstantBuyPrice(dto.basePrice);
 
     // Save product first to get the UUID for the image directory.
     const product = this.productsRepository.createProduct({
@@ -124,6 +127,7 @@ export class ProductsService {
       condition: dto.condition,
       basePrice: dto.basePrice,
       biddingStartPrice,
+      instantBuyPrice,
       biddingDurationHours: dto.biddingDurationHours ?? 72,
       status: ProductStatus.DRAFT,
       currentHighestBid: null,
@@ -193,6 +197,7 @@ export class ProductsService {
     if (dto.basePrice !== undefined) {
       product.basePrice = dto.basePrice;
       product.biddingStartPrice = this.computeBiddingStartPrice(dto.basePrice);
+      product.instantBuyPrice = this.computeInstantBuyPrice(dto.basePrice);
     }
 
     if (newImageFiles && newImageFiles.length > 0) {
@@ -733,7 +738,14 @@ export class ProductsService {
     return Math.round(basePrice * (1 + markup) * 100) / 100;
   }
 
+  // Fixed buy-now price: 1.4 × basePrice. Always above biddingStartPrice
+  // (max markup band is 1.2×), per Rule 13.
+  computeInstantBuyPrice(basePrice: number): number {
+    return Math.round(basePrice * 1.4 * 100) / 100;
+  }
+
   private mapProduct(product: Product): ProductResponse {
+    const currentBid = product.currentHighestBid ?? product.biddingStartPrice;
     return {
       id: product.id,
       ownerId: product.ownerId,
@@ -746,6 +758,8 @@ export class ProductsService {
       status: product.status,
       basePrice: product.basePrice,
       biddingStartPrice: product.biddingStartPrice,
+      instantBuyPrice: product.instantBuyPrice,
+      showInstantBuy: currentBid < product.instantBuyPrice,
       currency: product.currency,
       biddingDurationHours: product.biddingDurationHours,
       currentHighestBid: product.currentHighestBid,

@@ -1,0 +1,4 @@
+export enum DeliveryZone {
+  INSIDE_VALLEY = 'INSIDE_VALLEY',
+  OUTSIDE_VALLEY = 'OUTSIDE_VALLEY',
+}

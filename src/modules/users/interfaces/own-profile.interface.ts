@@ -1,5 +1,6 @@
 import { Role } from '@common/enums/role.enum';
 import { KycStatus } from '@common/enums/kyc-status.enum';
+import { SellerTier } from '@common/enums/seller-tier.enum';
 
 export interface KycSummary {
   status: KycStatus;
@@ -11,6 +12,12 @@ export interface KycSummary {
 export interface PendingEmailChangeSummary {
   newEmail: string;
   expiresAt: Date;
+}
+
+export interface RewardsSummary {
+  buyerPoints: number;
+  sellerPoints: number;
+  sellerTier: SellerTier;
 }
 
 export interface OwnProfileResponse {
@@ -27,4 +34,5 @@ export interface OwnProfileResponse {
   updatedAt: Date;
   kyc: KycSummary | null;
   pendingEmailChange: PendingEmailChangeSummary | null;
+  rewards: RewardsSummary;
 }

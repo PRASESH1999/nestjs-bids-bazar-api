@@ -27,3 +27,47 @@ export interface AuctionSettledPayload {
   buyerId: string;
   amount: number;
 }
+
+// ─── Fonepay payment lifecycle ─────────────────────────────────────────────
+
+export interface PaymentInitiatedPayload {
+  productId: string;
+  paymentId: string;
+  referenceLabel: string;
+  winnerUserId: string;
+}
+
+export interface PaymentSucceededPayload {
+  productId: string;
+  paymentId: string;
+  referenceLabel: string;
+  winnerUserId: string;
+  fonepayTraceId: string | null;
+  amount: number;
+}
+
+export interface PaymentFailedPayload {
+  productId: string;
+  paymentId: string;
+  referenceLabel: string;
+  winnerUserId: string;
+  message: string;
+}
+
+export interface WinTransferredPayload {
+  productId: string;
+  fromUserId: string;
+  toUserId: string;
+  newPaymentDeadline: string;
+}
+
+// ─── Rewards (Rule 16) ──────────────────────────────────────────────────────
+
+export interface SellerMarkedPaidPayload {
+  paymentId: string;
+  productId: string;
+  sellerId: string;
+  buyerId: string;
+  pointsEarned: number;
+  sellerPayoutAmount: number;
+}
