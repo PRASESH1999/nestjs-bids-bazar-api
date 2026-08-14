@@ -41,6 +41,9 @@ export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
   showInstantBuy: boolean;
 };
 
+// Home-page cards need the bid count alongside the standard product shape.
+export type HomeProductResponse = ProductResponse & { totalBids: number };
+
 export type TopBidder = { username: string; highestBid: number };
 
 export type WinningBidder = {
@@ -423,6 +426,33 @@ export class ProductsService {
       winningBidder,
       similarProducts,
     };
+  }
+
+  // ─── Home page ────────────────────────────────────────────────────────────
+
+  // The single hottest ACTIVE product — most bids, ties broken by soonest ending.
+  async getHotProduct(): Promise<HomeProductResponse | null> {
+    const result = await this.productsRepository.findHotProduct();
+    if (!result) return null;
+    return { ...this.mapProduct(result.product), totalBids: result.totalBids };
+  }
+
+  // Top 10 ACTIVE products ranked by bid count.
+  async getTrendingProducts(): Promise<HomeProductResponse[]> {
+    const results = await this.productsRepository.findTrendingProducts(10);
+    return results.map((r) => ({
+      ...this.mapProduct(r.product),
+      totalBids: r.totalBids,
+    }));
+  }
+
+  // 10 most recently listed ACTIVE products.
+  async getNewArrivals(): Promise<HomeProductResponse[]> {
+    const results = await this.productsRepository.findNewestProducts(10);
+    return results.map((r) => ({
+      ...this.mapProduct(r.product),
+      totalBids: r.totalBids,
+    }));
   }
 
   // ─── View tracking ────────────────────────────────────────────────────────

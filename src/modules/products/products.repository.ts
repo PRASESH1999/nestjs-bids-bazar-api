@@ -6,8 +6,14 @@ import {
 import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { ItemCondition } from '@common/enums/item-condition.enum';
+import { Bid } from '@modules/bidding/entities/bid.entity';
 import { Product } from './entities/product.entity';
 import { ProductImage } from './entities/product-image.entity';
+
+export interface RankedProduct {
+  product: Product;
+  totalBids: number;
+}
 
 export interface ProductFilters {
   categoryId?: string;
@@ -117,6 +123,60 @@ export class ProductsRepository {
 
   async deleteProduct(product: Product): Promise<void> {
     await this.productRepo.softRemove(product);
+  }
+
+  // ─── Home page ────────────────────────────────────────────────────────────
+
+  // The single hottest ACTIVE product: most bids first, ties broken by
+  // soonest-ending — "highest bid count" and "running out" per the home-page spec.
+  async findHotProduct(): Promise<RankedProduct | null> {
+    const rows = await this.productRepo
+      .createQueryBuilder('product')
+      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .select('product.id', 'id')
+      .addSelect('COUNT(bid.id)', 'totalBids')
+      .where('product.status = :status', { status: ProductStatus.ACTIVE })
+      .groupBy('product.id')
+      .orderBy('COUNT(bid.id)', 'DESC')
+      .addOrderBy('product.biddingEndsAt', 'ASC', 'NULLS LAST')
+      .limit(1)
+      .getRawMany<{ id: string; totalBids: string }>();
+
+    const hydrated = await this.hydrateRanked(rows);
+    return hydrated[0] ?? null;
+  }
+
+  // Top `limit` ACTIVE products ranked by bid count (DESC), ties broken by newest.
+  async findTrendingProducts(limit: number): Promise<RankedProduct[]> {
+    const rows = await this.productRepo
+      .createQueryBuilder('product')
+      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .select('product.id', 'id')
+      .addSelect('COUNT(bid.id)', 'totalBids')
+      .where('product.status = :status', { status: ProductStatus.ACTIVE })
+      .groupBy('product.id')
+      .orderBy('COUNT(bid.id)', 'DESC')
+      .addOrderBy('product.createdAt', 'DESC')
+      .limit(limit)
+      .getRawMany<{ id: string; totalBids: string }>();
+
+    return this.hydrateRanked(rows);
+  }
+
+  // Most recently listed `limit` ACTIVE products (bidding already under way).
+  async findNewestProducts(limit: number): Promise<RankedProduct[]> {
+    const rows = await this.productRepo
+      .createQueryBuilder('product')
+      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .select('product.id', 'id')
+      .addSelect('COUNT(bid.id)', 'totalBids')
+      .where('product.status = :status', { status: ProductStatus.ACTIVE })
+      .groupBy('product.id')
+      .orderBy('product.createdAt', 'DESC')
+      .limit(limit)
+      .getRawMany<{ id: string; totalBids: string }>();
+
+    return this.hydrateRanked(rows);
   }
 
   async findPaginated(
@@ -269,6 +329,31 @@ export class ProductsRepository {
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
+
+  // Re-fetches ranked product ids with their images, preserving the incoming
+  // (already-ranked) order — the ranking itself is computed in raw SQL above.
+  private async hydrateRanked(
+    rows: Array<{ id: string; totalBids: string }>,
+  ): Promise<RankedProduct[]> {
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((row) => row.id);
+    const products = await this.productRepo.find({
+      where: { id: In(ids) },
+      relations: ['images'],
+      order: { images: { displayOrder: 'ASC' } },
+    });
+    const productsById = new Map(
+      products.map((product) => [product.id, product]),
+    );
+
+    return rows
+      .map((row) => {
+        const product = productsById.get(row.id);
+        return product ? { product, totalBids: Number(row.totalBids) } : null;
+      })
+      .filter((entry): entry is RankedProduct => entry !== null);
+  }
 
   private buildFilterQuery(
     filters: ProductFilters,

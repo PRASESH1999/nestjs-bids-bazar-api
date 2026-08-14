@@ -3,17 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { extname, resolve } from 'path';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 
-const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'application/pdf',
-]);
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'application/pdf']);
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 export const MAX_FILE_SIZE_LABEL = '5 MB';
 
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
-  'image/png': '.png',
   'application/pdf': '.pdf',
 };
 
@@ -35,7 +30,7 @@ export class StorageService {
   ): Promise<string> {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       throw new BadRequestException(
-        `File type '${file.mimetype}' is not allowed. Accepted: JPEG, PNG, PDF`,
+        `File type '${file.mimetype}' is not allowed. Accepted: JPEG, PDF`,
       );
     }
     if (file.size > MAX_FILE_SIZE) {

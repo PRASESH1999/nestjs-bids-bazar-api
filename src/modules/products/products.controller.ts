@@ -94,6 +94,34 @@ export class ProductsController {
     return { basePrice: price, instantBuyPrice };
   }
 
+  @Get('products/home/hot-product')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Home page: the single hottest ACTIVE product (most bids, ties broken by soonest ending)',
+  })
+  async getHotProduct() {
+    return { data: await this.productsService.getHotProduct() };
+  }
+
+  @Get('products/home/trending-bids')
+  @Public()
+  @ApiOperation({
+    summary: 'Home page: top 10 ACTIVE products ranked by bid count',
+  })
+  async getTrendingBids() {
+    return { data: await this.productsService.getTrendingProducts() };
+  }
+
+  @Get('products/home/new-arrivals')
+  @Public()
+  @ApiOperation({
+    summary: 'Home page: 10 most recently listed ACTIVE products',
+  })
+  async getNewArrivals() {
+    return { data: await this.productsService.getNewArrivals() };
+  }
+
   @Get('products/me')
   @RequirePermissions(Permission.PRODUCT_VIEW_OWN)
   @ApiOperation({ summary: 'List own products (all statuses)' })
