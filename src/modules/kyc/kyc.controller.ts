@@ -30,6 +30,7 @@ import { Permission } from '@common/enums/permission.enum';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
 import { KycService } from './kyc.service';
+import { BankDetailDto } from './dto/bank-detail.dto';
 import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
@@ -54,6 +55,8 @@ export class KycController {
         { name: 'citizenshipFront', maxCount: 1 },
         { name: 'citizenshipBack', maxCount: 1 },
         { name: 'passport', maxCount: 1 },
+        { name: 'nidFront', maxCount: 1 },
+        { name: 'nidBack', maxCount: 1 },
       ],
       { storage: memoryStorage() },
     ),
@@ -66,6 +69,8 @@ export class KycController {
       citizenshipFront?: Express.Multer.File[];
       citizenshipBack?: Express.Multer.File[];
       passport?: Express.Multer.File[];
+      nidFront?: Express.Multer.File[];
+      nidBack?: Express.Multer.File[];
     },
   ) {
     return this.kycService.submitKyc(req.user.sub, dto, files ?? {});
@@ -76,6 +81,28 @@ export class KycController {
   @RequirePermissions(Permission.KYC_VIEW_OWN)
   async getMyKyc(@Request() req: RequestWithUser) {
     return this.kycService.getMyKyc(req.user.sub);
+  }
+
+  @Patch('me/bank')
+  @ApiOperation({
+    summary: 'Add or update own bank details (independent of KYC resubmission)',
+  })
+  @RequirePermissions(Permission.KYC_SUBMIT)
+  async addOrUpdateBankDetails(
+    @Request() req: RequestWithUser,
+    @Body() dto: BankDetailDto,
+  ) {
+    return this.kycService.addOrUpdateBankDetails(req.user.sub, dto);
+  }
+
+  @Get('me/sell-eligibility')
+  @ApiOperation({
+    summary:
+      'Check whether the caller can sell: KYC approved + bank details on file',
+  })
+  @RequirePermissions(Permission.KYC_VIEW_OWN)
+  async getSellEligibility(@Request() req: RequestWithUser) {
+    return this.kycService.getSellEligibility(req.user.sub);
   }
 
   @Get()

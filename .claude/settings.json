@@ -30,7 +30,15 @@
       "Bash(node scripts/backfill-instant-buy-price.js)",
       "Bash(npm ls *)",
       "Bash(git status *)",
-      "Bash(where psql *)"
+      "Bash(where psql *)",
+      "Bash(npx ts-node *)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")",
+      "PowerShell(Stop-Process -Id 6132,16056,19824 -Force -ErrorAction SilentlyContinue)",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/register -H \"Content-Type: application/json\" -d '{\"name\":\"KYC Test User\",\"email\":\"kyctest1@example.com\",\"password\":\"password123\"}')",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /tmp/create-product.json -w 'HTTP %{http_code}\\\\n' -X POST http://localhost:3000/api/v1/products -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -F 'title=Test Item' -F categoryId=00000000-0000-0000-0000-000000000000)",
+      "Bash(curl -s -o /tmp/create-product3.json -w 'HTTP %{http_code}\\\\n' -X POST http://localhost:3000/api/v1/products -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -F 'title=Test Item For Sale' -F 'description=A perfectly fine test item description for the listing.' -F categoryId=32babf54-33f3-4dc5-ba5e-78641da08f35 -F subcategoryId=62eaaa1f-0dbb-47e4-a137-f0738c0c86fd -F condition=NEW -F basePrice=100 -F 'images=@e:/Kusa/BidsBazar/nestjs-bids-bazar-api/scratch-dummy.jpg;type=image/jpeg')",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/register -H \"Content-Type: application/json\" -d '{\"name\":\"NID Test User\",\"email\":\"kyctest2@example.com\",\"password\":\"password123\"}')"
     ],
     "additionalDirectories": [
       "E:\\Kusa\\BidsBazar\\bids-bazar\\src\\features\\payments\\actions",

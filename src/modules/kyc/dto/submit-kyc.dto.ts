@@ -14,6 +14,26 @@ export class SubmitKycDto {
   @IsEnum(DocumentType)
   documentType: DocumentType;
 
+  // --- Contact ---
+
+  @ApiProperty({ example: '+9779812345678' })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\+?\d{7,15}$/, {
+    message: 'primaryPhone must be 7–15 digits, optionally starting with +',
+  })
+  primaryPhone: string;
+
+  @ApiPropertyOptional({
+    example: '+9779812345679',
+    description: 'Emergency contact number',
+  })
+  @IsOptional()
+  @Matches(/^\+?\d{7,15}$/, {
+    message: 'secondaryPhone must be 7–15 digits, optionally starting with +',
+  })
+  secondaryPhone?: string;
+
   // --- Permanent Address ---
 
   @ApiProperty({ example: 'Kathmandu-10' })
@@ -68,29 +88,32 @@ export class SubmitKycDto {
   @IsString()
   temporaryAddressCountry?: string;
 
-  // --- Bank Details ---
+  // --- Bank Details (optional at submission; all-or-nothing — see
+  // KycService.submitKyc. Required later, via PATCH /kyc/me/bank, before the
+  // user is allowed to list a product for sale.) ---
 
-  @ApiProperty({ example: 'Nepal Bank' })
+  @ApiPropertyOptional({ example: 'Nepal Bank' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  bankName: string;
+  bankName?: string;
 
-  @ApiProperty({ example: 'John Doe' })
+  @ApiPropertyOptional({ example: 'John Doe' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  accountHolderName: string;
+  accountHolderName?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '1234567890',
     description: '9–20 digit account number',
   })
+  @IsOptional()
   @Matches(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' })
-  accountNumber: string;
+  accountNumber?: string;
 
-  @ApiProperty({ example: 'Kathmandu Branch' })
+  @ApiPropertyOptional({ example: 'Kathmandu Branch' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  branch: string;
+  branch?: string;
 
   @ApiPropertyOptional({ example: 'NBLNNPKA' })
   @IsOptional()
@@ -122,4 +145,20 @@ export class SubmitKycDto {
   })
   @IsOptional()
   passport?: any;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'binary',
+    description: 'Required when documentType is NID_CARD',
+  })
+  @IsOptional()
+  nidFront?: any;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'binary',
+    description: 'Required when documentType is NID_CARD',
+  })
+  @IsOptional()
+  nidBack?: any;
 }

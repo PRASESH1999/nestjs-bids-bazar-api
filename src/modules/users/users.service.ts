@@ -28,15 +28,7 @@ import type {
   PendingEmailChangeSummary,
   RewardsSummary,
 } from './interfaces/own-profile.interface';
-import {
-  UsernameValidationError,
-  validateUsernameFormat,
-} from './username.validator';
-
-export interface UsernameAvailabilityResult {
-  available: boolean;
-  reason?: UsernameValidationError | 'TAKEN';
-}
+import { formatGeneratedUsername } from './username-generator';
 
 @Injectable()
 export class UsersService {
@@ -74,36 +66,34 @@ export class UsersService {
   }
 
   async createAdmin(data: CreateAdminDto): Promise<User> {
-    const { password, email, username, ...rest } = data;
+    const { password, email, ...rest } = data;
     const normalizedEmail = email.toLowerCase();
-    const normalizedUsername = username.trim();
 
     const existing = await this.usersRepository.findByEmail(normalizedEmail);
     if (existing) {
       throw new ConflictException('User with this email already exists');
     }
 
-    const usernameTaken =
-      await this.usersRepository.findByUsernameIncludingDeleted(
-        normalizedUsername,
-      );
-    if (usernameTaken) {
-      throw new ConflictException({
-        statusCode: 409,
-        code: 'USERNAME_TAKEN',
-        message: 'This username is already taken.',
-      });
-    }
-
     const hashedPassword = await bcrypt.hash(password, 12);
+    const username = await this.generateNextUsername();
     const user = this.usersRepository.createEntity({
       ...rest,
       email: normalizedEmail,
-      username: normalizedUsername,
+      username,
       password: hashedPassword,
       isActive: true,
     });
     return this.usersRepository.saveUser(user);
+  }
+
+  /**
+   * Generates the next system-assigned username (e.g. BB000001-2026) from
+   * `username_seq`. `nextval()` is atomic across concurrent sessions, so two
+   * simultaneous callers can never receive the same value.
+   */
+  async generateNextUsername(): Promise<string> {
+    const seq = await this.usersRepository.nextUsernameSequenceValue();
+    return formatGeneratedUsername(seq, new Date().getFullYear());
   }
 
   async findByEmail(email: string): Promise<User | null> {
@@ -116,17 +106,6 @@ export class UsersService {
 
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findById(id);
-  }
-
-  async findByUsername(
-    username: string,
-    excludeUserId?: string,
-  ): Promise<User | null> {
-    return this.usersRepository.findByUsername(username, excludeUserId);
-  }
-
-  async findByUsernameIncludingDeleted(username: string): Promise<User | null> {
-    return this.usersRepository.findByUsernameIncludingDeleted(username);
   }
 
   async updateUser(id: string, data: Partial<User>): Promise<User> {
@@ -295,7 +274,6 @@ export class UsersService {
       isActive: user.isActive,
       isEmailVerified: user.isEmailVerified,
       nameChangedAt: user.nameChangedAt,
-      usernameChangedAt: user.usernameChangedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       kyc: kycSummary,
@@ -336,84 +314,6 @@ export class UsersService {
     } catch (err: unknown) {
       this.logger.error(
         '[updateSelfName] Failed to dispatch name-changed email',
-        err instanceof Error ? err.stack : String(err),
-      );
-    }
-  }
-
-  /**
-   * Public availability check for a username. Never reserves and never throws —
-   * always resolves to an availability result. Format + reserved-list rules are
-   * evaluated first (single source of truth in username.validator.ts), then a
-   * case-insensitive existence check against the DB.
-   */
-  async checkUsernameAvailability(
-    username: string,
-  ): Promise<UsernameAvailabilityResult> {
-    const formatError = validateUsernameFormat(username);
-    if (formatError) {
-      return { available: false, reason: formatError };
-    }
-
-    const existing = await this.usersRepository.findByUsername(username);
-    if (existing) {
-      return { available: false, reason: 'TAKEN' };
-    }
-
-    return { available: true };
-  }
-
-  /**
-   * One-time username change.
-   * usernameChangedAt null = available; non-null = already used.
-   * The same-value guard runs BEFORE the quota guard so a no-op attempt never
-   * consumes the quota. Sends a confirmation email after the DB update.
-   */
-  async updateSelfUsername(userId: string, newUsername: string): Promise<void> {
-    const user = await this.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
-
-    // Same-value guard FIRST — a no-op must not consume the one-time quota.
-    if (
-      newUsername.trim().toLowerCase() === user.username.trim().toLowerCase()
-    ) {
-      throw new BadRequestException(
-        'New username must be different from your current username.',
-      );
-    }
-
-    if (user.usernameChangedAt !== null) {
-      throw new ForbiddenException(
-        'Username can only be changed once. Please contact support.',
-      );
-    }
-
-    // Store as-typed but without surrounding whitespace.
-    const normalizedUsername = newUsername.trim();
-
-    // Case-insensitive uniqueness check against other users.
-    const taken = await this.usersRepository.findByUsername(
-      normalizedUsername,
-      userId,
-    );
-    if (taken) {
-      throw new ConflictException('USERNAME_TAKEN');
-    }
-
-    const now = new Date();
-    await this.usersRepository.updateUser(userId, {
-      username: normalizedUsername,
-      usernameChangedAt: now,
-    });
-
-    try {
-      await this.mailService.sendUsernameChangedConfirmation(
-        user.email,
-        normalizedUsername,
-      );
-    } catch (err: unknown) {
-      this.logger.error(
-        '[updateSelfUsername] Failed to dispatch username-changed email',
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -489,19 +389,6 @@ export class UsersService {
 
     await this.usersRepository.updateUser(targetUserId, {
       nameChangedAt: null,
-    });
-  }
-
-  /**
-   * SUPERADMIN: reset a user's one-time username-change quota by setting
-   * usernameChangedAt back to null.
-   */
-  async resetUsernameChangeQuota(targetUserId: string): Promise<void> {
-    const user = await this.findById(targetUserId);
-    if (!user) throw new NotFoundException('User not found');
-
-    await this.usersRepository.updateUser(targetUserId, {
-      usernameChangedAt: null,
     });
   }
 }

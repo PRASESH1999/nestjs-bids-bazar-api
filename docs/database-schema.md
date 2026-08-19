@@ -47,7 +47,6 @@ erDiagram
         boolean isEmailVerified
         string hashedRefreshToken
         timestamp nameChangedAt
-        timestamp usernameChangedAt
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -86,6 +85,10 @@ erDiagram
         string citizenshipFrontPath
         string citizenshipBackPath
         string passportPath
+        string nidFrontPath
+        string nidBackPath
+        string primaryPhone
+        string secondaryPhone
         json permanentAddress
         json temporaryAddress
         enum status
@@ -283,8 +286,7 @@ erDiagram
 - `role` enum values: `SUPERADMIN`, `ADMIN`, `USER`. Default: `USER`.
 - `isActive` soft-disables the account without deletion. Checked on every authenticated request.
 - `nameChangedAt` is `null` until the user exercises their one-time display-name change. Once set it cannot be cleared except by a SUPERADMIN via `POST /admin/users/:id/reset-name-change`.
-- `username` is the public-facing handle (3–30 chars). It is **unique case-insensitively** — uniqueness is enforced on `LOWER(username)` in the service layer, backed by a column-level `unique` constraint. Stored as-typed for display; all lookups/comparisons are lowercased. `name` is private (emails, admin views, own profile only).
-- `usernameChangedAt` mirrors `nameChangedAt` semantics: `null` means the one-time username-change quota is available. Once set it cannot be cleared except by a SUPERADMIN via `POST /admin/users/:id/reset-username-change`.
+- `username` is the public-facing handle. It is **system-generated** at account creation (both public registration and admin creation) — format `BB000001-2026` (`BB` + a 6-digit, never-resetting sequence number from the `username_seq` Postgres sequence + the creation year). Nobody types a username; there is no self-service or admin change path. `nextval('username_seq')` is atomic across concurrent sessions, so simultaneous account creations never collide. Backed by a column-level `unique` constraint as a safety net. `name` is private (emails, admin views, own profile only).
 - `deletedAt` enables TypeORM soft-delete via `@DeleteDateColumn`. Queries exclude soft-deleted rows by default.
 
 ### EMAILVERIFICATIONTOKEN
@@ -312,8 +314,14 @@ erDiagram
 
 ### KYCVERIFICATION
 - `userId` is both a foreign key and unique — enforces one KYC record per user.
-- `documentType` enum values: `CITIZENSHIP`, `PASSPORT`.
+- `documentType` enum values: `CITIZENSHIP`, `PASSPORT`, `NID_CARD`.
 - `status` enum values: `PENDING`, `APPROVED`, `REJECTED`. Default: `PENDING`.
+- `nidFrontPath`/`nidBackPath` mirror the citizenship front/back columns — populated only
+  when `documentType === NID_CARD`.
+- `primaryPhone`/`secondaryPhone`: contact numbers collected at KYC submission.
+  `primaryPhone` is required by `SubmitKycDto` for new submissions but nullable at the DB
+  level (existing rows predate the column); `secondaryPhone` (emergency contact) is always
+  optional.
 - `permanentAddress` and `temporaryAddress` are `jsonb` columns with shape `{ street, city, district, province, country }`.
 - `reviewedBy` is a UUID referencing `users.id` (the admin who reviewed) — stored as a plain column, no TypeORM relation defined.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
@@ -322,6 +330,10 @@ erDiagram
 - `userId` is both a foreign key and unique — enforces one bank detail record per user.
 - `accountNumber`, `branch`, and `swiftCode` are **AES-256-GCM encrypted** at the application layer before being written to the database. The stored values are ciphertext.
 - `swiftCode` is nullable (not all banks require it).
+- No entity/column changes for optional-bank-at-submission — a row for a given `userId`
+  simply doesn't exist until bank details are provided (at KYC submission or later via
+  `PATCH /kyc/me/bank`). A missing row, not a nullable field, is what "no bank details yet"
+  means.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
 ### CATEGORY

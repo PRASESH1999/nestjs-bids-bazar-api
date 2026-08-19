@@ -713,6 +713,13 @@ export class ProductsService {
         'KYC verification required to sell products. Please complete and submit your KYC.',
       );
     }
+
+    const hasBankDetails = await this.kycService.hasBankDetails(userId);
+    if (!hasBankDetails) {
+      throw new ForbiddenException(
+        'Bank details required to sell products. Please add your bank details.',
+      );
+    }
   }
 
   private async assertCategoryAndSubcategory(

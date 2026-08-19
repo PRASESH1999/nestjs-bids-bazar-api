@@ -21,7 +21,6 @@ import { auctionAbandonedTemplate } from './templates/auction-abandoned.template
 import { passwordResetTemplate } from './templates/password-reset.template';
 import { passwordChangedConfirmationTemplate } from './templates/password-changed-confirmation.template';
 import { nameChangedTemplate } from './templates/name-changed.template';
-import { usernameChangedTemplate } from './templates/username-changed.template';
 import { emailChangeVerificationTemplate } from './templates/email-change-verification.template';
 import { emailChangedOldAddressTemplate } from './templates/email-changed-old-address.template';
 import { emailChangedNewAddressTemplate } from './templates/email-changed-new-address.template';
@@ -431,21 +430,6 @@ export class MailService implements OnModuleInit {
     const { subject, html } = nameChangedTemplate(userName, changedAt);
     await this.send(to, subject, html);
     this.logger.log('Name changed confirmation email dispatched', { to });
-  }
-
-  /** Notify the user that their public username was changed. */
-  async sendUsernameChangedConfirmation(
-    to: string,
-    newUsername: string,
-  ): Promise<void> {
-    const changedAt = new Date().toLocaleString('en-US', {
-      timeZone: 'Asia/Kathmandu',
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-    const { subject, html } = usernameChangedTemplate(newUsername, changedAt);
-    await this.send(to, subject, html);
-    this.logger.log('Username changed confirmation email dispatched', { to });
   }
 
   /**

@@ -29,7 +29,6 @@ export interface OwnProfileResponse {
   isActive: boolean;
   isEmailVerified: boolean;
   nameChangedAt: Date | null;
-  usernameChangedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   kyc: KycSummary | null;

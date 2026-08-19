@@ -21,39 +21,12 @@ export class UsersRepository {
     return this.repo.findOne({ where: { email }, withDeleted: true });
   }
 
-  /**
-   * Case-insensitive username lookup against active (non-soft-deleted) users.
-   * Pass `excludeUserId` to ignore a specific user (used by the change endpoint
-   * so a user is not considered to be in conflict with themselves).
-   */
-  async findByUsername(
-    username: string,
-    excludeUserId?: string,
-  ): Promise<User | null> {
-    const qb = this.repo
-      .createQueryBuilder('user')
-      .where('LOWER(user.username) = :username', {
-        username: username.trim().toLowerCase(),
-      });
-    if (excludeUserId) {
-      qb.andWhere('user.id != :excludeUserId', { excludeUserId });
-    }
-    return qb.getOne();
-  }
-
-  /**
-   * Case-insensitive username lookup including soft-deleted users. Used at
-   * registration: the DB unique constraint covers soft-deleted rows too, so a
-   * pre-flight check must see them to surface a clean conflict.
-   */
-  async findByUsernameIncludingDeleted(username: string): Promise<User | null> {
-    return this.repo
-      .createQueryBuilder('user')
-      .withDeleted()
-      .where('LOWER(user.username) = :username', {
-        username: username.trim().toLowerCase(),
-      })
-      .getOne();
+  /** Atomically claims the next value from the `username_seq` Postgres sequence. */
+  async nextUsernameSequenceValue(): Promise<number> {
+    const [{ seq }] = await this.dataSource.query<{ seq: string }[]>(
+      "SELECT nextval('username_seq') AS seq",
+    );
+    return Number(seq);
   }
 
   async findById(id: string): Promise<User | null> {

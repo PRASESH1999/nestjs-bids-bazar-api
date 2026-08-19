@@ -9,6 +9,7 @@ import { StorageService } from '@common/services/storage.service';
 import { DocumentType } from '@common/enums/document-type.enum';
 import { KycStatus } from '@common/enums/kyc-status.enum';
 import { KycRepository } from './kyc.repository';
+import { BankDetailDto } from './dto/bank-detail.dto';
 import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewAction, ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
@@ -19,6 +20,14 @@ export interface KycFiles {
   citizenshipFront?: Express.Multer.File[];
   citizenshipBack?: Express.Multer.File[];
   passport?: Express.Multer.File[];
+  nidFront?: Express.Multer.File[];
+  nidBack?: Express.Multer.File[];
+}
+
+export interface SellEligibility {
+  kycApproved: boolean;
+  hasBankDetails: boolean;
+  canSell: boolean;
 }
 
 @Injectable()
@@ -45,6 +54,8 @@ export class KycService {
     const front = files.citizenshipFront?.[0];
     const back = files.citizenshipBack?.[0];
     const passport = files.passport?.[0];
+    const nidFront = files.nidFront?.[0];
+    const nidBack = files.nidBack?.[0];
 
     if (dto.documentType === DocumentType.CITIZENSHIP) {
       if (!front || !back) {
@@ -52,12 +63,32 @@ export class KycService {
           'Both citizenshipFront and citizenshipBack files are required for CITIZENSHIP',
         );
       }
-    } else {
+    } else if (dto.documentType === DocumentType.PASSPORT) {
       if (!passport) {
         throw new BadRequestException(
           'A passport file is required for PASSPORT',
         );
       }
+    } else {
+      if (!nidFront || !nidBack) {
+        throw new BadRequestException(
+          'Both nidFront and nidBack files are required for NID_CARD',
+        );
+      }
+    }
+
+    // Bank details are optional at submission, but if any field is given,
+    // all of them must be — validated up front, before anything is persisted.
+    const bankFieldsProvided = [
+      dto.bankName,
+      dto.accountHolderName,
+      dto.accountNumber,
+      dto.branch,
+    ].filter((v) => v !== undefined && v !== '').length;
+    if (bankFieldsProvided > 0 && bankFieldsProvided < 4) {
+      throw new BadRequestException(
+        'bankName, accountHolderName, accountNumber and branch must all be provided together',
+      );
     }
 
     // Delete old files when resubmitting after REJECTED
@@ -66,6 +97,8 @@ export class KycService {
         existing.citizenshipFrontPath,
         existing.citizenshipBackPath,
         existing.passportPath,
+        existing.nidFrontPath,
+        existing.nidBackPath,
       ].filter((p): p is string => p !== null);
       await Promise.all(oldPaths.map((p) => this.storageService.deleteFile(p)));
     }
@@ -74,6 +107,8 @@ export class KycService {
     let citizenshipFrontPath: string | null = null;
     let citizenshipBackPath: string | null = null;
     let passportPath: string | null = null;
+    let nidFrontPath: string | null = null;
+    let nidBackPath: string | null = null;
 
     if (dto.documentType === DocumentType.CITIZENSHIP) {
       citizenshipFrontPath = await this.storageService.saveFile(
@@ -86,22 +121,24 @@ export class KycService {
         userId,
         'citizenship-back',
       );
-    } else {
+    } else if (dto.documentType === DocumentType.PASSPORT) {
       passportPath = await this.storageService.saveFile(
         passport!,
         userId,
         'passport',
       );
+    } else {
+      nidFrontPath = await this.storageService.saveFile(
+        nidFront!,
+        userId,
+        'nid-front',
+      );
+      nidBackPath = await this.storageService.saveFile(
+        nidBack!,
+        userId,
+        'nid-back',
+      );
     }
-
-    // Encrypt sensitive bank fields
-    const encryptedAccountNumber = this.encryptionService.encrypt(
-      dto.accountNumber,
-    );
-    const encryptedBranch = this.encryptionService.encrypt(dto.branch);
-    const encryptedSwiftCode = dto.swiftCode
-      ? this.encryptionService.encrypt(dto.swiftCode)
-      : null;
 
     // Save KYC record (update on resubmission, create otherwise)
     const kycPayload = {
@@ -110,6 +147,10 @@ export class KycService {
       citizenshipFrontPath,
       citizenshipBackPath,
       passportPath,
+      nidFrontPath,
+      nidBackPath,
+      primaryPhone: dto.primaryPhone,
+      secondaryPhone: dto.secondaryPhone ?? null,
       permanentAddress: {
         street: dto.permanentAddressStreet,
         city: dto.permanentAddressCity ?? '',
@@ -142,24 +183,16 @@ export class KycService {
       );
     }
 
-    // Save bank details (update on resubmission, create otherwise)
-    const existingBank = await this.kycRepository.findBankByUserId(userId);
-    const bankPayload = {
-      userId,
-      bankName: dto.bankName,
-      accountHolderName: dto.accountHolderName,
-      accountNumber: encryptedAccountNumber,
-      branch: encryptedBranch,
-      swiftCode: encryptedSwiftCode,
-    };
-
-    if (existingBank) {
-      Object.assign(existingBank, bankPayload);
-      await this.kycRepository.saveBank(existingBank);
-    } else {
-      await this.kycRepository.saveBank(
-        this.kycRepository.createBank(bankPayload),
-      );
+    // Bank details are optional at submission — only touch the bank_details
+    // row if the caller actually provided them (already validated above).
+    if (bankFieldsProvided === 4) {
+      await this.upsertBankDetails(userId, {
+        bankName: dto.bankName!,
+        accountHolderName: dto.accountHolderName!,
+        accountNumber: dto.accountNumber!,
+        branch: dto.branch!,
+        swiftCode: dto.swiftCode,
+      });
     }
 
     // Send notification email
@@ -172,6 +205,78 @@ export class KycService {
       id: kyc.id,
       status: kyc.status,
       message: 'KYC submitted successfully. Your application is under review.',
+    };
+  }
+
+  /**
+   * Encrypts and upserts a user's bank_details row. Shared by `submitKyc`
+   * (when bank fields are included in the submission) and
+   * `addOrUpdateBankDetails` (adding/updating bank details independently,
+   * any time after submission).
+   */
+  private async upsertBankDetails(
+    userId: string,
+    dto: BankDetailDto,
+  ): Promise<void> {
+    const bankPayload = {
+      userId,
+      bankName: dto.bankName,
+      accountHolderName: dto.accountHolderName,
+      accountNumber: this.encryptionService.encrypt(dto.accountNumber),
+      branch: this.encryptionService.encrypt(dto.branch),
+      swiftCode: dto.swiftCode
+        ? this.encryptionService.encrypt(dto.swiftCode)
+        : null,
+    };
+
+    const existingBank = await this.kycRepository.findBankByUserId(userId);
+    if (existingBank) {
+      Object.assign(existingBank, bankPayload);
+      await this.kycRepository.saveBank(existingBank);
+    } else {
+      await this.kycRepository.saveBank(
+        this.kycRepository.createBank(bankPayload),
+      );
+    }
+  }
+
+  /**
+   * Add or update bank details independently of KYC (re)submission — the
+   * only way to supply bank details once a KYC record has been APPROVED,
+   * since submitKyc blocks resubmission at that point. Requires a KYC record
+   * to already exist (any status).
+   */
+  async addOrUpdateBankDetails(
+    userId: string,
+    dto: BankDetailDto,
+  ): Promise<{ message: string }> {
+    const kyc = await this.kycRepository.findKycByUserId(userId);
+    if (!kyc) {
+      throw new NotFoundException('Submit your KYC before adding bank details');
+    }
+
+    await this.upsertBankDetails(userId, dto);
+    return { message: 'Bank details saved successfully.' };
+  }
+
+  async hasBankDetails(userId: string): Promise<boolean> {
+    const bank = await this.kycRepository.findBankByUserId(userId);
+    return bank !== null;
+  }
+
+  /**
+   * Combined status the frontend can poll to decide whether to show
+   * "start selling" UI vs. a prompt to finish KYC/bank details.
+   */
+  async getSellEligibility(userId: string): Promise<SellEligibility> {
+    const [kycApproved, hasBank] = await Promise.all([
+      this.isVerified(userId),
+      this.hasBankDetails(userId),
+    ]);
+    return {
+      kycApproved,
+      hasBankDetails: hasBank,
+      canSell: kycApproved && hasBank,
     };
   }
 
@@ -190,6 +295,10 @@ export class KycService {
       citizenshipFrontUploaded: !!kyc.citizenshipFrontPath,
       citizenshipBackUploaded: !!kyc.citizenshipBackPath,
       passportUploaded: !!kyc.passportPath,
+      nidFrontUploaded: !!kyc.nidFrontPath,
+      nidBackUploaded: !!kyc.nidBackPath,
+      primaryPhone: kyc.primaryPhone,
+      secondaryPhone: kyc.secondaryPhone,
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
       rejectionReason: kyc.rejectionReason,
@@ -213,6 +322,12 @@ export class KycService {
         : null,
       passportUrl: kyc.passportPath
         ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+        : null,
+      nidFrontUrl: kyc.nidFrontPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
+        : null,
+      nidBackUrl: kyc.nidBackPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'nidBack')
         : null,
     };
   }
@@ -242,6 +357,12 @@ export class KycService {
       passportUrl: kyc.passportPath
         ? this.getVirtualDocumentUrl(kyc.id, 'passport')
         : null,
+      nidFrontUrl: kyc.nidFrontPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
+        : null,
+      nidBackUrl: kyc.nidBackPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'nidBack')
+        : null,
     }));
 
     return { data, meta: { page, limit, total } };
@@ -257,6 +378,8 @@ export class KycService {
       id: kyc.id,
       userId: kyc.userId,
       documentType: kyc.documentType,
+      primaryPhone: kyc.primaryPhone,
+      secondaryPhone: kyc.secondaryPhone,
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
       status: kyc.status,
@@ -273,6 +396,12 @@ export class KycService {
         : null,
       passportUrl: kyc.passportPath
         ? this.getVirtualDocumentUrl(kyc.id, 'passport')
+        : null,
+      nidFrontUrl: kyc.nidFrontPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
+        : null,
+      nidBackUrl: kyc.nidBackPath
+        ? this.getVirtualDocumentUrl(kyc.id, 'nidBack')
         : null,
     };
   }
@@ -354,11 +483,13 @@ export class KycService {
       citizenshipFront: kyc.citizenshipFrontPath,
       citizenshipBack: kyc.citizenshipBackPath,
       passport: kyc.passportPath,
+      nidFront: kyc.nidFrontPath,
+      nidBack: kyc.nidBackPath,
     };
 
     if (!(fileKey in pathMap)) {
       throw new NotFoundException(
-        `Invalid document key '${fileKey}'. Valid keys: citizenshipFront, citizenshipBack, passport`,
+        `Invalid document key '${fileKey}'. Valid keys: citizenshipFront, citizenshipBack, passport, nidFront, nidBack`,
       );
     }
 

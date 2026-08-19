@@ -80,7 +80,6 @@ enum Permission {
   ADMIN_MANAGE      = 'admin:manage',
   ROLE_ASSIGN       = 'role:assign',
   SYSTEM_CONFIG     = 'system:config',
-  USERNAME_CHANGE_RESET = 'username_change:reset',
 }
 
 ## Role → Permission Mapping
@@ -90,9 +89,6 @@ enum Permission {
   USER       → [ITEM_BUY, ITEM_SELL, ITEM_VIEW, ITEM_MANAGE_OWN, PROFILE_VIEW, PROFILE_EDIT]
   ADMIN      → [USER_VIEW, USER_MANAGE, CONTENT_MODERATE, ITEM_VIEW, PROFILE_VIEW]
   SUPERADMIN → All permissions (wildcard — bypass all permission checks)
-
-- `USERNAME_CHANGE_RESET` is **SUPERADMIN-only** (mirrors `NAME_CHANGE_RESET`). It is
-  never granted to USER or ADMIN; SUPERADMIN holds it via the wildcard mapping above.
 
 ## Guards & Decorators
 - Implement three guards in common/guards/:
@@ -110,15 +106,12 @@ enum Permission {
 | POST /auth/login                | @Public()           | None           |
 | POST /auth/refresh              | @Public()           | None           |
 | POST /auth/logout               | Authenticated       | None           |
-| GET  /users/username-available  | @Public()           | None           |
 | GET  /users/me                  | PROFILE_VIEW        | None           |
 | PATCH /users/me                 | PROFILE_EDIT        | None           |
-| PATCH /users/me/username        | PROFILE_EDIT        | None           |
 | GET  /users                     | USER_VIEW           | None           |
 | PATCH /users/:id/suspend        | USER_MANAGE         | HierarchyGuard |
 | DELETE /users/:id               | USER_MANAGE         | HierarchyGuard |
 | POST /users/:id/role            | ROLE_ASSIGN         | HierarchyGuard |
-| POST /admin/users/:id/reset-username-change | USERNAME_CHANGE_RESET | None |
 
 ## Ownership Rules
 - Enforce ownership in the service layer — users can only edit their own profile.
@@ -143,22 +136,32 @@ enum Permission {
 - KYC is enforced at the service layer when a user attempts to create a listing.
 
 ### KYC Flow
-1. User submits KYC via POST /kyc/submit (uploads documents + fills address + bank details)
+1. User submits KYC via POST /kyc/submit (uploads documents + fills contact/address info,
+   bank details optional)
 2. KYC status is set to PENDING immediately on submission
 3. ADMIN or SUPERADMIN reviews the submission via the admin endpoints
-4. ADMIN approves → status becomes APPROVED → user can now sell
+4. ADMIN approves → status becomes APPROVED → user can now sell IF bank details are also on file
    ADMIN rejects → status becomes REJECTED → user must resubmit with corrections
 5. A user with REJECTED status may resubmit — this resets status to PENDING
 6. A user with PENDING or APPROVED status cannot resubmit
+7. Bank details can be added/updated independently at any time via PATCH /kyc/me/bank —
+   this is the only way to add them once KYC is APPROVED, since resubmission is blocked at
+   that point
 
 ### Document Requirements
-- User must upload EITHER:
+- User must upload exactly one of:
     Citizenship: front image AND back image (both required together)
-    OR
     Passport: single image
+    NID (National ID) card: front image AND back image (both required together)
 - Mixing document types is not allowed
 - Accepted formats: JPEG, PNG, PDF
 - Max file size: 5 MB per file
+
+### Contact Requirements
+- `primaryPhone`: required on every new submission
+- `secondaryPhone` (emergency contact): optional
+- Both live on the KYC record itself, not on the User entity — collected at KYC time,
+  same as address
 
 ### Address Requirements
 - Permanent address: required (street, city, district, province, country)
@@ -166,10 +169,14 @@ enum Permission {
 - Country defaults to Nepal
 
 ### Bank Details
-- Required at KYC submission time
+- Optional at KYC submission time — a KYC can be reviewed and APPROVED without it
+- If any bank field is provided at submission, all of bankName/accountHolderName/
+  accountNumber/branch must be provided together (all-or-nothing); swiftCode stays optional
+- Can also be added/updated independently via PATCH /kyc/me/bank at any time (KYC_SUBMIT
+  permission), regardless of KYC status, as long as a KYC record exists
 - Sensitive fields (accountNumber, branch, swiftCode) are encrypted at rest
   using AES-256-GCM via EncryptionService (common/services/encryption.service.ts)
-- Bank details are used later for seller payouts
+- Required — together with an APPROVED KYC — before a user can sell (see Sell Gate below)
 - Only SUPERADMIN can view decrypted bank details (BANK_VIEW_DECRYPTED permission)
 
 ### File Storage
@@ -192,6 +199,8 @@ Added to Permission enum (common/enums/permission.enum.ts):
 |------------------------------------|----------------------|
 | POST /kyc/submit                   | KYC_SUBMIT           |
 | GET  /kyc/me                       | KYC_VIEW_OWN         |
+| PATCH /kyc/me/bank                 | KYC_SUBMIT           |
+| GET  /kyc/me/sell-eligibility      | KYC_VIEW_OWN         |
 | GET  /kyc                          | KYC_VIEW_ALL         |
 | GET  /kyc/:id                      | KYC_VIEW_ALL         |
 | PATCH /kyc/:id/review              | KYC_REVIEW           |
@@ -199,11 +208,14 @@ Added to Permission enum (common/enums/permission.enum.ts):
 | GET  /kyc/:id/documents/:fileKey   | KYC_VIEW_ALL         |
 
 ### Sell Gate (enforced in listings/items service — NOT in KYC module)
-- Before creating a listing, the items/listings service must call
-  kycService.isVerified(userId) which returns true only if KycStatus === APPROVED
-- If not verified: throw ForbiddenException with message:
-  'KYC verification required to sell products. Please complete and submit your KYC.'
-- This check is the responsibility of the feature module (items),
+- Before creating a listing, the items/listings service must check, in order:
+    1. kycService.isVerified(userId) — true only if KycStatus === APPROVED
+    2. kycService.hasBankDetails(userId) — true only if a bank_details row exists
+- If either check fails: throw ForbiddenException with a message naming the specific
+  missing requirement ('KYC verification required...' or 'Bank details required...')
+- GET /kyc/me/sell-eligibility exposes both checks (plus a combined canSell) so the
+  frontend can show the right prompt without guessing
+- These checks are the responsibility of the feature module (items/products),
   not the KYC module itself
 - KycModule exports KycService so the items module can inject it directly
 
@@ -218,10 +230,9 @@ Added to Permission enum (common/enums/permission.enum.ts):
 ## Email Verification
 
 ### Flow
-0. Registration collects `name`, `username`, `email`, and `password`. `username` is
-   **required from day one** — a unique, user-chosen public handle validated against the
-   shared username rules (see Rule 15) and checked for case-insensitive uniqueness
-   (`USERNAME_TAKEN` on conflict, mirroring the email-duplicate check).
+0. Registration collects `name`, `email`, and `password` — no `username` field. `username`
+   is auto-generated server-side (`BB000001-2026` format, via the `username_seq` Postgres
+   sequence — see Rule 15 §2a). Admin creation (`POST /users/admin`) auto-generates the same way.
 1. User registers → account created with isEmailVerified: false
 2. Verification email sent automatically on registration
 3. JWT is NOT issued on registration — user must verify email first

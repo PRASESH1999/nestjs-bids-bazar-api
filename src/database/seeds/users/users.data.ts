@@ -20,8 +20,9 @@ export interface SeedUser {
   isEmailVerified: boolean;
 }
 
-// Seeded usernames bypass the username validator (written directly via the
-// repository) — reserved handles such as `superadmin` are intentionally allowed.
+// Seeded usernames are fixed, human-readable fixtures written directly via the
+// repository — they don't go through the username_seq sequence used by real
+// registration/admin-creation.
 export const SEED_USERS: SeedUser[] = [
   {
     id: SEED_USER_IDS.SUPERADMIN_1,

@@ -57,7 +57,11 @@ trigger: always_on
 ## Required Pre-conditions to Sell
 - User must have `isEmailVerified === true` (enforced via login gate).
 - User must have `KycStatus === APPROVED` (enforced in service layer).
-- If either fails: throw `ForbiddenException` with a clear message.
+- User must have bank details on file (`KycService.hasBankDetails`) — bank details are
+  optional at KYC submission time, so an approved KYC alone is not sufficient; see Rule 5's
+  KYC section for how a user adds bank details after the fact.
+- If any fails: throw `ForbiddenException` with a clear message naming the specific
+  unmet requirement.
 
 ## Item Condition
 Defined in `common/enums/item-condition.enum.ts`:

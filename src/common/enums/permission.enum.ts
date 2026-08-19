@@ -46,5 +46,4 @@ export enum Permission {
   ROLE_ASSIGN = 'role:assign',
   SYSTEM_CONFIG = 'system:config',
   NAME_CHANGE_RESET = 'name_change:reset',
-  USERNAME_CHANGE_RESET = 'username_change:reset',
 }
