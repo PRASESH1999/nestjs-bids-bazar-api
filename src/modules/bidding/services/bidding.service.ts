@@ -33,6 +33,15 @@ type BidRange = {
   message: string;
 };
 
+// A user may hold an active (highest-or-not, still-open) bid on at most this
+// many distinct products at once. Raising a bid on a product they're already
+// bidding on doesn't consume a new slot — only a bid on a product they don't
+// currently hold a bid on does.
+const MAX_ACTIVE_BIDS_PER_USER = 10;
+
+// Bidding-open statuses — mirrors the status check earlier in placeBid().
+const ACTIVE_BIDDING_STATUSES = [ProductStatus.PENDING, ProductStatus.ACTIVE];
+
 @Injectable()
 export class BiddingService {
   private readonly logger = new Logger(BiddingService.name);
@@ -98,6 +107,48 @@ export class BiddingService {
         throw new ForbiddenException(
           'You already hold the highest bid — wait for someone to outbid you before bidding again',
         );
+      }
+
+      // ─── Max-active-bids-per-user slot check ─────────────────────────────
+      // Bidding on a product the user already has a bid on just raises that
+      // existing bid — it doesn't consume a new slot, so skip the limit
+      // entirely in that case.
+      const existingBidOnThisProduct = await qr.manager
+        .getRepository(Bid)
+        .createQueryBuilder('bid')
+        .where('bid.productId = :productId', { productId })
+        .andWhere('bid.bidderId = :userId', { userId })
+        .getCount();
+
+      if (existingBidOnThisProduct === 0) {
+        // This is a NEW slot for the user. Serialize concurrent placeBid
+        // calls for this user with a transaction-scoped advisory lock —
+        // the pessimistic row lock on `product` above only protects against
+        // races on THIS product, but two simultaneous requests bidding on
+        // two DIFFERENT new products would each lock a different row and
+        // could both pass the count check below, letting the user exceed
+        // the limit. The advisory lock closes that gap; it auto-releases
+        // when the transaction commits or rolls back.
+        await qr.query('SELECT pg_advisory_xact_lock(hashtext($1))', [userId]);
+
+        const activeProductCount = await qr.manager
+          .getRepository(Bid)
+          .createQueryBuilder('bid')
+          .innerJoin('bid.product', 'activeProduct')
+          .select('COUNT(DISTINCT bid.productId)', 'count')
+          .where('bid.bidderId = :userId', { userId })
+          .andWhere('activeProduct.status IN (:...statuses)', {
+            statuses: ACTIVE_BIDDING_STATUSES,
+          })
+          .getRawOne<{ count: string }>();
+
+        if (
+          Number(activeProductCount?.count ?? 0) >= MAX_ACTIVE_BIDS_PER_USER
+        ) {
+          throw new BadRequestException(
+            `You can only have active bids on ${MAX_ACTIVE_BIDS_PER_USER} products at a time. Wait for one to close before bidding on a new one.`,
+          );
+        }
       }
 
       const range = this.computeValidBidRange(product);

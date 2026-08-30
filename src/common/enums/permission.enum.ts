@@ -14,6 +14,7 @@ export enum Permission {
   USER_MANAGE = 'user:manage',
   CONTENT_MODERATE = 'content:moderate',
   CATEGORY_MANAGE = 'category:manage',
+  SPECIFICATION_MANAGE = 'specification:manage',
 
   // KYC permissions
   KYC_SUBMIT = 'kyc:submit',

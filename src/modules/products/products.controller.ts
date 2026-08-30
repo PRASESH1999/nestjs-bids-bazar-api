@@ -224,6 +224,11 @@ export class ProductsController {
         'subcategoryId',
         'condition',
         'basePrice',
+        'province',
+        'district',
+        'city',
+        'street',
+        'wardNumber',
       ],
       properties: {
         title: { type: 'string', minLength: 5, maxLength: 150 },
@@ -250,6 +255,15 @@ export class ProductsController {
           default: 0,
           description:
             'Zero-based index of the image to use as the preview thumbnail',
+        },
+        province: { type: 'string', description: 'Pickup location: province' },
+        district: { type: 'string', description: 'Pickup location: district' },
+        city: { type: 'string', description: 'Pickup location: city' },
+        street: { type: 'string', description: 'Pickup location: street' },
+        wardNumber: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Pickup location: ward number',
         },
         images: {
           type: 'array',
@@ -300,6 +314,15 @@ export class ProductsController {
           default: 0,
           description:
             'Zero-based index of the new image set to use as preview thumbnail',
+        },
+        province: { type: 'string', description: 'Pickup location: province' },
+        district: { type: 'string', description: 'Pickup location: district' },
+        city: { type: 'string', description: 'Pickup location: city' },
+        street: { type: 'string', description: 'Pickup location: street' },
+        wardNumber: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Pickup location: ward number',
         },
         images: {
           type: 'array',

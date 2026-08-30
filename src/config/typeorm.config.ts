@@ -14,6 +14,7 @@ import { PasswordResetToken } from '../modules/auth/entities/password-reset-toke
 import { PendingEmailChange } from '../modules/auth/entities/pending-email-change.entity';
 import { UserRewards } from '../modules/rewards/entities/user-rewards.entity';
 import { PointsTransaction } from '../modules/rewards/entities/points-transaction.entity';
+import { Specification } from '../modules/specifications/entities/specification.entity';
 
 config({ path: '.env.development' });
 
@@ -40,6 +41,7 @@ export const dataSourceOptions: DataSourceOptions = {
     PendingEmailChange,
     UserRewards,
     PointsTransaction,
+    Specification,
   ],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

@@ -141,9 +141,11 @@ export class ProductsService {
       reviewedById: null,
       reviewedAt: null,
       rejectionReason: null,
-      locationProvince: null,
-      locationDistrict: null,
-      locationArea: null,
+      province: dto.province,
+      district: dto.district,
+      city: dto.city,
+      street: dto.street,
+      wardNumber: dto.wardNumber,
       withdrawnAt: null,
     });
 
@@ -196,6 +198,12 @@ export class ProductsService {
     if (dto.condition !== undefined) product.condition = dto.condition;
     if (dto.biddingDurationHours !== undefined)
       product.biddingDurationHours = dto.biddingDurationHours;
+
+    if (dto.province !== undefined) product.province = dto.province;
+    if (dto.district !== undefined) product.district = dto.district;
+    if (dto.city !== undefined) product.city = dto.city;
+    if (dto.street !== undefined) product.street = dto.street;
+    if (dto.wardNumber !== undefined) product.wardNumber = dto.wardNumber;
 
     if (dto.basePrice !== undefined) {
       product.basePrice = dto.basePrice;
@@ -807,9 +815,11 @@ export class ProductsService {
       reviewedById: product.reviewedById,
       reviewedAt: product.reviewedAt,
       rejectionReason: product.rejectionReason,
-      locationProvince: product.locationProvince,
-      locationDistrict: product.locationDistrict,
-      locationArea: product.locationArea,
+      province: product.province,
+      district: product.district,
+      city: product.city,
+      street: product.street,
+      wardNumber: product.wardNumber,
       winningBidId: product.winningBidId,
       closedAt: product.closedAt,
       settledAt: product.settledAt,

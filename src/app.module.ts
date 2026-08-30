@@ -16,6 +16,7 @@ import { MailModule } from '@modules/mail/mail.module';
 import { PaymentsModule } from '@modules/payments/payments.module';
 import { ProductsModule } from '@modules/products/products.module';
 import { RewardsModule } from '@modules/rewards/rewards.module';
+import { SpecificationsModule } from '@modules/specifications/specifications.module';
 import { UsersModule } from '@modules/users/users.module';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -65,6 +66,7 @@ import { envValidationSchema } from './config/env.validation';
     KycModule,
     MailModule,
     CategoriesModule,
+    SpecificationsModule,
     ProductsModule,
     BiddingModule,
     PaymentsModule,

@@ -24,6 +24,7 @@
     "migration:revert": "npm run typeorm migration:revert -- -d src/config/typeorm.config.ts",
     "seed:run": "npx ts-node -r tsconfig-paths/register src/database/seeds/index.ts",
     "seed:categories": "npx ts-node -r tsconfig-paths/register src/database/seeds/categories/categories-runner.ts",
+    "seed:specifications": "npx ts-node -r tsconfig-paths/register src/database/seeds/specifications/specifications-runner.ts",
     "seed:users": "npx ts-node -r tsconfig-paths/register src/database/seeds/users/users-runner.ts"
   },
   "dependencies": {

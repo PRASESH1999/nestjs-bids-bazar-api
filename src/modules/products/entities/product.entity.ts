@@ -94,16 +94,25 @@ export class Product extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   rejectionReason: string | null;
 
-  // ─── Location (forward compat, nullable) ─────────────────────────────────
+  // ─── Pickup location ───────────────────────────────────────────────────────
+  // Independent per product — never shared/reused across listings, even
+  // across multiple products from the same seller. Nullable because existing
+  // live rows predate this field; every new/updated product always sets all five.
 
   @Column({ type: 'varchar', nullable: true })
-  locationProvince: string | null;
+  province: string | null;
 
   @Column({ type: 'varchar', nullable: true })
-  locationDistrict: string | null;
+  district: string | null;
 
   @Column({ type: 'varchar', nullable: true })
-  locationArea: string | null;
+  city: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  street: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  wardNumber: number | null;
 
   // ─── Auction outcome (set by BiddingModule) ──────────────────────────────
 

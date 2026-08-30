@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-08-12 by agent (Instant Buy + Loyalty Points/Seller Tier/Commission — added `Product.instantBuyPrice`, `Bid.isInstantBuy`, `Payment` delivery-zone/fee and seller-settlement columns; added USERREWARDS and POINTSTRANSACTION entities)_
+_Last updated: 2026-08-30 by agent (Added `SPECIFICATION` master table — a flat, global, admin-managed list of specification names (e.g. RAM, Condition, Storage) with no relation to Product; Product will reference these by string value only)_
 
 ---
 
@@ -138,6 +138,16 @@ erDiagram
         timestamp deletedAt
     }
 
+    SPECIFICATION {
+        uuid id PK
+        string name UK
+        int displayOrder
+        boolean isActive
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp deletedAt
+    }
+
     PRODUCT {
         uuid id PK
         uuid ownerId FK
@@ -161,9 +171,11 @@ erDiagram
         uuid reviewedById
         timestamp reviewedAt
         string rejectionReason
-        string locationProvince
-        string locationDistrict
-        string locationArea
+        string province
+        string district
+        string city
+        string street
+        int wardNumber
         timestamp withdrawnAt
         uuid winningBidId FK
         timestamp closedAt
@@ -352,6 +364,14 @@ erDiagram
 - `isActive` soft-disables the subcategory without deletion.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
+### SPECIFICATION
+- A flat, global master list of specification **names** only (e.g. `RAM`, `Condition`, `Storage`, `Color`) — no values, no category/subcategory scoping, and **no relation to `PRODUCT`**. By design every specification is available regardless of category.
+- `name` is globally unique (case-insensitive, enforced in `SpecificationsService`).
+- `displayOrder` controls sort order in listings (ascending, then `name`).
+- `isActive` soft-disables the specification without deletion (admin `DELETE` sets `isActive = false` rather than removing the row).
+- `deletedAt` soft-delete inherited from `BaseEntity` (unused by the service, same as `CATEGORY`/`SUBCATEGORY`).
+- Read (`GET /specifications`, `GET /specifications/:id`) is public; create/update/delete require `Permission.SPECIFICATION_MANAGE` (ADMIN/SUPERADMIN only). Product will reference a specification only as a free-text string value — no FK is planned.
+
 ### PRODUCT
 - `ownerId` references `users.id` — stored as a plain UUID column (no TypeORM `@ManyToOne` relation defined to avoid joins on every load).
 - `condition` enum values: `NEW`, `LIKE_NEW`, `USED_GOOD`, `USED_FAIR`, `FOR_PARTS`.
@@ -366,7 +386,7 @@ erDiagram
 - `settledAt` — timestamp when payment was confirmed and the product transitioned to `SETTLED`.
 - `abandonedAt` — timestamp when all bidders in the fallback chain failed to pay and the product transitioned to `ABANDONED`.
 - `reviewedById` references `users.id` (the admin who reviewed) — plain UUID column, no TypeORM relation.
-- `locationProvince`, `locationDistrict`, `locationArea` — nullable, reserved for future location-based filtering.
+- `province`, `district`, `city`, `street`, `wardNumber` — the seller's pickup location for this listing, independent per product (never shared/reused, even across multiple listings from the same seller). Nullable at the DB level only because pre-existing rows predate this field (it superseded the old, never-wired-up `locationProvince`/`locationDistrict`/`locationArea` stub columns); `CreateProductDto` requires all five for every new product.
 - Composite indexes: `(status, createdAt)` for public listing, `(ownerId, status)` for "my products" queries, `(categoryId, subcategoryId)` for filters.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 

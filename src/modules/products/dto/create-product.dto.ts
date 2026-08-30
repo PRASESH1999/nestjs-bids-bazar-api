@@ -1,6 +1,7 @@
 import {
   IsEnum,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsPositive,
   IsString,
@@ -81,4 +82,34 @@ export class CreateProductDto {
   @Max(7)
   @IsOptional()
   previewImageIndex?: number;
+
+  // ─── Pickup location ────────────────────────────────────────────────────
+  // Independent per product — a seller with multiple listings sets this
+  // separately for each one; never reused across products.
+
+  @ApiProperty({ description: 'Pickup location: province' })
+  @IsString()
+  @IsNotEmpty()
+  province: string;
+
+  @ApiProperty({ description: 'Pickup location: district' })
+  @IsString()
+  @IsNotEmpty()
+  district: string;
+
+  @ApiProperty({ description: 'Pickup location: city' })
+  @IsString()
+  @IsNotEmpty()
+  city: string;
+
+  @ApiProperty({ description: 'Pickup location: street' })
+  @IsString()
+  @IsNotEmpty()
+  street: string;
+
+  @ApiProperty({ description: 'Pickup location: ward number', minimum: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  wardNumber: number;
 }

@@ -141,6 +141,30 @@ export const SubcategorySchema = {
   },
 };
 
+export const SpecificationSchema = {
+  type: 'object',
+  properties: {
+    id: {
+      type: 'string',
+      format: 'uuid',
+      example: '33000000-0000-0000-0000-000000000001',
+    },
+    name: { type: 'string', example: 'RAM' },
+    displayOrder: { type: 'number', example: 0 },
+    isActive: { type: 'boolean', example: true },
+    createdAt: {
+      type: 'string',
+      format: 'date-time',
+      example: '2025-01-01T00:00:00.000Z',
+    },
+    updatedAt: {
+      type: 'string',
+      format: 'date-time',
+      example: '2025-01-01T00:00:00.000Z',
+    },
+  },
+};
+
 // ─── Common Error Responses ───────────────────────────────────────────────────
 
 export const R400: ApiResponseOptions = {
