@@ -16,8 +16,16 @@ export class User extends BaseEntity {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  @Column({ type: 'varchar', length: 255 })
-  password: string;
+  // Null for accounts created via social login (Google/Facebook) that have
+  // never set a local password.
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  password: string | null;
+
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  googleId: string | null;
+
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  facebookId: string | null;
 
   @Column({
     type: 'enum',

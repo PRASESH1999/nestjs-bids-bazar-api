@@ -27,6 +27,11 @@ export const envValidationSchema = Joi.object({
   // omitted, the server falls back to APP_FRONTEND_URL (see main.ts).
   CORS_ORIGINS: Joi.string().optional(),
 
+  // Social login (token-verification flow — see AuthService.loginWithGoogle/loginWithFacebook)
+  GOOGLE_CLIENT_ID: Joi.string().required(),
+  FACEBOOK_APP_ID: Joi.string().required(),
+  FACEBOOK_APP_SECRET: Joi.string().required(),
+
   // Bidding & Auction Lifecycle
   BIDDING_DURATION_HOURS: Joi.number().integer().min(1).required(),
   PAYMENT_WINDOW_HOURS: Joi.number().integer().min(1).required(),

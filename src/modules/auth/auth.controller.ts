@@ -36,6 +36,8 @@ import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
+import { FacebookLoginDto } from './dto/facebook-login.dto';
 import type { User } from '../users/entities/user.entity';
 
 interface DecodedJwtPayload {
@@ -126,6 +128,66 @@ export class AuthController {
       req.user,
     );
 
+    this.setRefreshTokenCookie(res, refreshToken);
+    return { accessToken };
+  }
+
+  @Public()
+  @ApiOperation({ summary: 'Sign in (or sign up) with a Google ID token' })
+  @ApiBody({ type: GoogleLoginDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Login successful. Sets HttpOnly refreshToken cookie. Returns short-lived accessToken.',
+    ...AccessTokenResponse,
+  })
+  @ApiResponse({ status: 400, description: 'Validation failed.', ...R400 })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid or expired Google ID token.',
+    ...R401,
+  })
+  @ApiResponse(R429)
+  @Throttle({ default: { limit: 10, ttl: 900000 } }) // 10 attempts per 15 mins
+  @HttpCode(HttpStatus.OK)
+  @Post('google')
+  async loginWithGoogle(
+    @Body() dto: GoogleLoginDto,
+    @NestResponse({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken } =
+      await this.authService.loginWithGoogle(dto.idToken);
+    this.setRefreshTokenCookie(res, refreshToken);
+    return { accessToken };
+  }
+
+  @Public()
+  @ApiOperation({
+    summary: 'Sign in (or sign up) with a Facebook access token',
+  })
+  @ApiBody({ type: FacebookLoginDto })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Login successful. Sets HttpOnly refreshToken cookie. Returns short-lived accessToken.',
+    ...AccessTokenResponse,
+  })
+  @ApiResponse({ status: 400, description: 'Validation failed.', ...R400 })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid or expired Facebook access token.',
+    ...R401,
+  })
+  @ApiResponse(R429)
+  @Throttle({ default: { limit: 10, ttl: 900000 } }) // 10 attempts per 15 mins
+  @HttpCode(HttpStatus.OK)
+  @Post('facebook')
+  async loginWithFacebook(
+    @Body() dto: FacebookLoginDto,
+    @NestResponse({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken } =
+      await this.authService.loginWithFacebook(dto.accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
     return { accessToken };
   }

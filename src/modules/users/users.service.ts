@@ -108,6 +108,14 @@ export class UsersService {
     return this.usersRepository.findById(id);
   }
 
+  async findByGoogleId(googleId: string): Promise<User | null> {
+    return this.usersRepository.findByGoogleId(googleId);
+  }
+
+  async findByFacebookId(facebookId: string): Promise<User | null> {
+    return this.usersRepository.findByFacebookId(facebookId);
+  }
+
   async updateUser(id: string, data: Partial<User>): Promise<User> {
     const user = await this.findById(id);
     if (!user) {
@@ -183,6 +191,12 @@ export class UsersService {
   ): Promise<void> {
     const user = await this.findById(userId);
     if (!user) throw new NotFoundException('User not found');
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'This account has no password set. It was created via social login.',
+      );
+    }
 
     const matches = await bcrypt.compare(currentPassword, user.password);
     if (!matches) {
@@ -332,6 +346,12 @@ export class UsersService {
     const normalizedNew = newEmail.toLowerCase();
     const user = await this.findById(userId);
     if (!user) throw new NotFoundException('User not found');
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'This account has no password set. It was created via social login.',
+      );
+    }
 
     const matches = await bcrypt.compare(currentPassword, user.password);
     if (!matches) {

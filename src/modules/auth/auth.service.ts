@@ -14,6 +14,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { HttpService } from '@nestjs/axios';
+import axiosStatic from 'axios';
+import { firstValueFrom } from 'rxjs';
+import { OAuth2Client } from 'google-auth-library';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { DataSource } from 'typeorm';
@@ -23,9 +27,23 @@ import { PasswordResetRepository } from './password-reset.repository';
 import { PendingEmailChangeRepository } from './pending-email-change.repository';
 import { RolePermissionsMap } from './role-permissions.map';
 
+interface SocialLoginParams {
+  provider: 'google' | 'facebook';
+  providerId: string;
+  email: string | null;
+  name: string;
+}
+
+interface FacebookProfile {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly googleClient: OAuth2Client;
 
   constructor(
     private usersService: UsersService,
@@ -36,7 +54,12 @@ export class AuthService {
     private passwordResetRepository: PasswordResetRepository,
     private pendingEmailChangeRepository: PendingEmailChangeRepository,
     private dataSource: DataSource,
-  ) {}
+    private httpService: HttpService,
+  ) {
+    this.googleClient = new OAuth2Client(
+      this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID'),
+    );
+  }
 
   async validateUser(
     email: string,
@@ -59,6 +82,7 @@ export class AuthService {
       });
     }
 
+    if (!user.password) return null;
     if (!(await bcrypt.compare(pass, user.password))) return null;
 
     const { password: _, hashedRefreshToken: __, ...result } = user;
@@ -91,6 +115,156 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
+  }
+
+  // ─── Social login (token verification) ─────────────────────────────────────
+
+  async loginWithGoogle(idToken: string) {
+    let payload: { sub?: string; email?: string; name?: string } | undefined;
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        audience: this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID'),
+      });
+      payload = ticket.getPayload();
+    } catch (err: unknown) {
+      this.logger.error(
+        'Google ID token verification failed',
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new UnauthorizedException('Invalid Google ID token');
+    }
+
+    if (!payload?.sub) {
+      throw new UnauthorizedException('Invalid Google ID token');
+    }
+
+    const user = await this.findOrCreateSocialUser({
+      provider: 'google',
+      providerId: payload.sub,
+      email: payload.email ?? null,
+      name: payload.name ?? payload.email ?? 'Google User',
+    });
+
+    return this.login(user);
+  }
+
+  async loginWithFacebook(accessToken: string) {
+    const profile = await this.fetchFacebookProfile(accessToken);
+
+    const user = await this.findOrCreateSocialUser({
+      provider: 'facebook',
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
+    });
+
+    return this.login(user);
+  }
+
+  private async fetchFacebookProfile(
+    accessToken: string,
+  ): Promise<FacebookProfile> {
+    const appId = this.configService.getOrThrow<string>('FACEBOOK_APP_ID');
+    const appSecret = this.configService.getOrThrow<string>(
+      'FACEBOOK_APP_SECRET',
+    );
+
+    try {
+      const debugResponse = await firstValueFrom(
+        this.httpService.get<{
+          data?: { is_valid?: boolean; app_id?: string };
+        }>('https://graph.facebook.com/debug_token', {
+          params: {
+            input_token: accessToken,
+            access_token: `${appId}|${appSecret}`,
+          },
+          timeout: 10_000,
+        }),
+      );
+
+      const debugData = debugResponse.data.data;
+      if (!debugData?.is_valid || debugData.app_id !== appId) {
+        throw new UnauthorizedException('Invalid Facebook access token');
+      }
+
+      const profileResponse = await firstValueFrom(
+        this.httpService.get<{ id: string; name: string; email?: string }>(
+          'https://graph.facebook.com/me',
+          {
+            params: { fields: 'id,name,email', access_token: accessToken },
+            timeout: 10_000,
+          },
+        ),
+      );
+
+      return {
+        id: profileResponse.data.id,
+        name: profileResponse.data.name,
+        email: profileResponse.data.email ?? null,
+      };
+    } catch (err: unknown) {
+      if (err instanceof UnauthorizedException) throw err;
+      const detail: unknown = axiosStatic.isAxiosError(err)
+        ? (err.response?.data ?? err.message)
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      this.logger.error('Facebook token verification failed', detail);
+      throw new UnauthorizedException('Invalid Facebook access token');
+    }
+  }
+
+  /**
+   * Find-or-create shared by both social providers. Matches on the provider's
+   * own id first (returning user), then on verified email (auto-links a
+   * pre-existing password account), then creates a new account. Rejects when
+   * the provider doesn't hand back an email — email is required elsewhere
+   * (verification links, password resets, notifications).
+   */
+  private async findOrCreateSocialUser(
+    params: SocialLoginParams,
+  ): Promise<User> {
+    const existingByProvider =
+      params.provider === 'google'
+        ? await this.usersService.findByGoogleId(params.providerId)
+        : await this.usersService.findByFacebookId(params.providerId);
+    if (existingByProvider) return existingByProvider;
+
+    if (!params.email) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'EMAIL_REQUIRED_FOR_SOCIAL_LOGIN',
+        message:
+          'Please grant email access to sign in with this provider, or use a provider that shares your email.',
+      });
+    }
+
+    const providerColumns =
+      params.provider === 'google'
+        ? { googleId: params.providerId }
+        : { facebookId: params.providerId };
+
+    const normalizedEmail = params.email.toLowerCase();
+    const existingByEmail =
+      await this.usersService.findByEmail(normalizedEmail);
+    if (existingByEmail) {
+      return this.usersService.updateUser(existingByEmail.id, {
+        ...providerColumns,
+        isEmailVerified: true,
+      });
+    }
+
+    const username = await this.usersService.generateNextUsername();
+    return this.usersService.create({
+      email: normalizedEmail,
+      name: params.name,
+      username,
+      password: null,
+      isEmailVerified: true,
+      role: Role.USER,
+      ...providerColumns,
+    });
   }
 
   async register(data: RegisterDto) {

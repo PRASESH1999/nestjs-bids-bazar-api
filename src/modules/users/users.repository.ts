@@ -33,6 +33,14 @@ export class UsersRepository {
     return this.repo.findOneBy({ id });
   }
 
+  async findByGoogleId(googleId: string): Promise<User | null> {
+    return this.repo.findOneBy({ googleId });
+  }
+
+  async findByFacebookId(facebookId: string): Promise<User | null> {
+    return this.repo.findOneBy({ facebookId });
+  }
+
   async saveUser(user: User, queryRunner?: QueryRunner): Promise<User> {
     const repo = queryRunner
       ? queryRunner.manager.getRepository(User)
