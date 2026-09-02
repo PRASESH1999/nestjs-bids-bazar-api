@@ -77,20 +77,6 @@ export class KycService {
       }
     }
 
-    // Bank details are optional at submission, but if any field is given,
-    // all of them must be — validated up front, before anything is persisted.
-    const bankFieldsProvided = [
-      dto.bankName,
-      dto.accountHolderName,
-      dto.accountNumber,
-      dto.branch,
-    ].filter((v) => v !== undefined && v !== '').length;
-    if (bankFieldsProvided > 0 && bankFieldsProvided < 4) {
-      throw new BadRequestException(
-        'bankName, accountHolderName, accountNumber and branch must all be provided together',
-      );
-    }
-
     // Delete old files when resubmitting after REJECTED
     if (existing) {
       const oldPaths = [
@@ -183,17 +169,13 @@ export class KycService {
       );
     }
 
-    // Bank details are optional at submission — only touch the bank_details
-    // row if the caller actually provided them (already validated above).
-    if (bankFieldsProvided === 4) {
-      await this.upsertBankDetails(userId, {
-        bankName: dto.bankName!,
-        accountHolderName: dto.accountHolderName!,
-        accountNumber: dto.accountNumber!,
-        branch: dto.branch!,
-        swiftCode: dto.swiftCode,
-      });
-    }
+    await this.upsertBankDetails(userId, {
+      bankName: dto.bankName,
+      accountHolderName: dto.accountHolderName,
+      accountNumber: dto.accountNumber,
+      branch: dto.branch,
+      swiftCode: dto.swiftCode,
+    });
 
     // Send notification email
     const user = await this.usersService.findById(userId);
@@ -374,6 +356,8 @@ export class KycService {
       throw new NotFoundException('KYC record not found');
     }
 
+    const bank = await this.kycRepository.findBankByUserId(kyc.userId);
+
     return {
       id: kyc.id,
       userId: kyc.userId,
@@ -388,6 +372,15 @@ export class KycService {
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
       updatedAt: kyc.updatedAt,
+      bank: bank
+        ? {
+            bankName: bank.bankName,
+            accountHolderName: bank.accountHolderName,
+            accountNumber: this.maskAccountNumber(
+              this.encryptionService.decrypt(bank.accountNumber),
+            ),
+          }
+        : null,
       citizenshipFrontUrl: kyc.citizenshipFrontPath
         ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
         : null,

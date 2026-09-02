@@ -88,32 +88,30 @@ export class SubmitKycDto {
   @IsString()
   temporaryAddressCountry?: string;
 
-  // --- Bank Details (optional at submission; all-or-nothing — see
-  // KycService.submitKyc. Required later, via PATCH /kyc/me/bank, before the
-  // user is allowed to list a product for sale.) ---
+  // --- Bank Details (mandatory at submission) ---
 
-  @ApiPropertyOptional({ example: 'Nepal Bank' })
-  @IsOptional()
+  @ApiProperty({ example: 'Nepal Bank' })
+  @IsNotEmpty()
   @IsString()
-  bankName?: string;
+  bankName: string;
 
-  @ApiPropertyOptional({ example: 'John Doe' })
-  @IsOptional()
+  @ApiProperty({ example: 'John Doe' })
+  @IsNotEmpty()
   @IsString()
-  accountHolderName?: string;
+  accountHolderName: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: '1234567890',
     description: '9–20 digit account number',
   })
-  @IsOptional()
+  @IsNotEmpty()
   @Matches(/^\d{9,20}$/, { message: 'accountNumber must be 9–20 digits' })
-  accountNumber?: string;
+  accountNumber: string;
 
-  @ApiPropertyOptional({ example: 'Kathmandu Branch' })
-  @IsOptional()
+  @ApiProperty({ example: 'Kathmandu Branch' })
+  @IsNotEmpty()
   @IsString()
-  branch?: string;
+  branch: string;
 
   @ApiPropertyOptional({ example: 'NBLNNPKA' })
   @IsOptional()
