@@ -15,6 +15,7 @@ import { PendingEmailChange } from '../modules/auth/entities/pending-email-chang
 import { UserRewards } from '../modules/rewards/entities/user-rewards.entity';
 import { PointsTransaction } from '../modules/rewards/entities/points-transaction.entity';
 import { Specification } from '../modules/specifications/entities/specification.entity';
+import { Notification } from '../modules/notifications/entities/notification.entity';
 
 config({ path: '.env.development' });
 
@@ -42,6 +43,7 @@ export const dataSourceOptions: DataSourceOptions = {
     UserRewards,
     PointsTransaction,
     Specification,
+    Notification,
   ],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

@@ -17,11 +17,14 @@ import { EventNames } from '@common/events/event-names';
 import type {
   AuctionClosedPayload,
   AuctionSettledPayload,
+  WinTransferredPayload,
 } from '@common/events/event-payloads.type';
+import { NotificationType } from '@common/enums/notification-type.enum';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
 import { Payment } from '@modules/payments/entities/payment.entity';
 import { MailService } from '@modules/mail/mail.service';
+import { NotificationsService } from '@modules/notifications/notifications.service';
 import { Bid } from '../entities/bid.entity';
 
 @Injectable()
@@ -33,6 +36,7 @@ export class AuctionLifecycleService {
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ─── Core transition: close an active auction whose timer has expired ─────
@@ -180,6 +184,9 @@ export class AuctionLifecycleService {
         winningBidId: capturedWinningBidId,
         winnerId: winnerId,
         winningAmount: winningAmount,
+        sellerId: sellerId,
+        productTitle: capturedProductTitle,
+        paymentDeadline: paymentDeadline.toISOString(),
       };
       this.eventEmitter.emit(EventNames.AUCTION_CLOSED, payload);
     } catch (err: unknown) {
@@ -373,6 +380,9 @@ export class AuctionLifecycleService {
         winningBidId: capturedWinningBidId,
         winnerId: winnerId,
         winningAmount: winningAmount,
+        sellerId: sellerId,
+        productTitle: capturedProductTitle,
+        paymentDeadline: paymentDeadline.toISOString(),
       };
       this.eventEmitter.emit(EventNames.AUCTION_CLOSED, payload);
     } catch (err: unknown) {
@@ -412,6 +422,7 @@ export class AuctionLifecycleService {
     let newWinnerFallbackRank: number | null = null;
     let failedBidderRank: number | null = null;
     let totalBiddersCount: number | null = null;
+    let newWinningBidId: string | null = null;
 
     try {
       const product = await qr.manager
@@ -497,6 +508,7 @@ export class AuctionLifecycleService {
         newWinnerFallbackRank = nextBid.fallbackRank;
         capturedProductTitle = product.title;
         capturedProductId = product.id;
+        newWinningBidId = nextBid.id;
       } else {
         product.status = ProductStatus.ABANDONED;
         product.abandonedAt = now;
@@ -584,15 +596,45 @@ export class AuctionLifecycleService {
     // learn the win moved to a new bidder. Non-fatal — never blocks the expiry flow.
     if (outcome === 'fallback') {
       try {
-        this.eventEmitter.emit(EventNames.WIN_TRANSFERRED, {
+        const payload: WinTransferredPayload = {
           productId: capturedProductId,
           fromUserId: failedBidderId,
-          toUserId: newWinnerId,
+          toUserId: newWinnerId!,
           newPaymentDeadline: newWinnerDeadline!.toISOString(),
-        });
+          sellerId: sellerId,
+          productTitle: capturedProductTitle,
+          winningAmount: newWinnerAmount!,
+          fallbackRank: newWinnerFallbackRank!,
+          newWinningBidId: newWinningBidId!,
+        };
+        this.eventEmitter.emit(EventNames.WIN_TRANSFERRED, payload);
       } catch (err: unknown) {
         this.logger.error(
           `handlePaymentExpiry: win.transferred emission failed for product ${capturedProductId}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+
+    // Auction-abandoned notification — no domain event exists for this yet
+    // (Rule 7 lists auction.abandoned as planned, not wired), so this calls
+    // NotificationsService directly, mirroring the email above. Non-fatal.
+    if (outcome === 'abandoned') {
+      try {
+        await this.notificationsService.createForUser({
+          userId: sellerId,
+          type: NotificationType.AUCTION_ABANDONED,
+          relatedId: capturedProductId,
+          title: 'Your auction was abandoned',
+          message: `All bidders failed to pay for "${capturedProductTitle}".`,
+          data: {
+            productId: capturedProductId,
+            totalBidders: totalBiddersCount ?? 0,
+          },
+        });
+      } catch (err: unknown) {
+        this.logger.error(
+          `handlePaymentExpiry: abandoned notification failed for product ${capturedProductId}`,
           err instanceof Error ? err.stack : String(err),
         );
       }
@@ -776,6 +818,8 @@ export class AuctionLifecycleService {
         winningBidId: capturedWinningBidId,
         buyerId: buyerId,
         amount: confirmedAmount,
+        sellerId: sellerId,
+        productTitle: capturedProductTitle,
       };
       this.eventEmitter.emit(EventNames.AUCTION_SETTLED, payload);
     } catch (err: unknown) {
@@ -916,6 +960,8 @@ export class AuctionLifecycleService {
         winningBidId: capturedWinningBidId,
         buyerId,
         amount: confirmedAmount,
+        sellerId: sellerId,
+        productTitle: capturedProductTitle,
       };
       this.eventEmitter.emit(EventNames.AUCTION_SETTLED, payload);
     } catch (err: unknown) {
@@ -1043,6 +1089,30 @@ export class AuctionLifecycleService {
           productId: bid.productId,
         },
       );
+
+      // In-app notification — independent of the email outcome, no event
+      // exists for this cron-driven check, so this calls NotificationsService
+      // directly. Non-fatal: a failure here never blocks the email retry
+      // logic below.
+      try {
+        await this.notificationsService.createForUser({
+          userId: bid.bidderId,
+          type: NotificationType.PAYMENT_WINDOW_EXPIRING,
+          relatedId: bid.id,
+          title: 'Payment window closing soon',
+          message: `About 2 hours left to pay ${Number(bid.amount)} for "${bid.product.title}".`,
+          data: {
+            productId: bid.productId,
+            amount: Number(bid.amount),
+            paymentDeadline: bid.paymentDeadline,
+          },
+        });
+      } catch (err: unknown) {
+        this.logger.error(
+          `sendPaymentWarnings: notification creation failed for bid ${bid.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
 
       if (wasSent) {
         bid.paymentWarningSentAt = new Date();

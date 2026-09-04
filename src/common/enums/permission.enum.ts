@@ -41,6 +41,9 @@ export enum Permission {
   SETTLEMENT_MANAGE = 'settlement:manage',
   POINTS_ADJUST = 'points:adjust',
 
+  // Notification permissions
+  NOTIFICATION_VIEW_OWN = 'notification:view_own',
+
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',
   ADMIN_MANAGE = 'admin:manage',

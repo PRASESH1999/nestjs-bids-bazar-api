@@ -271,6 +271,12 @@ export class BiddingService {
         bidId: savedBid.id,
         bidderId: userId,
         amount: newBidAmount,
+        productOwnerId,
+        productTitle,
+        wasFirstBid,
+        biddingEndsAt: biddingEndsAt!.toISOString(),
+        previousHighestBidderId,
+        previousBidAmount,
       };
       this.eventEmitter.emit(EventNames.BID_SUBMITTED, payload);
     } catch (err: unknown) {

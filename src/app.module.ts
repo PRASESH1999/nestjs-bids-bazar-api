@@ -13,6 +13,7 @@ import { CategoriesModule } from '@modules/categories/categories.module';
 import { FonepayModule } from '@modules/fonepay/fonepay.module';
 import { KycModule } from '@modules/kyc/kyc.module';
 import { MailModule } from '@modules/mail/mail.module';
+import { NotificationsModule } from '@modules/notifications/notifications.module';
 import { PaymentsModule } from '@modules/payments/payments.module';
 import { ProductsModule } from '@modules/products/products.module';
 import { RewardsModule } from '@modules/rewards/rewards.module';
@@ -68,6 +69,7 @@ import { envValidationSchema } from './config/env.validation';
     CategoriesModule,
     SpecificationsModule,
     ProductsModule,
+    NotificationsModule,
     BiddingModule,
     PaymentsModule,
     FonepayModule,

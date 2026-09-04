@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-08-30 by agent (Added `SPECIFICATION` master table — a flat, global, admin-managed list of specification names (e.g. RAM, Condition, Storage) with no relation to Product; Product will reference these by string value only)_
+_Last updated: 2026-09-03 by agent (Added `NOTIFICATION` table — a per-user, permanent in-app notification log delivered live via SSE, populated by handlers reacting to the existing bidding/payment domain events)_
 
 ---
 
@@ -28,6 +28,7 @@ erDiagram
     USER ||--o{ PAYMENT : "owes"
     USER ||--o| USERREWARDS : "has rewards"
     USER ||--o{ POINTSTRANSACTION : "point history"
+    USER ||--o{ NOTIFICATION : "receives"
 ```
 
 ---
@@ -286,6 +287,23 @@ erDiagram
         timestamp updatedAt
         timestamp deletedAt
     }
+
+    USER ||--o{ NOTIFICATION : "receives"
+
+    NOTIFICATION {
+        uuid id PK
+        uuid userId FK
+        enum type
+        uuid relatedId
+        string title
+        text message
+        json data
+        boolean isRead
+        timestamp readAt
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp deletedAt
+    }
 ```
 
 ---
@@ -442,3 +460,14 @@ erDiagram
 - `type` enum values: `BUYER`, `SELLER`.
 - `referenceId` is the triggering `Payment.id` for automatic awards (via `markSellerPaid`), `null` for a manual admin adjustment (via `adjustPoints`).
 - `(userId, createdAt)` composite index for a user's point history.
+
+### NOTIFICATION
+- A permanent, per-user in-app notification log — **never deleted**, only `isRead`/`readAt` change over time. `deletedAt` is inherited from `BaseEntity` but unused by the service.
+- `userId` references `users.id` — stored as a plain UUID column (no TypeORM `@ManyToOne` relation); every field needed to render a notification (names, amounts, titles) already arrives via the triggering domain event payload, so this stays a leaf entity with no join.
+- `type` enum values (`NotificationType`): `BID_PLACED_SELLER`, `OUTBID`, `AUCTION_WON`, `AUCTION_CLOSED_SELLER`, `PAYMENT_WINDOW_EXPIRING`, `PAYMENT_FAILED_FALLBACK`, `PAYMENT_FAILED_SELLER`, `AUCTION_ABANDONED`, `PAYMENT_CONFIRMED_SELLER`, `PAYMENT_CONFIRMED_BUYER` — one per notification-worthy moment in the bidding/payment lifecycle (mirrors the existing transactional email events in `MailService`).
+- `relatedId` — the id of the row that triggered this notification (a `bid.id` or `product.id`, depending on `type`). Used only for the idempotency index below and as an FE deep-link aid — never joined against.
+- `data` is a nullable `jsonb` free-form payload (`productId`, `amount`, etc.) for the frontend to build deep links — intentionally loosely typed.
+- **Composite unique index** on `(userId, type, relatedId)` — the idempotency guard: a replayed domain event (from `EventEmitter2`, which has no delivery-once guarantee) produces a duplicate-key insert that the repository catches and treats as a no-op, rather than a duplicate notification. For the `win.transferred`-driven types (`PAYMENT_FAILED_FALLBACK`/`PAYMENT_FAILED_SELLER`), `relatedId` is the *newly-promoted* bid id, not `productId` — a single product can go through multiple fallback rounds, and keying on `productId` alone would collide across rounds.
+- Composite index on `(userId, isRead, createdAt)` for the list and unread-count queries.
+- Delivered live via a per-user SSE stream (`GET /notifications/stream`), mirroring `AuctionBroadcastService`'s existing per-product SSE mechanism (Rule 7) — same single-instance-only in-memory `Subject` limitation.
+- Created by dedicated `@OnEvent` handlers in `NotificationsModule` reacting to the existing `bid.submitted`/`auction.closed`/`auction.settled`/`win.transferred` events (payloads extended with a few additional fields for this purpose — see `src/common/events/event-payloads.type.ts`), except `PAYMENT_WINDOW_EXPIRING` and `AUCTION_ABANDONED`, which have no corresponding domain event yet and are created via a direct service call at the same point their equivalent email is sent.
