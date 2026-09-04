@@ -16,6 +16,7 @@ import { UserRewards } from '../modules/rewards/entities/user-rewards.entity';
 import { PointsTransaction } from '../modules/rewards/entities/points-transaction.entity';
 import { Specification } from '../modules/specifications/entities/specification.entity';
 import { Notification } from '../modules/notifications/entities/notification.entity';
+import { Favorite } from '../modules/favorites/entities/favorite.entity';
 
 config({ path: '.env.development' });
 
@@ -44,6 +45,7 @@ export const dataSourceOptions: DataSourceOptions = {
     PointsTransaction,
     Specification,
     Notification,
+    Favorite,
   ],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

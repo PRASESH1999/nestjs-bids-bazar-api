@@ -44,6 +44,9 @@ export enum Permission {
   // Notification permissions
   NOTIFICATION_VIEW_OWN = 'notification:view_own',
 
+  // Favorite permissions
+  FAVORITE_MANAGE = 'favorite:manage',
+
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',
   ADMIN_MANAGE = 'admin:manage',

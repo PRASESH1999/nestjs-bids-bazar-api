@@ -60,9 +60,16 @@ export class ProductsController {
 
   @Get('products')
   @Public()
+  @UseGuards(OptionalJwtGuard)
   @ApiOperation({ summary: 'List publicly visible products' })
-  async listPublicProducts(@Query() query: ListProductsQueryDto) {
-    return this.productsService.listPublicProducts(query);
+  async listPublicProducts(
+    @Query() query: ListProductsQueryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productsService.listPublicProducts(
+      query,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/calculate-bidding-price')
@@ -96,30 +103,41 @@ export class ProductsController {
 
   @Get('products/home/hot-product')
   @Public()
+  @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary:
       'Home page: the single hottest ACTIVE product (most bids, ties broken by soonest ending)',
   })
-  async getHotProduct() {
-    return { data: await this.productsService.getHotProduct() };
+  async getHotProduct(@Request() req: RequestWithUser) {
+    return {
+      data: await this.productsService.getHotProduct(this.getRequesterId(req)),
+    };
   }
 
   @Get('products/home/trending-bids')
   @Public()
+  @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary: 'Home page: top 10 ACTIVE products ranked by bid count',
   })
-  async getTrendingBids() {
-    return { data: await this.productsService.getTrendingProducts() };
+  async getTrendingBids(@Request() req: RequestWithUser) {
+    return {
+      data: await this.productsService.getTrendingProducts(
+        this.getRequesterId(req),
+      ),
+    };
   }
 
   @Get('products/home/new-arrivals')
   @Public()
+  @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary: 'Home page: 10 most recently listed ACTIVE products',
   })
-  async getNewArrivals() {
-    return { data: await this.productsService.getNewArrivals() };
+  async getNewArrivals(@Request() req: RequestWithUser) {
+    return {
+      data: await this.productsService.getNewArrivals(this.getRequesterId(req)),
+    };
   }
 
   @Get('products/me')
@@ -143,9 +161,10 @@ export class ProductsController {
     @Param('id') id: string,
     @Request() req: RequestWithUser,
   ) {
-    const requesterId =
-      (req.user as RequestWithUser['user'] | undefined)?.sub ?? null;
-    return this.productsService.getPublicProductById(id, requesterId);
+    return this.productsService.getPublicProductById(
+      id,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/:id/images/:imageId')
@@ -158,12 +177,8 @@ export class ProductsController {
     @Request() req: RequestWithUser,
     @NestResponse({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
-    const requesterId =
-      (req.user as RequestWithUser['user'] | undefined)?.sub ?? null;
-    const isAdmin =
-      (req.user as RequestWithUser['user'] | undefined)?.role === Role.ADMIN ||
-      (req.user as RequestWithUser['user'] | undefined)?.role ===
-        Role.SUPERADMIN;
+    const requesterId = this.getRequesterId(req);
+    const isAdmin = this.isRequesterAdmin(req);
 
     const { absolutePath, mimeType } =
       await this.productsService.getProductImageFile(
@@ -198,14 +213,11 @@ export class ProductsController {
     @Param('id') id: string,
     @Request() req: RequestWithUser,
   ): Promise<void> {
-    const requesterId =
-      (req.user as RequestWithUser['user'] | undefined)?.sub ?? null;
-    const isAdmin =
-      (req.user as RequestWithUser['user'] | undefined)?.role === Role.ADMIN ||
-      (req.user as RequestWithUser['user'] | undefined)?.role ===
-        Role.SUPERADMIN;
-
-    await this.productsService.trackView(id, requesterId, isAdmin);
+    await this.productsService.trackView(
+      id,
+      this.getRequesterId(req),
+      this.isRequesterAdmin(req),
+    );
   }
 
   // ─── User endpoints ───────────────────────────────────────────────────────
@@ -422,8 +434,11 @@ export class ProductsController {
   @Get('admin/products')
   @RequirePermissions(Permission.PRODUCT_VIEW_ALL)
   @ApiOperation({ summary: 'Admin: list all products (all statuses)' })
-  async listAllProducts(@Query() query: AdminListProductsQueryDto) {
-    return this.productsService.listAllProducts(query);
+  async listAllProducts(
+    @Request() req: RequestWithUser,
+    @Query() query: AdminListProductsQueryDto,
+  ) {
+    return this.productsService.listAllProducts(query, req.user.sub);
   }
 
   @Get('admin/products/:id')
@@ -496,5 +511,16 @@ export class ProductsController {
       req.user.sub,
       true,
     );
+  }
+
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  private getRequesterId(req: RequestWithUser): string | null {
+    return (req.user as RequestWithUser['user'] | undefined)?.sub ?? null;
+  }
+
+  private isRequesterAdmin(req: RequestWithUser): boolean {
+    const role = (req.user as RequestWithUser['user'] | undefined)?.role;
+    return role === Role.ADMIN || role === Role.SUPERADMIN;
   }
 }

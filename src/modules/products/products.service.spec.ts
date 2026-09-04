@@ -5,6 +5,13 @@ import { ProductsRepository } from './products.repository';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
 
+// Shared across the describe blocks below — none of them exercise favorites
+// logic itself (see favorites.service.spec.ts for that), they just need
+// mapProduct's isFavorited lookup to resolve to something.
+const mockFavoritesService = {
+  getFavoritedProductIds: jest.fn().mockResolvedValue(new Set<string>()),
+};
+
 describe('ProductsService — Instant Buy pricing', () => {
   // Pure functions — no injected dependencies are touched, so a full
   // NestJS TestingModule is unnecessary here.
@@ -17,6 +24,7 @@ describe('ProductsService — Instant Buy pricing', () => {
     {} as never,
     {} as never,
     {} as never,
+    mockFavoritesService as never,
   );
 
   describe('computeInstantBuyPrice', () => {
@@ -119,6 +127,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       {} as never,
       {} as never,
       {} as never,
+      mockFavoritesService as never,
     );
 
     const dto: UpdateProductDto = {
@@ -166,6 +175,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       {} as never,
       {} as never,
       {} as never,
+      mockFavoritesService as never,
     );
 
     const dto: UpdateProductDto = { title: 'Updated title' };
@@ -178,5 +188,119 @@ describe('ProductsService.updateProduct — pickup location', () => {
     expect(result.city).toBe('Old City');
     expect(result.street).toBe('Old Street');
     expect(result.wardNumber).toBe(1);
+  });
+});
+
+describe('ProductsService — isFavorited flag', () => {
+  function buildProduct(id: string): Product {
+    return {
+      id,
+      ownerId: 'seller-1',
+      title: `Product ${id}`,
+      description: 'A product long enough to pass validation.',
+      specifications: null,
+      categoryId: 'cat-1',
+      subcategoryId: 'sub-1',
+      condition: ItemCondition.NEW,
+      status: ProductStatus.ACTIVE,
+      basePrice: 1000,
+      biddingStartPrice: 1200,
+      instantBuyPrice: 1400,
+      currency: 'NPR',
+      biddingDurationHours: 72,
+      currentHighestBid: null,
+      currentHighestBidderId: null,
+      biddingStartedAt: null,
+      biddingEndsAt: null,
+      viewCount: 0,
+      submittedAt: null,
+      reviewedById: null,
+      reviewedAt: null,
+      rejectionReason: null,
+      province: null,
+      district: null,
+      city: null,
+      street: null,
+      wardNumber: null,
+      winningBidId: null,
+      closedAt: null,
+      settledAt: null,
+      abandonedAt: null,
+      withdrawnAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+      images: [],
+    };
+  }
+
+  it('flags isFavorited per product from a single batch lookup, not one query each', async () => {
+    const productA = buildProduct('product-a');
+    const productB = buildProduct('product-b');
+
+    const productsRepository = {
+      findPaginated: jest.fn().mockResolvedValue([[productA, productB], 2]),
+    } as unknown as ProductsRepository;
+
+    const favoritesService = {
+      // Only product-a is favorited by this requester.
+      getFavoritedProductIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['product-a'])),
+    };
+
+    const service = new ProductsService(
+      productsRepository,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      favoritesService as never,
+    );
+
+    const result = await service.listPublicProducts({}, 'user-1');
+
+    expect(favoritesService.getFavoritedProductIds).toHaveBeenCalledTimes(1);
+    expect(favoritesService.getFavoritedProductIds).toHaveBeenCalledWith(
+      'user-1',
+      ['product-a', 'product-b'],
+    );
+    expect(result.data.find((p) => p.id === 'product-a')?.isFavorited).toBe(
+      true,
+    );
+    expect(result.data.find((p) => p.id === 'product-b')?.isFavorited).toBe(
+      false,
+    );
+  });
+
+  it('is false for every product on an unauthenticated (anonymous) request', async () => {
+    const productA = buildProduct('product-a');
+
+    const productsRepository = {
+      findPaginated: jest.fn().mockResolvedValue([[productA], 1]),
+    } as unknown as ProductsRepository;
+
+    const favoritesService = {
+      getFavoritedProductIds: jest.fn().mockResolvedValue(new Set<string>()),
+    };
+
+    const service = new ProductsService(
+      productsRepository,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      favoritesService as never,
+    );
+
+    const result = await service.listPublicProducts({}, null);
+
+    expect(result.data[0].isFavorited).toBe(false);
   });
 });

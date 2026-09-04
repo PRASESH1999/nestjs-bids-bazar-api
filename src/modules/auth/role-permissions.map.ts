@@ -18,6 +18,7 @@ export const RolePermissionsMap: Record<Role, Permission[]> = {
     Permission.BID_VIEW_OWN,
     Permission.PAYMENT_INITIATE,
     Permission.NOTIFICATION_VIEW_OWN,
+    Permission.FAVORITE_MANAGE,
   ],
   [Role.ADMIN]: [
     Permission.USER_VIEW,

@@ -9,6 +9,7 @@ import { MailService } from '@modules/mail/mail.service';
 import { UsersService } from '@modules/users/users.service';
 import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
 import { BiddingService } from '@modules/bidding/services/bidding.service';
+import { FavoritesService } from '@modules/favorites/favorites.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -24,22 +25,9 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
 import { ProductStorageService } from './product-storage.service';
 import { ProductsRepository } from './products.repository';
+import { mapProduct, ProductResponse } from './products.mapper';
 
-export type ProductImageResponse = {
-  id: string;
-  displayOrder: number;
-  mimeType: string;
-  url: string;
-};
-
-// `viewCount` is omitted from the base response — it is detail-page metadata,
-// surfaced explicitly on ProductDetailResponse rather than on every list item.
-export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
-  previewImage: { id: string; url: string; mimeType: string } | null;
-  images: ProductImageResponse[];
-  // Derived, not stored: currentBid < instantBuyPrice. See Rule 13/14.
-  showInstantBuy: boolean;
-};
+export type { ProductImageResponse, ProductResponse } from './products.mapper';
 
 // Home-page cards need the bid count alongside the standard product shape.
 export type HomeProductResponse = ProductResponse & { totalBids: number };
@@ -85,6 +73,7 @@ export class ProductsService {
     private readonly mailService: MailService,
     private readonly auctionLifecycleService: AuctionLifecycleService,
     private readonly biddingService: BiddingService,
+    private readonly favoritesService: FavoritesService,
   ) {}
 
   // ─── Create ───────────────────────────────────────────────────────────────
@@ -165,9 +154,11 @@ export class ProductsService {
 
     await this.productsRepository.saveImages(images);
 
-    return this.mapProduct(
-      (await this.productsRepository.findById(savedProduct.id)) as Product,
-    );
+    const createdProduct = (await this.productsRepository.findById(
+      savedProduct.id,
+    )) as Product;
+    const favoritedSet = await this.favoritedSetFor(userId, [createdProduct]);
+    return mapProduct(createdProduct, favoritedSet.has(createdProduct.id));
   }
 
   // ─── Update ───────────────────────────────────────────────────────────────
@@ -243,9 +234,11 @@ export class ProductsService {
     }
 
     await this.productsRepository.saveProduct(product);
-    return this.mapProduct(
-      (await this.productsRepository.findById(productId)) as Product,
-    );
+    const updatedProduct = (await this.productsRepository.findById(
+      productId,
+    )) as Product;
+    const favoritedSet = await this.favoritedSetFor(userId, [updatedProduct]);
+    return mapProduct(updatedProduct, favoritedSet.has(updatedProduct.id));
   }
 
   // ─── Submit ───────────────────────────────────────────────────────────────
@@ -286,7 +279,8 @@ export class ProductsService {
       );
     }
 
-    return this.mapProduct(saved);
+    const favoritedSet = await this.favoritedSetFor(userId, [saved]);
+    return mapProduct(saved, favoritedSet.has(saved.id));
   }
 
   // ─── Withdraw ─────────────────────────────────────────────────────────────
@@ -349,15 +343,19 @@ export class ProductsService {
         ownerId: userId,
       },
     );
+    const favoritedSet = await this.favoritedSetFor(userId, data);
     return {
-      data: data.map((p) => this.mapProduct(p)),
+      data: data.map((p) => mapProduct(p, favoritedSet.has(p.id))),
       meta: { page, limit, total },
     };
   }
 
   // ─── Public views ─────────────────────────────────────────────────────────
 
-  async listPublicProducts(query: ListProductsQueryDto): Promise<{
+  async listPublicProducts(
+    query: ListProductsQueryDto,
+    requesterId: string | null = null,
+  ): Promise<{
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
@@ -370,8 +368,9 @@ export class ProductsService {
         statuses: PUBLICLY_VISIBLE_STATUSES,
       },
     );
+    const favoritedSet = await this.favoritedSetFor(requesterId, data);
     return {
-      data: data.map((p) => this.mapProduct(p)),
+      data: data.map((p) => mapProduct(p, favoritedSet.has(p.id))),
       meta: { page, limit, total },
     };
   }
@@ -413,17 +412,25 @@ export class ProductsService {
     }
 
     // Detail-page metadata fetched in parallel — none depend on each other.
-    const [topBidders, bidCounts, winningBidder, similarProducts] =
-      await Promise.all([
-        this.biddingService.getTopBiddersForProduct(id),
-        this.biddingService.getBidCountsForProduct(id),
-        this.biddingService.getWinningBidder(product.winningBidId),
-        this.getSimilarProducts(product),
-      ]);
+    const [
+      topBidders,
+      bidCounts,
+      winningBidder,
+      similarProducts,
+      favoritedSet,
+    ] = await Promise.all([
+      this.biddingService.getTopBiddersForProduct(id),
+      this.biddingService.getBidCountsForProduct(id),
+      this.biddingService.getWinningBidder(product.winningBidId),
+      this.getSimilarProducts(product, 5, requesterId),
+      this.favoritedSetFor(requesterId, [product]),
+    ]);
 
     // The raw winningBidId pointer is replaced by the resolved winningBidder.
-    const { winningBidId: _winningBidId, ...productBase } =
-      this.mapProduct(product);
+    const { winningBidId: _winningBidId, ...productBase } = mapProduct(
+      product,
+      favoritedSet.has(product.id),
+    );
 
     return {
       ...productBase,
@@ -439,26 +446,46 @@ export class ProductsService {
   // ─── Home page ────────────────────────────────────────────────────────────
 
   // The single hottest ACTIVE product — most bids, ties broken by soonest ending.
-  async getHotProduct(): Promise<HomeProductResponse | null> {
+  async getHotProduct(
+    requesterId: string | null = null,
+  ): Promise<HomeProductResponse | null> {
     const result = await this.productsRepository.findHotProduct();
     if (!result) return null;
-    return { ...this.mapProduct(result.product), totalBids: result.totalBids };
+    const favoritedSet = await this.favoritedSetFor(requesterId, [
+      result.product,
+    ]);
+    return {
+      ...mapProduct(result.product, favoritedSet.has(result.product.id)),
+      totalBids: result.totalBids,
+    };
   }
 
   // Top 10 ACTIVE products ranked by bid count.
-  async getTrendingProducts(): Promise<HomeProductResponse[]> {
+  async getTrendingProducts(
+    requesterId: string | null = null,
+  ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findTrendingProducts(10);
+    const favoritedSet = await this.favoritedSetFor(
+      requesterId,
+      results.map((r) => r.product),
+    );
     return results.map((r) => ({
-      ...this.mapProduct(r.product),
+      ...mapProduct(r.product, favoritedSet.has(r.product.id)),
       totalBids: r.totalBids,
     }));
   }
 
   // 10 most recently listed ACTIVE products.
-  async getNewArrivals(): Promise<HomeProductResponse[]> {
+  async getNewArrivals(
+    requesterId: string | null = null,
+  ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findNewestProducts(10);
+    const favoritedSet = await this.favoritedSetFor(
+      requesterId,
+      results.map((r) => r.product),
+    );
     return results.map((r) => ({
-      ...this.mapProduct(r.product),
+      ...mapProduct(r.product, favoritedSet.has(r.product.id)),
       totalBids: r.totalBids,
     }));
   }
@@ -503,6 +530,7 @@ export class ProductsService {
   async getSimilarProducts(
     product: Product,
     limit = 5,
+    requesterId: string | null = null,
   ): Promise<ProductResponse[]> {
     const collected: Product[] = [];
     const excludeIds = [product.id];
@@ -525,7 +553,8 @@ export class ProductsService {
       excludeIds.push(...found.map((p) => p.id));
     }
 
-    return collected.map((p) => this.mapProduct(p));
+    const favoritedSet = await this.favoritedSetFor(requesterId, collected);
+    return collected.map((p) => mapProduct(p, favoritedSet.has(p.id)));
   }
 
   async getProductImageFile(
@@ -578,9 +607,11 @@ export class ProductsService {
     }
 
     await this.productsRepository.reorderImages(productId, imageIds);
-    return this.mapProduct(
-      (await this.productsRepository.findById(productId)) as Product,
-    );
+    const reordered = (await this.productsRepository.findById(
+      productId,
+    )) as Product;
+    const favoritedSet = await this.favoritedSetFor(requesterId, [reordered]);
+    return mapProduct(reordered, favoritedSet.has(reordered.id));
   }
 
   // ─── Preview image ────────────────────────────────────────────────────────
@@ -603,9 +634,11 @@ export class ProductsService {
     }
 
     await this.productsRepository.setPreviewImage(productId, imageId);
-    return this.mapProduct(
-      (await this.productsRepository.findById(productId)) as Product,
-    );
+    const updated = (await this.productsRepository.findById(
+      productId,
+    )) as Product;
+    const favoritedSet = await this.favoritedSetFor(requesterId, [updated]);
+    return mapProduct(updated, favoritedSet.has(updated.id));
   }
 
   // ─── Owner or Admin view ──────────────────────────────────────────────────
@@ -622,12 +655,16 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.mapProduct(product);
+    const favoritedSet = await this.favoritedSetFor(userId, [product]);
+    return mapProduct(product, favoritedSet.has(product.id));
   }
 
   // ─── Admin moderation ─────────────────────────────────────────────────────
 
-  async listAllProducts(query: AdminListProductsQueryDto): Promise<{
+  async listAllProducts(
+    query: AdminListProductsQueryDto,
+    requesterId: string | null = null,
+  ): Promise<{
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
@@ -637,8 +674,9 @@ export class ProductsService {
       limit,
       { ...filters, status, ownerId },
     );
+    const favoritedSet = await this.favoritedSetFor(requesterId, data);
     return {
-      data: data.map((p) => this.mapProduct(p)),
+      data: data.map((p) => mapProduct(p, favoritedSet.has(p.id))),
       meta: { page, limit, total },
     };
   }
@@ -674,7 +712,8 @@ export class ProductsService {
       );
     }
 
-    return this.mapProduct(saved);
+    const favoritedSet = await this.favoritedSetFor(adminId, [saved]);
+    return mapProduct(saved, favoritedSet.has(saved.id));
   }
 
   async rejectProduct(
@@ -709,7 +748,8 @@ export class ProductsService {
       );
     }
 
-    return this.mapProduct(saved);
+    const favoritedSet = await this.favoritedSetFor(adminId, [saved]);
+    return mapProduct(saved, favoritedSet.has(saved.id));
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
@@ -789,62 +829,16 @@ export class ProductsService {
     return Math.round(basePrice * 1.4 * 100) / 100;
   }
 
-  private mapProduct(product: Product): ProductResponse {
-    const currentBid = product.currentHighestBid ?? product.biddingStartPrice;
-    return {
-      id: product.id,
-      ownerId: product.ownerId,
-      title: product.title,
-      description: product.description,
-      specifications: product.specifications,
-      categoryId: product.categoryId,
-      subcategoryId: product.subcategoryId,
-      condition: product.condition,
-      status: product.status,
-      basePrice: product.basePrice,
-      biddingStartPrice: product.biddingStartPrice,
-      instantBuyPrice: product.instantBuyPrice,
-      showInstantBuy: currentBid < product.instantBuyPrice,
-      currency: product.currency,
-      biddingDurationHours: product.biddingDurationHours,
-      currentHighestBid: product.currentHighestBid,
-      currentHighestBidderId: product.currentHighestBidderId,
-      biddingStartedAt: product.biddingStartedAt,
-      biddingEndsAt: product.biddingEndsAt,
-      submittedAt: product.submittedAt,
-      reviewedById: product.reviewedById,
-      reviewedAt: product.reviewedAt,
-      rejectionReason: product.rejectionReason,
-      province: product.province,
-      district: product.district,
-      city: product.city,
-      street: product.street,
-      wardNumber: product.wardNumber,
-      winningBidId: product.winningBidId,
-      closedAt: product.closedAt,
-      settledAt: product.settledAt,
-      abandonedAt: product.abandonedAt,
-      withdrawnAt: product.withdrawnAt,
-      createdAt: product.createdAt,
-      updatedAt: product.updatedAt,
-      deletedAt: product.deletedAt,
-      previewImage: (() => {
-        const p = product.images?.find((img) => img.displayOrder === 0);
-        return p
-          ? {
-              id: p.id,
-              url: `/api/v1/products/${product.id}/images/${p.id}`,
-              mimeType: p.mimeType,
-            }
-          : null;
-      })(),
-      images:
-        product.images?.map((img) => ({
-          id: img.id,
-          displayOrder: img.displayOrder,
-          mimeType: img.mimeType,
-          url: `/api/v1/products/${product.id}/images/${img.id}`,
-        })) || [],
-    };
+  // Single batch query for the whole product list/detail being built — never
+  // one favorites lookup per product. Returns an empty set for anonymous
+  // requesters (requesterId === null) or when there's nothing to check.
+  private async favoritedSetFor(
+    requesterId: string | null,
+    products: Product[],
+  ): Promise<Set<string>> {
+    return this.favoritesService.getFavoritedProductIds(
+      requesterId,
+      products.map((p) => p.id),
+    );
   }
 }

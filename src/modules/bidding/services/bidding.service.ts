@@ -518,24 +518,28 @@ export class BiddingService {
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   private computeValidBidRange(product: Product): BidRange {
+    const percentRaw = this.configService.getOrThrow<number>(
+      'BID_INCREMENT_PERCENT',
+    );
+    const incrementPercent = new Decimal(String(percentRaw));
+
     if (product.status === ProductStatus.PENDING) {
       const minAmount = new Decimal(String(product.biddingStartPrice));
+      const maxAmount = minAmount
+        .add(minAmount.mul(incrementPercent))
+        .toDecimalPlaces(2);
+
       return {
         minAmount,
-        maxAmount: null,
-        message: `First bid must be at least Rs. ${minAmount.toFixed(2)}`,
+        maxAmount,
+        message: `First bid must be between Rs. ${minAmount.toFixed(2)} and Rs. ${maxAmount.toFixed(2)}`,
       };
     }
 
     const current = new Decimal(String(product.currentHighestBid));
-    const percentRaw = this.configService.getOrThrow<number>(
-      'BID_INCREMENT_PERCENT',
-    );
     const flatRaw = this.configService.getOrThrow<number>(
       'BID_INCREMENT_MIN_FLAT',
     );
-
-    const incrementPercent = new Decimal(String(percentRaw));
     const incrementFlat = new Decimal(String(flatRaw));
 
     const percentInc = current.mul(incrementPercent).toDecimalPlaces(2);
