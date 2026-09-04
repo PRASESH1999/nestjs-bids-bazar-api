@@ -518,6 +518,7 @@ export class BiddingService {
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   private computeValidBidRange(product: Product): BidRange {
+    const instantBuyPrice = new Decimal(String(product.instantBuyPrice));
     const percentRaw = this.configService.getOrThrow<number>(
       'BID_INCREMENT_PERCENT',
     );
@@ -525,9 +526,16 @@ export class BiddingService {
 
     if (product.status === ProductStatus.PENDING) {
       const minAmount = new Decimal(String(product.biddingStartPrice));
-      const maxAmount = minAmount
+      const uncappedMax = minAmount
         .add(minAmount.mul(incrementPercent))
         .toDecimalPlaces(2);
+      const maxAmount = Decimal.min(uncappedMax, instantBuyPrice);
+
+      if (minAmount.greaterThan(maxAmount)) {
+        throw new BadRequestException(
+          `Bidding is not available below the Instant Buy price of Rs. ${instantBuyPrice.toFixed(2)} — use Instant Buy to purchase this product.`,
+        );
+      }
 
       return {
         minAmount,
@@ -547,14 +555,26 @@ export class BiddingService {
     const maxInc = percentInc;
 
     let minAmount: Decimal;
-    let maxAmount: Decimal;
+    let uncappedMax: Decimal;
 
     if (minInc.greaterThan(maxInc)) {
       minAmount = current.add(incrementFlat).toDecimalPlaces(2);
-      maxAmount = minAmount;
+      uncappedMax = minAmount;
     } else {
       minAmount = current.add(minInc).toDecimalPlaces(2);
-      maxAmount = current.add(maxInc).toDecimalPlaces(2);
+      uncappedMax = current.add(maxInc).toDecimalPlaces(2);
+    }
+
+    // Bids can never cross the Instant Buy price — once the increment floor
+    // itself would exceed it, there's no valid amount left to bid and the
+    // auction can only be won by the current leader at close (or by Instant
+    // Buy, while it's still available to a different buyer).
+    const maxAmount = Decimal.min(uncappedMax, instantBuyPrice);
+
+    if (minAmount.greaterThan(maxAmount)) {
+      throw new BadRequestException(
+        `Bidding has reached the Instant Buy price of Rs. ${instantBuyPrice.toFixed(2)} — no further bids can be placed on this product.`,
+      );
     }
 
     const message = minAmount.equals(maxAmount)
