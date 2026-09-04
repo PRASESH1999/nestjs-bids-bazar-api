@@ -7,6 +7,20 @@ export type ProductImageResponse = {
   url: string;
 };
 
+// Public seller summary attached to every product response. `averageRating`/
+// `ratingCount` are persisted on User, recomputed from seller_ratings on
+// every new rating — see RatingsRepository.createAndRecomputeAggregate.
+// `totalListings`/`totalSold` are computed live from the products table
+// (never stored) — see UsersRepository.countListingsAndSalesBySeller.
+export type ProductSellerSummary = {
+  id: string;
+  username: string;
+  averageRating: number;
+  ratingCount: number;
+  totalListings: number;
+  totalSold: number;
+};
+
 // `viewCount` is omitted from the base response — it is detail-page metadata,
 // surfaced explicitly on ProductDetailResponse rather than on every list item.
 export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
@@ -18,6 +32,8 @@ export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
   // false for unauthenticated requests. Computed by the caller via a single
   // batch favorites lookup — never a per-product query (see FavoritesService).
   isFavorited: boolean;
+  // Null only if the owning account no longer resolves (e.g. soft-deleted).
+  seller: ProductSellerSummary | null;
 };
 
 // Plain, dependency-free mapping shared by ProductsService and FavoritesService.
@@ -27,6 +43,7 @@ export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
 export function mapProduct(
   product: Product,
   isFavorited: boolean,
+  seller: ProductSellerSummary | null,
 ): ProductResponse {
   const currentBid = product.currentHighestBid ?? product.biddingStartPrice;
   return {
@@ -67,6 +84,7 @@ export function mapProduct(
     updatedAt: product.updatedAt,
     deletedAt: product.deletedAt,
     isFavorited,
+    seller,
     previewImage: (() => {
       const p = product.images?.find((img) => img.displayOrder === 0);
       return p

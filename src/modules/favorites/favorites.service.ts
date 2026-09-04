@@ -7,6 +7,7 @@ import { PUBLICLY_VISIBLE_STATUSES } from '@common/enums/product-status.enum';
 import { PaginationDto } from '@common/dto/pagination.dto';
 import { PaginatedResult } from '@common/types/paginated-result.type';
 import { mapProduct, ProductResponse } from '@modules/products/products.mapper';
+import { UsersService } from '@modules/users/users.service';
 import { FavoritesRepository } from './favorites.repository';
 
 export interface FavoriteResponse {
@@ -17,7 +18,10 @@ export interface FavoriteResponse {
 
 @Injectable()
 export class FavoritesService {
-  constructor(private readonly favoritesRepository: FavoritesRepository) {}
+  constructor(
+    private readonly favoritesRepository: FavoritesRepository,
+    private readonly usersService: UsersService,
+  ) {}
 
   async addFavorite(
     userId: string,
@@ -72,10 +76,20 @@ export class FavoritesService {
         limit,
       );
 
+    // Single batch query for every distinct seller across this page — never
+    // one lookup per favorited product.
+    const sellerSummaries = await this.usersService.getPublicSellerSummaries(
+      favorites.map((favorite) => favorite.product.ownerId),
+    );
+
     // Every product here belongs to this user's own favorites by definition —
     // isFavorited is always true, no extra lookup needed.
     const data = favorites.map((favorite) =>
-      mapProduct(favorite.product, true),
+      mapProduct(
+        favorite.product,
+        true,
+        sellerSummaries.get(favorite.product.ownerId) ?? null,
+      ),
     );
 
     return { data, meta: { page, limit, total } };

@@ -47,6 +47,13 @@ export enum Permission {
   // Favorite permissions
   FAVORITE_MANAGE = 'favorite:manage',
 
+  // Product report permissions
+  REPORT_SUBMIT = 'report:submit',
+  REPORT_MANAGE = 'report:manage',
+
+  // Seller rating permissions
+  RATING_SUBMIT = 'rating:submit',
+
   // Superadmin-only permissions
   ADMIN_VIEW = 'admin:view',
   ADMIN_MANAGE = 'admin:manage',

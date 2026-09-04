@@ -16,6 +16,10 @@ const mockFavoritesRepository = {
   findPaginatedActiveForUser: jest.fn(),
 };
 
+const mockUsersService = {
+  getPublicSellerSummaries: jest.fn().mockResolvedValue(new Map()),
+};
+
 function makeProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: 'product-1',
@@ -77,6 +81,7 @@ describe('FavoritesService', () => {
   beforeEach(() => {
     service = new FavoritesService(
       mockFavoritesRepository as unknown as FavoritesRepository,
+      mockUsersService as never,
     );
   });
 

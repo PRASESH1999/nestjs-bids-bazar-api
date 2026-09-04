@@ -1,0 +1,6 @@
+export enum ReportStatus {
+  PENDING = 'PENDING',
+  REVIEWED = 'REVIEWED',
+  ACTION_TAKEN = 'ACTION_TAKEN',
+  DISMISSED = 'DISMISSED',
+}

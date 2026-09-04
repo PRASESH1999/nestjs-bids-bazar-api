@@ -17,6 +17,8 @@ import { MailModule } from '@modules/mail/mail.module';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
 import { PaymentsModule } from '@modules/payments/payments.module';
 import { ProductsModule } from '@modules/products/products.module';
+import { RatingsModule } from '@modules/ratings/ratings.module';
+import { ReportsModule } from '@modules/reports/reports.module';
 import { RewardsModule } from '@modules/rewards/rewards.module';
 import { SpecificationsModule } from '@modules/specifications/specifications.module';
 import { UsersModule } from '@modules/users/users.module';
@@ -76,6 +78,8 @@ import { envValidationSchema } from './config/env.validation';
     PaymentsModule,
     FonepayModule,
     RewardsModule,
+    ReportsModule,
+    RatingsModule,
   ],
   controllers: [AppController],
   providers: [

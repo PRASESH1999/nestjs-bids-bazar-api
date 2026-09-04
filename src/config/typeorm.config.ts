@@ -17,6 +17,8 @@ import { PointsTransaction } from '../modules/rewards/entities/points-transactio
 import { Specification } from '../modules/specifications/entities/specification.entity';
 import { Notification } from '../modules/notifications/entities/notification.entity';
 import { Favorite } from '../modules/favorites/entities/favorite.entity';
+import { ProductReport } from '../modules/reports/entities/product-report.entity';
+import { SellerRating } from '../modules/ratings/entities/seller-rating.entity';
 
 config({ path: '.env.development' });
 
@@ -46,6 +48,8 @@ export const dataSourceOptions: DataSourceOptions = {
     Specification,
     Notification,
     Favorite,
+    ProductReport,
+    SellerRating,
   ],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

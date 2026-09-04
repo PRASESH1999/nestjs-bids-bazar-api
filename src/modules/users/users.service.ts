@@ -411,4 +411,54 @@ export class UsersService {
       nameChangedAt: null,
     });
   }
+
+  // ─── Public seller info ──────────────────────────────────────────────────
+
+  /**
+   * Batched lookup of public seller info (username, rating aggregates, and
+   * listing/sales counts) for a set of owner ids, keyed by user id. Used by
+   * ProductsService (and FavoritesService) to attach `seller` to every
+   * product it returns without a per-product query.
+   */
+  async getPublicSellerSummaries(sellerIds: string[]): Promise<
+    Map<
+      string,
+      {
+        id: string;
+        username: string;
+        averageRating: number;
+        ratingCount: number;
+        totalListings: number;
+        totalSold: number;
+      }
+    >
+  > {
+    const uniqueIds = Array.from(new Set(sellerIds));
+    if (uniqueIds.length === 0) return new Map();
+
+    const [users, listingsAndSales] = await Promise.all([
+      this.usersRepository.findByIds(uniqueIds),
+      this.usersRepository.countListingsAndSalesBySeller(uniqueIds),
+    ]);
+
+    return new Map(
+      users.map((u) => {
+        const counts = listingsAndSales.get(u.id) ?? {
+          totalListings: 0,
+          totalSold: 0,
+        };
+        return [
+          u.id,
+          {
+            id: u.id,
+            username: u.username,
+            averageRating: Number(u.averageRating),
+            ratingCount: u.ratingCount,
+            totalListings: counts.totalListings,
+            totalSold: counts.totalSold,
+          },
+        ];
+      }),
+    );
+  }
 }

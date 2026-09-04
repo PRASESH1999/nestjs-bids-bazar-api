@@ -45,4 +45,15 @@ export class User extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   nameChangedAt: Date | null;
+
+  // ─── Seller rating aggregates ────────────────────────────────────────────
+  // Recomputed from scratch (AVG/COUNT over seller_ratings) inside the same
+  // transaction as every new rating insert — never patched incrementally, so
+  // these can never drift from the underlying rows. See RatingsRepository.
+
+  @Column({ type: 'decimal', precision: 3, scale: 2, default: 0 })
+  averageRating: number;
+
+  @Column({ type: 'int', default: 0 })
+  ratingCount: number;
 }

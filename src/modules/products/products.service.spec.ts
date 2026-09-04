@@ -6,10 +6,15 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
 
 // Shared across the describe blocks below — none of them exercise favorites
-// logic itself (see favorites.service.spec.ts for that), they just need
-// mapProduct's isFavorited lookup to resolve to something.
+// or seller-rating logic itself (see favorites.service.spec.ts and
+// ratings.service.spec.ts for that), they just need mapProduct's isFavorited/
+// seller lookups to resolve to something.
 const mockFavoritesService = {
   getFavoritedProductIds: jest.fn().mockResolvedValue(new Set<string>()),
+};
+
+const mockUsersService = {
+  getPublicSellerSummaries: jest.fn().mockResolvedValue(new Map()),
 };
 
 describe('ProductsService — Instant Buy pricing', () => {
@@ -19,7 +24,7 @@ describe('ProductsService — Instant Buy pricing', () => {
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
+    mockUsersService as never,
     {} as never,
     {} as never,
     {} as never,
@@ -122,7 +127,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       productsRepository,
       {} as never,
       {} as never,
-      {} as never,
+      mockUsersService as never,
       {} as never,
       {} as never,
       {} as never,
@@ -170,7 +175,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       productsRepository,
       {} as never,
       {} as never,
-      {} as never,
+      mockUsersService as never,
       {} as never,
       {} as never,
       {} as never,
@@ -253,7 +258,7 @@ describe('ProductsService — isFavorited flag', () => {
       productsRepository,
       {} as never,
       {} as never,
-      {} as never,
+      mockUsersService as never,
       {} as never,
       {} as never,
       {} as never,
@@ -291,7 +296,7 @@ describe('ProductsService — isFavorited flag', () => {
       productsRepository,
       {} as never,
       {} as never,
-      {} as never,
+      mockUsersService as never,
       {} as never,
       {} as never,
       {} as never,
@@ -302,5 +307,105 @@ describe('ProductsService — isFavorited flag', () => {
     const result = await service.listPublicProducts({}, null);
 
     expect(result.data[0].isFavorited).toBe(false);
+  });
+});
+
+describe('ProductsService — seller rating summary', () => {
+  function buildProduct(id: string, ownerId: string): Product {
+    return {
+      id,
+      ownerId,
+      title: `Product ${id}`,
+      description: 'A product long enough to pass validation.',
+      specifications: null,
+      categoryId: 'cat-1',
+      subcategoryId: 'sub-1',
+      condition: ItemCondition.NEW,
+      status: ProductStatus.ACTIVE,
+      basePrice: 1000,
+      biddingStartPrice: 1200,
+      instantBuyPrice: 1400,
+      currency: 'NPR',
+      biddingDurationHours: 72,
+      currentHighestBid: null,
+      currentHighestBidderId: null,
+      biddingStartedAt: null,
+      biddingEndsAt: null,
+      viewCount: 0,
+      submittedAt: null,
+      reviewedById: null,
+      reviewedAt: null,
+      rejectionReason: null,
+      province: null,
+      district: null,
+      city: null,
+      street: null,
+      wardNumber: null,
+      winningBidId: null,
+      closedAt: null,
+      settledAt: null,
+      abandonedAt: null,
+      withdrawnAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+      images: [],
+    };
+  }
+
+  it("attaches each product's seller summary from a single batch lookup, not one query each", async () => {
+    const productA = buildProduct('product-a', 'seller-1');
+    const productB = buildProduct('product-b', 'seller-2');
+
+    const productsRepository = {
+      findPaginated: jest.fn().mockResolvedValue([[productA, productB], 2]),
+    } as unknown as ProductsRepository;
+
+    const usersService = {
+      getPublicSellerSummaries: jest.fn().mockResolvedValue(
+        new Map([
+          [
+            'seller-1',
+            {
+              id: 'seller-1',
+              username: 'BB000001-2026',
+              averageRating: 4.5,
+              ratingCount: 10,
+              totalListings: 7,
+              totalSold: 3,
+            },
+          ],
+        ]),
+      ),
+    };
+
+    const service = new ProductsService(
+      productsRepository,
+      {} as never,
+      {} as never,
+      usersService as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      mockFavoritesService as never,
+    );
+
+    const result = await service.listPublicProducts({}, null);
+
+    expect(usersService.getPublicSellerSummaries).toHaveBeenCalledTimes(1);
+    expect(usersService.getPublicSellerSummaries).toHaveBeenCalledWith([
+      'seller-1',
+      'seller-2',
+    ]);
+    expect(result.data.find((p) => p.id === 'product-a')?.seller).toEqual({
+      id: 'seller-1',
+      username: 'BB000001-2026',
+      averageRating: 4.5,
+      ratingCount: 10,
+      totalListings: 7,
+      totalSold: 3,
+    });
+    expect(result.data.find((p) => p.id === 'product-b')?.seller).toBeNull();
   });
 });

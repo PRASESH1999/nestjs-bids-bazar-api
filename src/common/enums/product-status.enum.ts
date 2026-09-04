@@ -34,3 +34,15 @@ export const ACTIVE_LISTING_STATUSES: ProductStatus[] = [
   ProductStatus.PENDING,
   ProductStatus.ACTIVE,
 ];
+
+// Statuses a product can be in without ever having actually gone live for
+// public sale. Everything else means it was approved and listed at some
+// point, even if it has since closed, failed payment, or been abandoned —
+// used to compute a seller's total listings count.
+export const NEVER_LISTED_STATUSES: ProductStatus[] = [
+  ProductStatus.DRAFT,
+  ProductStatus.SUBMITTED,
+  ProductStatus.REJECTED,
+  ProductStatus.APPROVED,
+  ProductStatus.WITHDRAWN,
+];
