@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -112,4 +113,13 @@ export class CreateProductDto {
   @IsInt()
   @IsPositive()
   wardNumber: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Self-declared rarity badge. Subject to admin override on review.',
+    default: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  isRare?: boolean;
 }

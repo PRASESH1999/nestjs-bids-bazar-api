@@ -21,6 +21,7 @@ import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { RejectProductDto } from './dto/reject-product.dto';
+import { ApproveProductDto } from './dto/approve-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
 import { ProductStorageService } from './product-storage.service';
@@ -144,6 +145,7 @@ export class ProductsService {
       street: dto.street,
       wardNumber: dto.wardNumber,
       withdrawnAt: null,
+      isRare: dto.isRare ?? false,
     });
 
     const savedProduct = await this.productsRepository.saveProduct(product);
@@ -210,6 +212,7 @@ export class ProductsService {
     if (dto.city !== undefined) product.city = dto.city;
     if (dto.street !== undefined) product.street = dto.street;
     if (dto.wardNumber !== undefined) product.wardNumber = dto.wardNumber;
+    if (dto.isRare !== undefined) product.isRare = dto.isRare;
 
     if (dto.basePrice !== undefined) {
       product.basePrice = dto.basePrice;
@@ -551,6 +554,25 @@ export class ProductsService {
     }));
   }
 
+  // 10 most recently SETTLED (sold) products.
+  async getRecentlySold(
+    requesterId: string | null = null,
+  ): Promise<HomeProductResponse[]> {
+    const results = await this.productsRepository.findRecentlySoldProducts(10);
+    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
+      requesterId,
+      results.map((r) => r.product),
+    );
+    return results.map((r) => ({
+      ...mapProduct(
+        r.product,
+        favoritedSet.has(r.product.id),
+        sellerSummaries.get(r.product.ownerId) ?? null,
+      ),
+      totalBids: r.totalBids,
+    }));
+  }
+
   // ─── View tracking ────────────────────────────────────────────────────────
 
   /**
@@ -784,6 +806,7 @@ export class ProductsService {
   async approveProduct(
     adminId: string,
     productId: string,
+    dto: ApproveProductDto = {},
   ): Promise<ProductResponse> {
     const product =
       await this.productsRepository.findByIdWithoutImages(productId);
@@ -800,6 +823,7 @@ export class ProductsService {
     product.status = ProductStatus.PENDING;
     product.reviewedById = adminId;
     product.reviewedAt = new Date();
+    if (dto.isRare !== undefined) product.isRare = dto.isRare;
 
     const saved = await this.productsRepository.saveProduct(product);
 
@@ -842,6 +866,7 @@ export class ProductsService {
     product.rejectionReason = dto.rejectionReason;
     product.reviewedById = adminId;
     product.reviewedAt = new Date();
+    if (dto.isRare !== undefined) product.isRare = dto.isRare;
 
     const saved = await this.productsRepository.saveProduct(product);
 

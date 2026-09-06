@@ -179,6 +179,24 @@ export class ProductsRepository {
     return this.hydrateRanked(rows);
   }
 
+  // Most recently SETTLED (payment confirmed) `limit` products — a real,
+  // final sale, unlike CLOSED/AWAITING_PAYMENT which can still fall through
+  // to PAYMENT_FAILED/ABANDONED.
+  async findRecentlySoldProducts(limit: number): Promise<RankedProduct[]> {
+    const rows = await this.productRepo
+      .createQueryBuilder('product')
+      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .select('product.id', 'id')
+      .addSelect('COUNT(bid.id)', 'totalBids')
+      .where('product.status = :status', { status: ProductStatus.SETTLED })
+      .groupBy('product.id')
+      .orderBy('product.settledAt', 'DESC')
+      .limit(limit)
+      .getRawMany<{ id: string; totalBids: string }>();
+
+    return this.hydrateRanked(rows);
+  }
+
   async findPaginated(
     page: number,
     limit: number,

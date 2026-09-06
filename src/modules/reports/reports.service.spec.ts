@@ -48,6 +48,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     biddingStartedAt: null,
     biddingEndsAt: null,
     viewCount: 0,
+    isRare: false,
     submittedAt: null,
     reviewedById: null,
     reviewedAt: null,

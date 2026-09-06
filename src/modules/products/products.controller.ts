@@ -42,6 +42,7 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { RejectProductDto } from './dto/reject-product.dto';
+import { ApproveProductDto } from './dto/approve-product.dto';
 import { SetPreviewImageDto } from './dto/set-preview-image.dto';
 import { ReorderImagesDto } from './dto/reorder-images.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -137,6 +138,20 @@ export class ProductsController {
   async getNewArrivals(@Request() req: RequestWithUser) {
     return {
       data: await this.productsService.getNewArrivals(this.getRequesterId(req)),
+    };
+  }
+
+  @Get('products/home/recently-sold')
+  @Public()
+  @UseGuards(OptionalJwtGuard)
+  @ApiOperation({
+    summary: 'Home page: 10 most recently sold (SETTLED) products',
+  })
+  async getRecentlySold(@Request() req: RequestWithUser) {
+    return {
+      data: await this.productsService.getRecentlySold(
+        this.getRequesterId(req),
+      ),
     };
   }
 
@@ -461,8 +476,9 @@ export class ProductsController {
   async approveProduct(
     @Request() req: RequestWithUser,
     @Param('id') id: string,
+    @Body() dto: ApproveProductDto,
   ) {
-    return this.productsService.approveProduct(req.user.sub, id);
+    return this.productsService.approveProduct(req.user.sub, id, dto);
   }
 
   @Patch('admin/products/:id/reject')

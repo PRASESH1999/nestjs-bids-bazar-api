@@ -80,6 +80,7 @@ export function mapProduct(
     settledAt: product.settledAt,
     abandonedAt: product.abandonedAt,
     withdrawnAt: product.withdrawnAt,
+    isRare: product.isRare,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
     deletedAt: product.deletedAt,

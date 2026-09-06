@@ -80,6 +80,14 @@ export class Product extends BaseEntity {
   @Column({ type: 'int', default: 0 })
   viewCount: number;
 
+  // ─── Rarity ───────────────────────────────────────────────────────────────
+
+  // Self-declared by the seller at create/edit time; admin can override it
+  // (in either direction) while approving/rejecting. Just a display badge —
+  // no pricing/commission effect.
+  @Column({ type: 'boolean', default: false })
+  isRare: boolean;
+
   // ─── Moderation ───────────────────────────────────────────────────────────
 
   @Column({ type: 'timestamptz', nullable: true })
