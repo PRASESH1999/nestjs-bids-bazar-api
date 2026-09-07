@@ -22,7 +22,11 @@ export class UsersRepository {
   }
 
   async findByEmailIncludingDeleted(email: string): Promise<User | null> {
-    return this.repo.findOne({ where: { email }, withDeleted: true });
+    return this.repo
+      .createQueryBuilder('user')
+      .where('LOWER(user.email) = :email', { email: email.toLowerCase() })
+      .withDeleted()
+      .getOne();
   }
 
   /** Atomically claims the next value from the `username_seq` Postgres sequence. */

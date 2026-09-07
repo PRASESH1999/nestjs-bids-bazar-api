@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Patch,
@@ -14,6 +16,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -34,6 +37,7 @@ import { BankDetailDto } from './dto/bank-detail.dto';
 import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
+import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 
 @ApiTags('kyc')
 @ApiBearerAuth()
@@ -81,6 +85,32 @@ export class KycController {
   @RequirePermissions(Permission.KYC_VIEW_OWN)
   async getMyKyc(@Request() req: RequestWithUser) {
     return this.kycService.getMyKyc(req.user.sub);
+  }
+
+  @Post('phone/send-otp')
+  @ApiOperation({
+    summary:
+      'Request (or resend) an SMS OTP to verify the phone on own KYC submission',
+  })
+  @RequirePermissions(Permission.KYC_SUBMIT)
+  @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
+  @HttpCode(HttpStatus.OK)
+  async sendPhoneOtp(@Request() req: RequestWithUser) {
+    return this.kycService.sendPhoneOtp(req.user.sub);
+  }
+
+  @Post('phone/verify-otp')
+  @ApiOperation({
+    summary: 'Verify the phone on own KYC submission with an OTP',
+  })
+  @RequirePermissions(Permission.KYC_SUBMIT)
+  @Throttle({ default: { limit: 10, ttl: 3600000 } }) // 10/hour per IP
+  @HttpCode(HttpStatus.OK)
+  async verifyPhoneOtp(
+    @Request() req: RequestWithUser,
+    @Body() dto: VerifyPhoneOtpDto,
+  ) {
+    return this.kycService.verifyPhoneOtp(req.user.sub, dto);
   }
 
   @Patch('me/bank')

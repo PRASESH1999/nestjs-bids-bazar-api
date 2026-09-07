@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { EncryptionService } from '@common/services/encryption.service';
 import { StorageService } from '@common/services/storage.service';
 import { DocumentType } from '@common/enums/document-type.enum';
@@ -13,8 +15,14 @@ import { BankDetailDto } from './dto/bank-detail.dto';
 import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewAction, ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
+import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
+import { KycVerification } from './entities/kyc-verification.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { UsersService } from '@modules/users/users.service';
+import { SparrowSmsService } from '@modules/sms/sparrow-sms.service';
+
+const PHONE_OTP_TTL_MS = 5 * 60 * 1000;
+const PHONE_OTP_MAX_ATTEMPTS = 5;
 
 export interface KycFiles {
   citizenshipFront?: Express.Multer.File[];
@@ -32,12 +40,15 @@ export interface SellEligibility {
 
 @Injectable()
 export class KycService {
+  private readonly logger = new Logger(KycService.name);
+
   constructor(
     private readonly kycRepository: KycRepository,
     private readonly encryptionService: EncryptionService,
     private readonly storageService: StorageService,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
+    private readonly smsService: SparrowSmsService,
   ) {}
 
   async submitKyc(userId: string, dto: SubmitKycDto, files: KycFiles) {
@@ -126,6 +137,12 @@ export class KycService {
       );
     }
 
+    // A previously-verified phone survives resubmission only if the number
+    // didn't change — otherwise it must be re-verified from scratch.
+    const keepPhoneVerification =
+      existing?.phoneVerifiedAt != null &&
+      existing.primaryPhone === dto.primaryPhone;
+
     // Save KYC record (update on resubmission, create otherwise)
     const kycPayload = {
       userId,
@@ -157,6 +174,10 @@ export class KycService {
       rejectionReason: null,
       reviewedBy: null,
       reviewedAt: null,
+      phoneVerifiedAt: keepPhoneVerification ? existing.phoneVerifiedAt : null,
+      phoneOtpHash: null,
+      phoneOtpExpiresAt: null,
+      phoneOtpAttempts: 0,
     };
 
     let kyc;
@@ -167,6 +188,19 @@ export class KycService {
       kyc = await this.kycRepository.saveKyc(
         this.kycRepository.createKyc(kycPayload),
       );
+    }
+
+    if (!keepPhoneVerification) {
+      // Non-fatal: a Sparrow outage must not fail the whole submission —
+      // the seller can always request a fresh code later via send-otp.
+      try {
+        await this.issueAndSendOtp(kyc);
+      } catch (err: unknown) {
+        this.logger.error(
+          `Failed to auto-send phone OTP on submit for KYC ${kyc.id}: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     await this.upsertBankDetails(userId, {
@@ -284,6 +318,7 @@ export class KycService {
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
       rejectionReason: kyc.rejectionReason,
+      phoneVerifiedAt: kyc.phoneVerifiedAt,
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
       updatedAt: kyc.updatedAt,
@@ -328,6 +363,7 @@ export class KycService {
       status: kyc.status,
       documentType: kyc.documentType,
       rejectionReason: kyc.rejectionReason,
+      phoneVerifiedAt: kyc.phoneVerifiedAt,
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
       citizenshipFrontUrl: kyc.citizenshipFrontPath
@@ -368,6 +404,7 @@ export class KycService {
       temporaryAddress: kyc.temporaryAddress,
       status: kyc.status,
       rejectionReason: kyc.rejectionReason,
+      phoneVerifiedAt: kyc.phoneVerifiedAt,
       reviewedBy: kyc.reviewedBy,
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
@@ -411,6 +448,12 @@ export class KycService {
       );
     }
 
+    if (dto.action === ReviewAction.APPROVE && !kyc.phoneVerifiedAt) {
+      throw new BadRequestException(
+        'Cannot approve: phone number is not verified yet',
+      );
+    }
+
     kyc.status =
       dto.action === ReviewAction.APPROVE
         ? KycStatus.APPROVED
@@ -437,6 +480,102 @@ export class KycService {
     }
 
     return updatedKyc;
+  }
+
+  // ─── Phone verification ───────────────────────────────────────────────────
+
+  /**
+   * Generates a fresh OTP, sends it via Sparrow, and persists its hash.
+   * Throws (propagates the SMS failure) if the send itself fails — callers
+   * that want a non-fatal auto-send (e.g. on submit) must catch it themselves.
+   */
+  private async issueAndSendOtp(kyc: KycVerification): Promise<void> {
+    if (!kyc.primaryPhone) {
+      throw new BadRequestException(
+        'No phone number on file for this KYC submission',
+      );
+    }
+
+    const code = crypto.randomInt(100000, 1000000).toString();
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    await this.smsService.sendSms(
+      kyc.primaryPhone,
+      `Your BidsBazar phone verification code is ${code}. It expires in 5 minutes.`,
+    );
+
+    kyc.phoneOtpHash = codeHash;
+    kyc.phoneOtpExpiresAt = new Date(Date.now() + PHONE_OTP_TTL_MS);
+    kyc.phoneOtpAttempts = 0;
+    await this.kycRepository.saveKyc(kyc);
+  }
+
+  /**
+   * Requests a fresh OTP for the caller's own KYC submission. Callable at any
+   * time before verification — there is no deadline tied to submission.
+   */
+  async sendPhoneOtp(userId: string): Promise<{ message: string }> {
+    const kyc = await this.kycRepository.findKycByUserId(userId);
+    if (!kyc) {
+      throw new NotFoundException('Submit KYC before verifying your phone');
+    }
+    if (kyc.phoneVerifiedAt) {
+      throw new BadRequestException('Phone number is already verified');
+    }
+
+    await this.issueAndSendOtp(kyc);
+    return { message: 'Verification code sent' };
+  }
+
+  /**
+   * Verifies the caller's own KYC phone OTP. Admin approval is blocked on
+   * `phoneVerifiedAt` (see reviewKyc) but this endpoint itself is independent
+   * of KYC status — a rejected submission can still get its phone verified
+   * ahead of a resubmission with the same number.
+   */
+  async verifyPhoneOtp(
+    userId: string,
+    dto: VerifyPhoneOtpDto,
+  ): Promise<{ message: string }> {
+    const kyc = await this.kycRepository.findKycByUserId(userId);
+    if (!kyc) {
+      throw new NotFoundException('KYC record not found');
+    }
+    if (kyc.phoneVerifiedAt) {
+      return { message: 'Phone number already verified' };
+    }
+
+    if (!kyc.phoneOtpHash || !kyc.phoneOtpExpiresAt) {
+      throw new BadRequestException(
+        'No verification code requested. Please request one first.',
+      );
+    }
+    if (kyc.phoneOtpExpiresAt < new Date()) {
+      throw new BadRequestException(
+        'Verification code has expired. Please request a new one.',
+      );
+    }
+    if (kyc.phoneOtpAttempts >= PHONE_OTP_MAX_ATTEMPTS) {
+      throw new BadRequestException(
+        'Too many incorrect attempts. Please request a new code.',
+      );
+    }
+
+    const codeHash = crypto.createHash('sha256').update(dto.code).digest('hex');
+
+    if (codeHash !== kyc.phoneOtpHash) {
+      kyc.phoneOtpAttempts += 1;
+      await this.kycRepository.saveKyc(kyc);
+      throw new BadRequestException('Incorrect verification code');
+    }
+
+    kyc.phoneVerifiedAt = new Date();
+    kyc.phoneOtpHash = null;
+    kyc.phoneOtpExpiresAt = null;
+    kyc.phoneOtpAttempts = 0;
+    await this.kycRepository.saveKyc(kyc);
+
+    return { message: 'Phone number verified' };
   }
 
   async getDecryptedBankDetails(kycId: string) {

@@ -60,4 +60,22 @@ export class KycVerification extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   reviewedAt: Date | null;
+
+  // ─── Phone verification (Sparrow SMS OTP) ─────────────────────────────────
+  // Decoupled from the submission lifecycle: admin approval is gated on
+  // phoneVerifiedAt, but verifying it is never required to submit or to have
+  // the KYC sit in the review queue. Carried over across a rejection+resubmit
+  // as long as primaryPhone doesn't change (see KycService.submitKyc).
+
+  @Column({ type: 'varchar', nullable: true })
+  phoneOtpHash: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  phoneOtpExpiresAt: Date | null;
+
+  @Column({ type: 'int', default: 0 })
+  phoneOtpAttempts: number;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  phoneVerifiedAt: Date | null;
 }

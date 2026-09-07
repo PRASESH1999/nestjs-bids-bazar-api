@@ -42,6 +42,13 @@ export const envValidationSchema = Joi.object({
   DELIVERY_CHARGE_INSIDE_VALLEY: Joi.number().min(0).required(),
   DELIVERY_CHARGE_OUTSIDE_VALLEY: Joi.number().min(0).required(),
 
+  // Sparrow SMS (KYC phone OTP verification)
+  SPARROW_SMS_TOKEN: Joi.string().required(),
+  SPARROW_SMS_FROM: Joi.string().required(),
+  SPARROW_SMS_BASE_URL: Joi.string()
+    .uri()
+    .default('https://api.sparrowsms.com/v2/sms/'),
+
   // Fonepay Intent Checkout
   FONEPAY_BASE_URL: Joi.string().uri().required(),
   FONEPAY_BASE_PATH: Joi.string().required(),

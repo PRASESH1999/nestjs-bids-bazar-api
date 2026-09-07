@@ -7,12 +7,14 @@ import { KycController } from './kyc.controller';
 import { KycRepository } from './kyc.repository';
 import { KycService } from './kyc.service';
 import { UsersModule } from '../users/users.module';
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([KycVerification, BankDetail]),
     CommonModule,
     UsersModule,
+    SmsModule,
   ],
   controllers: [KycController],
   providers: [KycService, KycRepository],
