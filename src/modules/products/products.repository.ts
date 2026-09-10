@@ -163,14 +163,35 @@ export class ProductsRepository {
     return this.hydrateRanked(rows);
   }
 
-  // Most recently listed `limit` ACTIVE products (bidding already under way).
+  // Most recently listed `limit` PENDING products (approved and publicly
+  // listed, but bidding hasn't started yet — no bids placed).
   async findNewestProducts(limit: number): Promise<RankedProduct[]> {
     const rows = await this.productRepo
       .createQueryBuilder('product')
       .leftJoin(Bid, 'bid', 'bid.productId = product.id')
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.status = :status', { status: ProductStatus.ACTIVE })
+      .where('product.status = :status', { status: ProductStatus.PENDING })
+      .groupBy('product.id')
+      .orderBy('product.createdAt', 'DESC')
+      .limit(limit)
+      .getRawMany<{ id: string; totalBids: string }>();
+
+    return this.hydrateRanked(rows);
+  }
+
+  // Most recently listed `limit` rare products (PENDING or ACTIVE — publicly
+  // listed and still biddable, either before or after their first bid).
+  async findRareProducts(limit: number): Promise<RankedProduct[]> {
+    const rows = await this.productRepo
+      .createQueryBuilder('product')
+      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .select('product.id', 'id')
+      .addSelect('COUNT(bid.id)', 'totalBids')
+      .where('product.isRare = true')
+      .andWhere('product.status IN (:...statuses)', {
+        statuses: [ProductStatus.PENDING, ProductStatus.ACTIVE],
+      })
       .groupBy('product.id')
       .orderBy('product.createdAt', 'DESC')
       .limit(limit)

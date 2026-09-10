@@ -535,11 +535,30 @@ export class ProductsService {
     }));
   }
 
-  // 10 most recently listed ACTIVE products.
+  // 10 most recently listed PENDING products (bidding hasn't started yet).
   async getNewArrivals(
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findNewestProducts(10);
+    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
+      requesterId,
+      results.map((r) => r.product),
+    );
+    return results.map((r) => ({
+      ...mapProduct(
+        r.product,
+        favoritedSet.has(r.product.id),
+        sellerSummaries.get(r.product.ownerId) ?? null,
+      ),
+      totalBids: r.totalBids,
+    }));
+  }
+
+  // 10 most recently listed rare products (PENDING or ACTIVE).
+  async getRareItems(
+    requesterId: string | null = null,
+  ): Promise<HomeProductResponse[]> {
+    const results = await this.productsRepository.findRareProducts(10);
     const { favoritedSet, sellerSummaries } = await this.responseContextFor(
       requesterId,
       results.map((r) => r.product),

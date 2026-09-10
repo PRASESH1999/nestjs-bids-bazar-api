@@ -133,11 +133,25 @@ export class ProductsController {
   @Public()
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
-    summary: 'Home page: 10 most recently listed ACTIVE products',
+    summary:
+      'Home page: 10 most recently listed products awaiting their first bid',
   })
   async getNewArrivals(@Request() req: RequestWithUser) {
     return {
       data: await this.productsService.getNewArrivals(this.getRequesterId(req)),
+    };
+  }
+
+  @Get('products/home/rare-items')
+  @Public()
+  @UseGuards(OptionalJwtGuard)
+  @ApiOperation({
+    summary:
+      'Home page: 10 most recently listed rare products (PENDING or ACTIVE)',
+  })
+  async getRareItems(@Request() req: RequestWithUser) {
+    return {
+      data: await this.productsService.getRareItems(this.getRequesterId(req)),
     };
   }
 
