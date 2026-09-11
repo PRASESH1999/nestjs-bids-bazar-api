@@ -87,7 +87,6 @@ erDiagram
         string citizenshipBackPath
         string passportPath
         string nidFrontPath
-        string nidBackPath
         string primaryPhone
         string secondaryPhone
         json permanentAddress
@@ -346,8 +345,8 @@ erDiagram
 - `userId` is both a foreign key and unique — enforces one KYC record per user.
 - `documentType` enum values: `CITIZENSHIP`, `PASSPORT`, `NID_CARD`.
 - `status` enum values: `PENDING`, `APPROVED`, `REJECTED`. Default: `PENDING`.
-- `nidFrontPath`/`nidBackPath` mirror the citizenship front/back columns — populated only
-  when `documentType === NID_CARD`.
+- `nidFrontPath` (single side — NID cards have no back side) is populated only when
+  `documentType === NID_CARD`.
 - `primaryPhone`/`secondaryPhone`: contact numbers collected at KYC submission.
   `primaryPhone` is required by `SubmitKycDto` for new submissions but nullable at the DB
   level (existing rows predate the column); `secondaryPhone` (emergency contact) is always

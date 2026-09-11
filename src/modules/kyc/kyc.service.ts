@@ -29,7 +29,6 @@ export interface KycFiles {
   citizenshipBack?: Express.Multer.File[];
   passport?: Express.Multer.File[];
   nidFront?: Express.Multer.File[];
-  nidBack?: Express.Multer.File[];
 }
 
 export interface SellEligibility {
@@ -66,7 +65,6 @@ export class KycService {
     const back = files.citizenshipBack?.[0];
     const passport = files.passport?.[0];
     const nidFront = files.nidFront?.[0];
-    const nidBack = files.nidBack?.[0];
 
     if (dto.documentType === DocumentType.CITIZENSHIP) {
       if (!front || !back) {
@@ -81,9 +79,9 @@ export class KycService {
         );
       }
     } else {
-      if (!nidFront || !nidBack) {
+      if (!nidFront) {
         throw new BadRequestException(
-          'Both nidFront and nidBack files are required for NID_CARD',
+          'A nidFront file is required for NID_CARD',
         );
       }
     }
@@ -95,7 +93,6 @@ export class KycService {
         existing.citizenshipBackPath,
         existing.passportPath,
         existing.nidFrontPath,
-        existing.nidBackPath,
       ].filter((p): p is string => p !== null);
       await Promise.all(oldPaths.map((p) => this.storageService.deleteFile(p)));
     }
@@ -105,7 +102,6 @@ export class KycService {
     let citizenshipBackPath: string | null = null;
     let passportPath: string | null = null;
     let nidFrontPath: string | null = null;
-    let nidBackPath: string | null = null;
 
     if (dto.documentType === DocumentType.CITIZENSHIP) {
       citizenshipFrontPath = await this.storageService.saveFile(
@@ -130,11 +126,6 @@ export class KycService {
         userId,
         'nid-front',
       );
-      nidBackPath = await this.storageService.saveFile(
-        nidBack!,
-        userId,
-        'nid-back',
-      );
     }
 
     // A previously-verified phone survives resubmission only if the number
@@ -151,7 +142,6 @@ export class KycService {
       citizenshipBackPath,
       passportPath,
       nidFrontPath,
-      nidBackPath,
       primaryPhone: dto.primaryPhone,
       secondaryPhone: dto.secondaryPhone ?? null,
       permanentAddress: {
@@ -312,7 +302,6 @@ export class KycService {
       citizenshipBackUploaded: !!kyc.citizenshipBackPath,
       passportUploaded: !!kyc.passportPath,
       nidFrontUploaded: !!kyc.nidFrontPath,
-      nidBackUploaded: !!kyc.nidBackPath,
       primaryPhone: kyc.primaryPhone,
       secondaryPhone: kyc.secondaryPhone,
       permanentAddress: kyc.permanentAddress,
@@ -342,9 +331,6 @@ export class KycService {
         : null,
       nidFrontUrl: kyc.nidFrontPath
         ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
-        : null,
-      nidBackUrl: kyc.nidBackPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'nidBack')
         : null,
     };
   }
@@ -377,9 +363,6 @@ export class KycService {
         : null,
       nidFrontUrl: kyc.nidFrontPath
         ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
-        : null,
-      nidBackUrl: kyc.nidBackPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'nidBack')
         : null,
     }));
 
@@ -429,9 +412,6 @@ export class KycService {
         : null,
       nidFrontUrl: kyc.nidFrontPath
         ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
-        : null,
-      nidBackUrl: kyc.nidBackPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'nidBack')
         : null,
     };
   }
@@ -616,12 +596,11 @@ export class KycService {
       citizenshipBack: kyc.citizenshipBackPath,
       passport: kyc.passportPath,
       nidFront: kyc.nidFrontPath,
-      nidBack: kyc.nidBackPath,
     };
 
     if (!(fileKey in pathMap)) {
       throw new NotFoundException(
-        `Invalid document key '${fileKey}'. Valid keys: citizenshipFront, citizenshipBack, passport, nidFront, nidBack`,
+        `Invalid document key '${fileKey}'. Valid keys: citizenshipFront, citizenshipBack, passport, nidFront`,
       );
     }
 

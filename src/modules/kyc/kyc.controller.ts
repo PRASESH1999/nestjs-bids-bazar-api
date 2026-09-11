@@ -60,7 +60,6 @@ export class KycController {
         { name: 'citizenshipBack', maxCount: 1 },
         { name: 'passport', maxCount: 1 },
         { name: 'nidFront', maxCount: 1 },
-        { name: 'nidBack', maxCount: 1 },
       ],
       { storage: memoryStorage() },
     ),
@@ -74,7 +73,6 @@ export class KycController {
       citizenshipBack?: Express.Multer.File[];
       passport?: Express.Multer.File[];
       nidFront?: Express.Multer.File[];
-      nidBack?: Express.Multer.File[];
     },
   ) {
     return this.kycService.submitKyc(req.user.sub, dto, files ?? {});

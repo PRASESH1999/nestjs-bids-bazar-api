@@ -32,9 +32,6 @@ export class KycVerification extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   nidFrontPath: string | null;
 
-  @Column({ type: 'varchar', nullable: true })
-  nidBackPath: string | null;
-
   // Nullable at the DB level (existing rows predate this field); required by
   // SubmitKycDto for every new submission going forward.
   @Column({ type: 'varchar', length: 20, nullable: true })

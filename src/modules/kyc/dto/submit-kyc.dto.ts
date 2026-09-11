@@ -151,12 +151,4 @@ export class SubmitKycDto {
   })
   @IsOptional()
   nidFront?: any;
-
-  @ApiPropertyOptional({
-    type: 'string',
-    format: 'binary',
-    description: 'Required when documentType is NID_CARD',
-  })
-  @IsOptional()
-  nidBack?: any;
 }

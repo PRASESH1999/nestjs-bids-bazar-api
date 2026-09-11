@@ -16,7 +16,6 @@ function buildKyc(overrides: Partial<KycVerification> = {}): KycVerification {
     citizenshipBackPath: null,
     passportPath: null,
     nidFrontPath: '/nid-front.png',
-    nidBackPath: '/nid-back.png',
     primaryPhone: '+9779812345678',
     secondaryPhone: null,
     permanentAddress: {
@@ -285,7 +284,6 @@ describe('KycService — phone OTP verification', () => {
 
     const files = {
       nidFront: [{ buffer: Buffer.from('') } as Express.Multer.File],
-      nidBack: [{ buffer: Buffer.from('') } as Express.Multer.File],
     };
 
     it('keeps phoneVerifiedAt when resubmitting with the same number', async () => {
