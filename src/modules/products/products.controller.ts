@@ -254,23 +254,15 @@ export class ProductsController {
   @Post('products')
   @RequirePermissions(Permission.PRODUCT_CREATE)
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Create a new product listing (KYC required)' })
+  @ApiOperation({
+    summary:
+      'Create a new product draft (KYC required). Every field is optional — ' +
+      'build it up incrementally via PATCH /products/:id, then call ' +
+      'POST /products/:id/submit once ready for review.',
+  })
   @ApiBody({
     schema: {
       type: 'object',
-      required: [
-        'title',
-        'description',
-        'categoryId',
-        'subcategoryId',
-        'condition',
-        'basePrice',
-        'province',
-        'district',
-        'city',
-        'street',
-        'wardNumber',
-      ],
       properties: {
         title: { type: 'string', minLength: 5, maxLength: 150 },
         description: { type: 'string', minLength: 20, maxLength: 5000 },

@@ -172,7 +172,8 @@ export class BiddingService {
       // Capture state needed for post-commit emails before mutating product
       previousHighestBidderId = product.currentHighestBidderId;
       productOwnerId = product.ownerId;
-      productTitle = product.title;
+      // Non-null: only products past submission (title required) can be bid on.
+      productTitle = product.title!;
       productId_ = product.id;
       previousBidAmount =
         product.currentHighestBid !== null

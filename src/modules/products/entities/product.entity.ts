@@ -13,25 +13,29 @@ export class Product extends BaseEntity {
   @Column({ type: 'uuid' })
   ownerId: string;
 
-  @Column({ type: 'varchar', length: 150 })
-  title: string;
+  // Nullable — a DRAFT product can be created and saved incrementally before
+  // every field is filled in. All required-for-submission fields are
+  // enforced at POST /products/:id/submit time instead (see
+  // ProductsService.assertReadyForSubmission), not at the DB/DTO level.
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  title: string | null;
 
-  @Column({ type: 'text' })
-  description: string;
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
 
   @Column({ type: 'text', nullable: true })
   specifications: string | null;
 
   @Index()
-  @Column({ type: 'uuid' })
-  categoryId: string;
+  @Column({ type: 'uuid', nullable: true })
+  categoryId: string | null;
 
   @Index()
-  @Column({ type: 'uuid' })
-  subcategoryId: string;
+  @Column({ type: 'uuid', nullable: true })
+  subcategoryId: string | null;
 
-  @Column({ type: 'enum', enum: ItemCondition })
-  condition: ItemCondition;
+  @Column({ type: 'enum', enum: ItemCondition, nullable: true })
+  condition: ItemCondition | null;
 
   @Index()
   @Column({ type: 'enum', enum: ProductStatus, default: ProductStatus.DRAFT })
@@ -39,17 +43,19 @@ export class Product extends BaseEntity {
 
   // ─── Pricing ─────────────────────────────────────────────────────────────
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
-  basePrice: number;
+  // Nullable until set on the draft; required (and used to derive the two
+  // columns below) by submission time.
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  basePrice: number | null;
 
   // Stored so the bidding module never has to recompute it.
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
-  biddingStartPrice: number;
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  biddingStartPrice: number | null;
 
-  // Fixed buy-now price = 1.4 × basePrice. Mandatory on every listing.
+  // Fixed buy-now price = 1.4 × basePrice. Mandatory by submission time.
   // Stored, not recomputed on read, same reasoning as biddingStartPrice.
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
-  instantBuyPrice: number;
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  instantBuyPrice: number | null;
 
   @Column({ type: 'varchar', length: 10, default: 'NPR' })
   currency: string;

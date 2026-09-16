@@ -36,33 +36,28 @@ describe('CreateProductDto — pickup location validation', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it.each(['province', 'district', 'city', 'street'])(
-    'fails when %s is missing',
+  // Every field is optional at create time — a DRAFT can be saved
+  // incrementally and is only fully validated at submit time (see
+  // ProductsService.assertReadyForSubmission), not here.
+  it.each(['province', 'district', 'city', 'street', 'wardNumber'])(
+    'passes when %s is missing (deferred to submission, not creation)',
     async (field) => {
       const payload = buildPayload();
       delete payload[field];
 
       const errors = await validateDto(payload);
-      expect(errors.find((e) => e.property === field)).toBeDefined();
+      expect(errors.find((e) => e.property === field)).toBeUndefined();
     },
   );
 
   it.each(['province', 'district', 'city', 'street'])(
-    'fails when %s is an empty string',
+    'fails when %s is an empty string (still shape-validated if provided)',
     async (field) => {
       const errors = await validateDto(buildPayload({ [field]: '' }));
       const fieldError = errors.find((e) => e.property === field);
       expect(fieldError?.constraints).toHaveProperty('isNotEmpty');
     },
   );
-
-  it('fails when wardNumber is missing', async () => {
-    const payload = buildPayload();
-    delete payload.wardNumber;
-
-    const errors = await validateDto(payload);
-    expect(errors.find((e) => e.property === 'wardNumber')).toBeDefined();
-  });
 
   it.each(['0', '-3', '2.5', 'abc'])(
     'fails when wardNumber is invalid (%s)',
@@ -75,5 +70,19 @@ describe('CreateProductDto — pickup location validation', () => {
   it('accepts a positive integer wardNumber', async () => {
     const errors = await validateDto(buildPayload({ wardNumber: '12' }));
     expect(errors.find((e) => e.property === 'wardNumber')).toBeUndefined();
+  });
+});
+
+describe('CreateProductDto — draft creation with an empty payload', () => {
+  it('passes with no fields at all — a DRAFT can start completely empty', async () => {
+    const errors = await validateDto({});
+    expect(errors).toHaveLength(0);
+  });
+
+  it('still shape-validates whatever IS provided on a partial draft', async () => {
+    const errors = await validateDto({ categoryId: 'not-a-uuid' });
+    expect(
+      errors.find((e) => e.property === 'categoryId')?.constraints,
+    ).toHaveProperty('isUuid');
   });
 });

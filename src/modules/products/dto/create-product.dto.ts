@@ -13,22 +13,29 @@ import {
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional } from 'class-validator';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 
+// Every field is optional — a product starts life as an empty/partial DRAFT
+// and is filled in incrementally via PATCH /products/:id (resilient to lost
+// connections/power outages), then fully validated only at
+// POST /products/:id/submit (see ProductsService.assertReadyForSubmission).
+// Shape/format validators below still apply to whatever IS provided.
 export class CreateProductDto {
-  @ApiProperty({ minLength: 5, maxLength: 150 })
+  @ApiPropertyOptional({ minLength: 5, maxLength: 150 })
+  @IsOptional()
   @IsString()
   @MinLength(5)
   @MaxLength(150)
-  title: string;
+  title?: string;
 
-  @ApiProperty({ minLength: 20, maxLength: 5000 })
+  @ApiPropertyOptional({ minLength: 20, maxLength: 5000 })
+  @IsOptional()
   @IsString()
   @MinLength(20)
   @MaxLength(5000)
-  description: string;
+  description?: string;
 
   @ApiPropertyOptional({
     description: 'Plain-text product specifications',
@@ -39,23 +46,30 @@ export class CreateProductDto {
   @IsOptional()
   specifications?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  categoryId: string;
+  categoryId?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  subcategoryId: string;
+  subcategoryId?: string;
 
-  @ApiProperty({ enum: ItemCondition })
+  @ApiPropertyOptional({ enum: ItemCondition })
+  @IsOptional()
   @IsEnum(ItemCondition)
-  condition: ItemCondition;
+  condition?: ItemCondition;
 
-  @ApiProperty({ description: 'User desired sale price (NPR)', minimum: 1 })
+  @ApiPropertyOptional({
+    description: 'User desired sale price (NPR)',
+    minimum: 1,
+  })
+  @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
-  basePrice: number;
+  basePrice?: number;
 
   @ApiPropertyOptional({
     description: 'Countdown duration in hours after the first bid is placed',
@@ -88,31 +102,39 @@ export class CreateProductDto {
   // Independent per product — a seller with multiple listings sets this
   // separately for each one; never reused across products.
 
-  @ApiProperty({ description: 'Pickup location: province' })
+  @ApiPropertyOptional({ description: 'Pickup location: province' })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  province: string;
+  province?: string;
 
-  @ApiProperty({ description: 'Pickup location: district' })
+  @ApiPropertyOptional({ description: 'Pickup location: district' })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  district: string;
+  district?: string;
 
-  @ApiProperty({ description: 'Pickup location: city' })
+  @ApiPropertyOptional({ description: 'Pickup location: city' })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  city: string;
+  city?: string;
 
-  @ApiProperty({ description: 'Pickup location: street' })
+  @ApiPropertyOptional({ description: 'Pickup location: street' })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  street: string;
+  street?: string;
 
-  @ApiProperty({ description: 'Pickup location: ward number', minimum: 1 })
+  @ApiPropertyOptional({
+    description: 'Pickup location: ward number',
+    minimum: 1,
+  })
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @IsPositive()
-  wardNumber: number;
+  wardNumber?: number;
 
   @ApiPropertyOptional({
     description:

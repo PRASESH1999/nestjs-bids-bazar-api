@@ -93,40 +93,52 @@ export class ProductsService {
     imageFiles: Express.Multer.File[],
   ): Promise<ProductResponse> {
     await this.assertKycApproved(userId);
-    await this.assertCategoryAndSubcategory(dto.categoryId, dto.subcategoryId);
 
-    if (!imageFiles || imageFiles.length === 0) {
-      throw new BadRequestException('At least one product image is required');
+    if (dto.categoryId && dto.subcategoryId) {
+      await this.assertCategoryAndSubcategory(
+        dto.categoryId,
+        dto.subcategoryId,
+      );
     }
-    if (imageFiles.length > 8) {
+
+    if (imageFiles && imageFiles.length > 8) {
       throw new BadRequestException('A product can have at most 8 images');
     }
 
-    this.productStorage.validateFiles(imageFiles);
+    let orderedFiles: Express.Multer.File[] = [];
+    if (imageFiles && imageFiles.length > 0) {
+      this.productStorage.validateFiles(imageFiles);
 
-    const previewIdx = Math.min(
-      dto.previewImageIndex ?? 0,
-      imageFiles.length - 1,
-    );
-    const orderedFiles = [
-      imageFiles[previewIdx],
-      ...imageFiles.slice(0, previewIdx),
-      ...imageFiles.slice(previewIdx + 1),
-    ];
+      const previewIdx = Math.min(
+        dto.previewImageIndex ?? 0,
+        imageFiles.length - 1,
+      );
+      orderedFiles = [
+        imageFiles[previewIdx],
+        ...imageFiles.slice(0, previewIdx),
+        ...imageFiles.slice(previewIdx + 1),
+      ];
+    }
 
-    const biddingStartPrice = this.computeBiddingStartPrice(dto.basePrice);
-    const instantBuyPrice = this.computeInstantBuyPrice(dto.basePrice);
+    const biddingStartPrice =
+      dto.basePrice !== undefined
+        ? this.computeBiddingStartPrice(dto.basePrice)
+        : null;
+    const instantBuyPrice =
+      dto.basePrice !== undefined
+        ? this.computeInstantBuyPrice(dto.basePrice)
+        : null;
 
     // Save product first to get the UUID for the image directory.
     const product = this.productsRepository.createProduct({
       ownerId: userId,
-      title: dto.title,
-      description: dto.description,
+      title: dto.title ?? null,
+      description: dto.description ?? null,
       specifications: dto.specifications ?? null,
-      categoryId: dto.categoryId,
-      subcategoryId: dto.subcategoryId,
-      condition: dto.condition,
-      basePrice: dto.basePrice,
+      categoryId: dto.categoryId ?? null,
+      subcategoryId: dto.subcategoryId ?? null,
+      condition: dto.condition ?? null,
+      basePrice: dto.basePrice ?? null,
       biddingStartPrice,
       instantBuyPrice,
       biddingDurationHours: dto.biddingDurationHours ?? 72,
@@ -139,30 +151,32 @@ export class ProductsService {
       reviewedById: null,
       reviewedAt: null,
       rejectionReason: null,
-      province: dto.province,
-      district: dto.district,
-      city: dto.city,
-      street: dto.street,
-      wardNumber: dto.wardNumber,
+      province: dto.province ?? null,
+      district: dto.district ?? null,
+      city: dto.city ?? null,
+      street: dto.street ?? null,
+      wardNumber: dto.wardNumber ?? null,
       withdrawnAt: null,
       isRare: dto.isRare ?? false,
     });
 
     const savedProduct = await this.productsRepository.saveProduct(product);
 
-    const imageMeta = await this.productStorage.saveProductImages(
-      savedProduct.id,
-      orderedFiles,
-    );
+    if (orderedFiles.length > 0) {
+      const imageMeta = await this.productStorage.saveProductImages(
+        savedProduct.id,
+        orderedFiles,
+      );
 
-    const images = imageMeta.map((meta) =>
-      this.productsRepository.createImage({
-        productId: savedProduct.id,
-        ...meta,
-      }),
-    );
+      const images = imageMeta.map((meta) =>
+        this.productsRepository.createImage({
+          productId: savedProduct.id,
+          ...meta,
+        }),
+      );
 
-    await this.productsRepository.saveImages(images);
+      await this.productsRepository.saveImages(images);
+    }
 
     const createdProduct = (await this.productsRepository.findById(
       savedProduct.id,
@@ -189,11 +203,18 @@ export class ProductsService {
     const product = await this.findOwnedProduct(userId, productId);
     this.assertEditable(product);
 
-    if (dto.categoryId || dto.subcategoryId) {
-      await this.assertCategoryAndSubcategory(
-        dto.categoryId ?? product.categoryId,
-        dto.subcategoryId ?? product.subcategoryId,
-      );
+    if (dto.categoryId !== undefined || dto.subcategoryId !== undefined) {
+      const resolvedCategoryId = dto.categoryId ?? product.categoryId;
+      const resolvedSubcategoryId = dto.subcategoryId ?? product.subcategoryId;
+      // Only re-validate once both sides of the pair are known — an
+      // in-progress draft may still have one side unset, in which case the
+      // check is deferred to submit time (assertReadyForSubmission).
+      if (resolvedCategoryId && resolvedSubcategoryId) {
+        await this.assertCategoryAndSubcategory(
+          resolvedCategoryId,
+          resolvedSubcategoryId,
+        );
+      }
     }
 
     if (dto.title !== undefined) product.title = dto.title;
@@ -277,11 +298,7 @@ export class ProductsService {
 
     const images =
       await this.productsRepository.findImagesByProductId(productId);
-    if (images.length === 0) {
-      throw new BadRequestException(
-        'Product must have at least one image before submitting',
-      );
-    }
+    await this.assertReadyForSubmission(product, images.length);
 
     if (product.status === ProductStatus.REJECTED) {
       product.rejectionReason = null;
@@ -297,10 +314,11 @@ export class ProductsService {
     // Notify owner
     const user = await this.usersService.findById(userId);
     if (user) {
+      // Non-null: assertReadyForSubmission above guarantees title is set.
       await this.mailService.sendProductSubmitted(
         user.email,
         user.name,
-        saved.title,
+        saved.title!,
       );
     }
 
@@ -645,9 +663,10 @@ export class ProductsService {
 
     for (const scope of tiers) {
       if (collected.length >= limit) break;
+      // Non-null: only PENDING/ACTIVE products (past submission) call this.
       const found = await this.productsRepository.findSimilar(scope, {
-        categoryId: product.categoryId,
-        subcategoryId: product.subcategoryId,
+        categoryId: product.categoryId!,
+        subcategoryId: product.subcategoryId!,
         excludeIds,
         limit: limit - collected.length,
       });
@@ -848,10 +867,11 @@ export class ProductsService {
 
     const owner = await this.usersService.findById(product.ownerId);
     if (owner) {
+      // Non-null: only SUBMITTED products (already past assertReadyForSubmission) reach here.
       await this.mailService.sendProductApproved(
         owner.email,
         owner.name,
-        saved.title,
+        saved.title!,
       );
     }
 
@@ -891,10 +911,11 @@ export class ProductsService {
 
     const owner = await this.usersService.findById(product.ownerId);
     if (owner) {
+      // Non-null: only SUBMITTED products (already past assertReadyForSubmission) reach here.
       await this.mailService.sendProductRejected(
         owner.email,
         owner.name,
-        saved.title,
+        saved.title!,
         dto.rejectionReason,
       );
     }
@@ -926,6 +947,47 @@ export class ProductsService {
         'Bank details required to sell products. Please add your bank details.',
       );
     }
+  }
+
+  // Full-completeness gate for POST /products/:id/submit — this is where a
+  // DRAFT's partially-filled fields (optional at create/update time) finally
+  // become mandatory. Reports every missing/invalid field at once rather
+  // than one BadRequestException per retry.
+  private async assertReadyForSubmission(
+    product: Product,
+    imageCount: number,
+  ): Promise<void> {
+    const missingFields: string[] = [];
+
+    if (!product.title || product.title.trim().length < 5)
+      missingFields.push('title');
+    if (!product.description || product.description.trim().length < 20)
+      missingFields.push('description');
+    if (!product.categoryId) missingFields.push('categoryId');
+    if (!product.subcategoryId) missingFields.push('subcategoryId');
+    if (!product.condition) missingFields.push('condition');
+    if (product.basePrice == null || Number(product.basePrice) <= 0)
+      missingFields.push('basePrice');
+    if (!product.province) missingFields.push('province');
+    if (!product.district) missingFields.push('district');
+    if (!product.city) missingFields.push('city');
+    if (!product.street) missingFields.push('street');
+    if (!product.wardNumber) missingFields.push('wardNumber');
+    if (imageCount === 0) missingFields.push('images');
+    if (imageCount > 8) missingFields.push('images (max 8)');
+
+    if (missingFields.length > 0) {
+      throw new BadRequestException({
+        message: 'Product is missing required fields for submission',
+        missingFields,
+      });
+    }
+
+    // categoryId/subcategoryId are confirmed present above.
+    await this.assertCategoryAndSubcategory(
+      product.categoryId!,
+      product.subcategoryId!,
+    );
   }
 
   private async assertCategoryAndSubcategory(

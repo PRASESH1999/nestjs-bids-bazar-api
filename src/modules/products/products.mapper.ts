@@ -45,7 +45,10 @@ export function mapProduct(
   isFavorited: boolean,
   seller: ProductSellerSummary | null,
 ): ProductResponse {
-  const currentBid = product.currentHighestBid ?? product.biddingStartPrice;
+  // Both sides can be null on an in-progress DRAFT that hasn't set a price
+  // yet — showInstantBuy is simply false until then.
+  const currentBid =
+    product.currentHighestBid ?? product.biddingStartPrice ?? 0;
   return {
     id: product.id,
     ownerId: product.ownerId,
@@ -59,7 +62,8 @@ export function mapProduct(
     basePrice: product.basePrice,
     biddingStartPrice: product.biddingStartPrice,
     instantBuyPrice: product.instantBuyPrice,
-    showInstantBuy: currentBid < product.instantBuyPrice,
+    showInstantBuy:
+      product.instantBuyPrice != null && currentBid < product.instantBuyPrice,
     currency: product.currency,
     biddingDurationHours: product.biddingDurationHours,
     currentHighestBid: product.currentHighestBid,

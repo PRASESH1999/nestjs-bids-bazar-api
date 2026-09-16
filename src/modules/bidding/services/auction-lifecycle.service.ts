@@ -127,7 +127,8 @@ export class AuctionLifecycleService {
       sellerId = product.ownerId;
       winningAmount = Number(highestBid.amount);
       paymentDeadline = computedDeadline;
-      capturedProductTitle = product.title;
+      // Non-null: only products past submission (title required) reach the auction lifecycle.
+      capturedProductTitle = product.title!;
       capturedProductId = product.id;
       capturedWinningBidId = highestBid.id;
       transitioned = true;
@@ -323,7 +324,8 @@ export class AuctionLifecycleService {
       sellerId = product.ownerId;
       winningAmount = instantBuyPrice;
       paymentDeadline = computedDeadline;
-      capturedProductTitle = product.title;
+      // Non-null: only products past submission (title required) reach the auction lifecycle.
+      capturedProductTitle = product.title!;
       capturedProductId = product.id;
       capturedWinningBidId = savedBid.id;
     } catch (err: unknown) {
@@ -506,7 +508,8 @@ export class AuctionLifecycleService {
         newWinnerAmount = Number(nextBid.amount);
         newWinnerDeadline = computedDeadline;
         newWinnerFallbackRank = nextBid.fallbackRank;
-        capturedProductTitle = product.title;
+        // Non-null: only products past submission (title required) reach the auction lifecycle.
+        capturedProductTitle = product.title!;
         capturedProductId = product.id;
         newWinningBidId = nextBid.id;
       } else {
@@ -520,7 +523,8 @@ export class AuctionLifecycleService {
 
         outcome = 'abandoned';
         sellerId = product.ownerId;
-        capturedProductTitle = product.title;
+        // Non-null: only products past submission (title required) reach the auction lifecycle.
+        capturedProductTitle = product.title!;
         capturedProductId = product.id;
 
         // Count total unique bidders for the abandonment email
@@ -769,7 +773,8 @@ export class AuctionLifecycleService {
       sellerId = product.ownerId;
       buyerId = responsibleBid.bidderId;
       confirmedAmount = Number(responsibleBid.amount);
-      capturedProductTitle = product.title;
+      // Non-null: only products past submission (title required) reach the auction lifecycle.
+      capturedProductTitle = product.title!;
       capturedWinningBidId = responsibleBid.id;
     } catch (err: unknown) {
       await qr.rollbackTransaction();
@@ -912,7 +917,8 @@ export class AuctionLifecycleService {
       sellerId = product.ownerId;
       buyerId = responsibleBid.bidderId;
       confirmedAmount = Number(responsibleBid.amount);
-      capturedProductTitle = product.title;
+      // Non-null: only products past submission (title required) reach the auction lifecycle.
+      capturedProductTitle = product.title!;
       capturedWinningBidId = responsibleBid.id;
     } catch (err: unknown) {
       await qr.rollbackTransaction();
@@ -1083,7 +1089,8 @@ export class AuctionLifecycleService {
         bid.bidder.email,
         {
           bidderName: bid.bidder.name,
-          productTitle: bid.product.title,
+          // Non-null: only products past submission (title required) reach the bidding stage.
+          productTitle: bid.product.title!,
           amount: Number(bid.amount),
           paymentDeadline: bid.paymentDeadline,
           productId: bid.productId,
