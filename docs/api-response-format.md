@@ -100,7 +100,7 @@ Soft-deleted users have `deletedAt` set to a timestamp.
 {
   "id": "uuid",
   "name": "Electronics",
-  "iconPath": "/category-icons/electronics.png",
+  "iconUrl": "/api/v1/categories/uuid/icon",
   "displayOrder": 0,
   "isActive": true,
   "createdAt": "2025-01-01T00:00:00.000Z",
@@ -108,7 +108,10 @@ Soft-deleted users have `deletedAt` set to a timestamp.
 }
 ```
 
-`iconPath` is `null` when no icon was uploaded. Serve it from the same host as a static file.
+`iconUrl` is `null` when no icon was uploaded. Otherwise it is an opaque URL to a
+streaming endpoint (`GET /categories/:id/icon`) — the same pattern used for product
+images (`GET products/:id/images/:imageId`). The file is not served as a static asset;
+fetch the URL directly to get the image bytes with the correct `Content-Type`.
 
 ### Subcategory
 
@@ -117,13 +120,15 @@ Soft-deleted users have `deletedAt` set to a timestamp.
   "id": "uuid",
   "categoryId": "parent-category-uuid",
   "name": "Mobile Phones",
-  "iconPath": "/category-icons/mobile.png",
+  "iconUrl": "/api/v1/subcategories/uuid/icon",
   "displayOrder": 0,
   "isActive": true,
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z"
 }
 ```
+
+`iconUrl` follows the same rules as Category's, pointing at `GET /subcategories/:id/icon`.
 
 ### Paginated List
 
@@ -340,7 +345,7 @@ Soft delete — record is kept in DB with `deletedAt` set.
 | `displayOrder` | number | No (default 0) |
 | `icon` | file (JPEG/PNG/SVG/WebP, max 1 MB) | No |
 
-**201 Created** → Category object (`iconPath` set if icon uploaded)
+**201 Created** → Category object (`iconUrl` set if icon uploaded)
 
 **Errors:** 400 · 401 · 403 · 409 (name already exists)
 
@@ -466,14 +471,18 @@ Query: `?categoryId=<uuid>&includeInactive=true`
 
 ## Icon Files
 
-Icons are served as static files from the same server:
+Icons are streamed through a dedicated endpoint — the same pattern used for product
+images — rather than served as static files:
 
 ```
-GET http://localhost:3000<iconPath>
-e.g. http://localhost:3000/category-icons/abc123.png
+GET http://localhost:3000<iconUrl>
+e.g. http://localhost:3000/api/v1/categories/11000000-.../icon
+e.g. http://localhost:3000/api/v1/subcategories/22000000-.../icon
 ```
 
-`iconPath` in the response is always a root-relative path starting with `/`.
+`iconUrl` in the response is `null` when no icon was uploaded, otherwise a
+root-relative URL to that streaming endpoint. Both endpoints are public (no auth
+required) and return 404 if the category/subcategory has no icon.
 
 ---
 

@@ -160,6 +160,7 @@ export class KycService {
             country: dto.temporaryAddressCountry ?? 'Nepal',
           }
         : null,
+      remarks: dto.remarks ?? null,
       status: KycStatus.PENDING,
       rejectionReason: null,
       reviewedBy: null,
@@ -306,6 +307,7 @@ export class KycService {
       secondaryPhone: kyc.secondaryPhone,
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
+      remarks: kyc.remarks,
       rejectionReason: kyc.rejectionReason,
       phoneVerifiedAt: kyc.phoneVerifiedAt,
       reviewedAt: kyc.reviewedAt,
@@ -385,6 +387,7 @@ export class KycService {
       secondaryPhone: kyc.secondaryPhone,
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
+      remarks: kyc.remarks,
       status: kyc.status,
       rejectionReason: kyc.rejectionReason,
       phoneVerifiedAt: kyc.phoneVerifiedAt,

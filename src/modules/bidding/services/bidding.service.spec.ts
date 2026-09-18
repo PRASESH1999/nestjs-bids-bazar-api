@@ -76,6 +76,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     currentHighestBidderId: 'other-bidder',
     biddingStartPrice: 900,
     instantBuyPrice: 1400,
+    biddingEndPrice: 2000,
     biddingEndsAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   } as Product;
@@ -197,13 +198,14 @@ describe('BiddingService.placeBid — max active bids per user', () => {
   });
 });
 
-describe('BiddingService.placeBid — Instant Buy price cap', () => {
-  // current = 1000, instantBuyPrice = 1010: uncapped max would be
-  // 1000 + 5% = 1050, but that crosses instantBuyPrice, so it must clamp to
-  // 1010 exactly.
-  it('clamps the top of the bid range to instantBuyPrice when the percent increment would cross it', async () => {
+describe('BiddingService.placeBid — bidding end price cap (60% ceiling)', () => {
+  // current = 1000, biddingEndPrice = 1010: uncapped max would be
+  // 1000 + 5% = 1050, but that crosses biddingEndPrice, so it must clamp to
+  // 1010 exactly. instantBuyPrice plays no role here — it's a separate,
+  // independent ceiling (see Rule 13/14).
+  it('clamps the top of the bid range to biddingEndPrice when the percent increment would cross it', async () => {
     const productRepo = makeProductRepo(
-      makeProduct({ currentHighestBid: 1000, instantBuyPrice: 1010 }),
+      makeProduct({ currentHighestBid: 1000, biddingEndPrice: 1010 }),
     );
 
     const first = buildService(
@@ -218,22 +220,23 @@ describe('BiddingService.placeBid — Instant Buy price cap', () => {
     expect(first.qr.commitTransaction).toHaveBeenCalled();
 
     // A different bidder (and a fresh bid-repo mock), since the outbidding
-    // user can't re-bid on their own lead, and the product now sits at 1010.
+    // user can't re-bid on their own lead, and the product now sits at 1010
+    // — exactly at the ceiling, so no further bid has anywhere to go.
     const second = buildService(
       makeBidRepo({ existingBidCount: 0, activeProductCount: 0 }),
       productRepo,
     );
     await expect(
-      second.service.placeBid('user-2', 'product-1', { amount: 1011 }),
+      second.service.placeBid('user-2', 'product-1', { amount: 1015 }),
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('rejects any further bid once the increment floor itself would exceed instantBuyPrice', async () => {
-    // current already sits at instantBuyPrice: even the minimum +flat
+  it('rejects any further bid once the increment floor itself would exceed biddingEndPrice', async () => {
+    // current already sits at biddingEndPrice: even the minimum +flat
     // increment has nowhere left to go, so bidding must be refused outright.
     const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
     const productRepo = makeProductRepo(
-      makeProduct({ currentHighestBid: 1010, instantBuyPrice: 1010 }),
+      makeProduct({ currentHighestBid: 1010, biddingEndPrice: 1010 }),
     );
     const { service, qr } = buildService(bidRepo, productRepo);
 
@@ -241,7 +244,7 @@ describe('BiddingService.placeBid — Instant Buy price cap', () => {
       service.placeBid(USER_ID, 'product-1', { amount: 1015 }),
     ).rejects.toThrow(
       new BadRequestException(
-        'Bidding has reached the Instant Buy price of Rs. 1010.00 — no further bids can be placed on this product.',
+        'Bidding has reached the maximum bidding price of Rs. 1010.00 — no further bids can be placed on this product.',
       ),
     );
 
@@ -249,19 +252,19 @@ describe('BiddingService.placeBid — Instant Buy price cap', () => {
     expect(qr.commitTransaction).not.toHaveBeenCalled();
   });
 
-  function makePendingProduct(instantBuyPrice: number) {
+  function makePendingProduct(biddingEndPrice: number) {
     return makeProduct({
       status: ProductStatus.PENDING,
       currentHighestBid: null,
       currentHighestBidderId: null,
       biddingStartPrice: 1000,
-      instantBuyPrice,
+      biddingEndPrice,
     });
   }
 
   // biddingStartPrice = 1000, 5% first-bid increment would allow up to 1050,
-  // but instantBuyPrice = 1030 must win instead.
-  it('clamps the first-bid range to instantBuyPrice when the PENDING percent increment would cross it', async () => {
+  // but biddingEndPrice = 1030 must win instead.
+  it('clamps the first-bid range to biddingEndPrice when the PENDING percent increment would cross it', async () => {
     const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
     const productRepo = makeProductRepo(makePendingProduct(1030));
     const { service, qr } = buildService(bidRepo, productRepo);
@@ -272,13 +275,68 @@ describe('BiddingService.placeBid — Instant Buy price cap', () => {
     expect(qr.commitTransaction).toHaveBeenCalled();
   });
 
-  it('rejects a first bid above the clamped instantBuyPrice ceiling', async () => {
+  it('rejects a first bid above the clamped biddingEndPrice ceiling', async () => {
     const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
     const productRepo = makeProductRepo(makePendingProduct(1030));
     const { service, qr } = buildService(bidRepo, productRepo);
 
+    // 1035 (not 1031) so the rejection is unambiguously about exceeding the
+    // ceiling, not about the separate multiple-of-5 rule tested below.
     await expect(
-      service.placeBid(USER_ID, 'product-1', { amount: 1031 }),
+      service.placeBid(USER_ID, 'product-1', { amount: 1035 }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(qr.rollbackTransaction).toHaveBeenCalled();
+    expect(qr.commitTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('BiddingService.placeBid — multiples of 5', () => {
+  it('rejects a bid amount that is not a multiple of 5, even inside the valid range', async () => {
+    const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
+    // current = 1000: valid range is [1010, 1050] per the test config
+    // (BID_INCREMENT_MIN_FLAT=10, BID_INCREMENT_PERCENT=0.05) — 1013 falls
+    // inside it but isn't a multiple of 5.
+    const productRepo = makeProductRepo(
+      makeProduct({ currentHighestBid: 1000 }),
+    );
+    const { service, qr } = buildService(bidRepo, productRepo);
+
+    await expect(
+      service.placeBid(USER_ID, 'product-1', { amount: 1013 }),
+    ).rejects.toThrow(
+      new BadRequestException('Bid amount must be a multiple of Rs. 5.'),
+    );
+
+    expect(qr.rollbackTransaction).toHaveBeenCalled();
+    expect(qr.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rounds the increment ceiling down to a multiple of 5 rather than leaving it fractional', async () => {
+    // current = 1010: percent increment is 1010 * 5% = 50.5, so the naive
+    // ceiling (1060.5) is not a multiple of 5 and must floor to 1060.
+    const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
+    const productRepo = makeProductRepo(
+      makeProduct({ currentHighestBid: 1010 }),
+    );
+    const { service, qr } = buildService(bidRepo, productRepo);
+
+    const bid = await service.placeBid(USER_ID, 'product-1', { amount: 1060 });
+
+    expect(bid).toBeDefined();
+    expect(qr.commitTransaction).toHaveBeenCalled();
+  });
+
+  it('rejects a bid above the rounded-down increment ceiling', async () => {
+    const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
+    const productRepo = makeProductRepo(
+      makeProduct({ currentHighestBid: 1010 }),
+    );
+    const { service, qr } = buildService(bidRepo, productRepo);
+
+    // 1065 is a multiple of 5 but exceeds the floored ceiling of 1060.
+    await expect(
+      service.placeBid(USER_ID, 'product-1', { amount: 1065 }),
     ).rejects.toThrow(BadRequestException);
 
     expect(qr.rollbackTransaction).toHaveBeenCalled();

@@ -12,6 +12,12 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateSubcategoryDto } from './dto/create-subcategory.dto';
 import { UpdateSubcategoryDto } from './dto/update-subcategory.dto';
 import { IconStorageService } from './icon-storage.service';
+import {
+  CategoryResponse,
+  mapCategory,
+  mapSubcategory,
+  SubcategoryResponse,
+} from './categories.mapper';
 
 @Injectable()
 export class CategoriesService {
@@ -25,45 +31,65 @@ export class CategoriesService {
 
   // ─── Public ──────────────────────────────────────────────────────────────
 
-  async listCategories(includeInactive = false): Promise<Category[]> {
-    return this.categoryRepo.find({
+  async listCategories(includeInactive = false): Promise<CategoryResponse[]> {
+    const categories = await this.categoryRepo.find({
       where: includeInactive ? {} : { isActive: true },
       order: { displayOrder: 'ASC', name: 'ASC' },
     });
+    return categories.map(mapCategory);
   }
 
   async listSubcategories(filters: {
     categoryId?: string;
     includeInactive?: boolean;
-  }): Promise<Subcategory[]> {
+  }): Promise<SubcategoryResponse[]> {
     const where: Record<string, unknown> = {};
     if (!filters.includeInactive) where['isActive'] = true;
     if (filters.categoryId) where['categoryId'] = filters.categoryId;
 
-    return this.subcategoryRepo.find({
+    const subcategories = await this.subcategoryRepo.find({
       where,
       order: { displayOrder: 'ASC', name: 'ASC' },
     });
+    return subcategories.map(mapSubcategory);
   }
 
   // ─── Admin ────────────────────────────────────────────────────────────────
 
-  async getCategoryById(id: string): Promise<Category> {
-    const category = await this.categoryRepo.findOne({ where: { id } });
-    if (!category) throw new NotFoundException('Category not found');
-    return category;
+  async getCategoryById(id: string): Promise<CategoryResponse> {
+    return mapCategory(await this.findCategoryEntityById(id));
   }
 
-  async getSubcategoryById(id: string): Promise<Subcategory> {
-    const subcategory = await this.subcategoryRepo.findOne({ where: { id } });
-    if (!subcategory) throw new NotFoundException('Subcategory not found');
-    return subcategory;
+  async getSubcategoryById(id: string): Promise<SubcategoryResponse> {
+    return mapSubcategory(await this.findSubcategoryEntityById(id));
+  }
+
+  async getCategoryIconFile(
+    id: string,
+  ): Promise<{ absolutePath: string; mimeType: string }> {
+    const category = await this.findCategoryEntityById(id);
+    if (!category.iconPath) throw new NotFoundException('Icon not found');
+    return {
+      absolutePath: this.iconStorage.getAbsolutePath(category.iconPath),
+      mimeType: this.iconStorage.getMimeType(category.iconPath),
+    };
+  }
+
+  async getSubcategoryIconFile(
+    id: string,
+  ): Promise<{ absolutePath: string; mimeType: string }> {
+    const subcategory = await this.findSubcategoryEntityById(id);
+    if (!subcategory.iconPath) throw new NotFoundException('Icon not found');
+    return {
+      absolutePath: this.iconStorage.getAbsolutePath(subcategory.iconPath),
+      mimeType: this.iconStorage.getMimeType(subcategory.iconPath),
+    };
   }
 
   async createCategory(
     dto: CreateCategoryDto,
     iconFile?: Express.Multer.File,
-  ): Promise<Category> {
+  ): Promise<CategoryResponse> {
     await this.assertCategoryNameUnique(dto.name);
 
     let iconPath: string | null = null;
@@ -77,15 +103,15 @@ export class CategoriesService {
       displayOrder: dto.displayOrder ?? 0,
     });
 
-    return this.categoryRepo.save(category);
+    return mapCategory(await this.categoryRepo.save(category));
   }
 
   async updateCategory(
     id: string,
     dto: UpdateCategoryDto,
     iconFile?: Express.Multer.File,
-  ): Promise<Category> {
-    const category = await this.getCategoryById(id);
+  ): Promise<CategoryResponse> {
+    const category = await this.findCategoryEntityById(id);
 
     if (
       dto.name !== undefined &&
@@ -104,11 +130,11 @@ export class CategoriesService {
       category.iconPath = await this.iconStorage.saveIcon(iconFile);
     }
 
-    return this.categoryRepo.save(category);
+    return mapCategory(await this.categoryRepo.save(category));
   }
 
   async deleteCategory(id: string): Promise<void> {
-    const category = await this.getCategoryById(id);
+    const category = await this.findCategoryEntityById(id);
 
     const activeSubcategoryCount = await this.subcategoryRepo.count({
       where: { categoryId: id, isActive: true },
@@ -126,7 +152,7 @@ export class CategoriesService {
   async createSubcategory(
     dto: CreateSubcategoryDto,
     iconFile?: Express.Multer.File,
-  ): Promise<Subcategory> {
+  ): Promise<SubcategoryResponse> {
     const parent = await this.categoryRepo.findOne({
       where: { id: dto.categoryId, isActive: true },
     });
@@ -148,15 +174,15 @@ export class CategoriesService {
       displayOrder: dto.displayOrder ?? 0,
     });
 
-    return this.subcategoryRepo.save(subcategory);
+    return mapSubcategory(await this.subcategoryRepo.save(subcategory));
   }
 
   async updateSubcategory(
     id: string,
     dto: UpdateSubcategoryDto,
     iconFile?: Express.Multer.File,
-  ): Promise<Subcategory> {
-    const subcategory = await this.getSubcategoryById(id);
+  ): Promise<SubcategoryResponse> {
+    const subcategory = await this.findSubcategoryEntityById(id);
 
     if (
       dto.categoryId !== undefined &&
@@ -194,16 +220,28 @@ export class CategoriesService {
       subcategory.iconPath = await this.iconStorage.saveIcon(iconFile);
     }
 
-    return this.subcategoryRepo.save(subcategory);
+    return mapSubcategory(await this.subcategoryRepo.save(subcategory));
   }
 
   async deleteSubcategory(id: string): Promise<void> {
-    const subcategory = await this.getSubcategoryById(id);
+    const subcategory = await this.findSubcategoryEntityById(id);
     subcategory.isActive = false;
     await this.subcategoryRepo.save(subcategory);
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
+
+  private async findCategoryEntityById(id: string): Promise<Category> {
+    const category = await this.categoryRepo.findOne({ where: { id } });
+    if (!category) throw new NotFoundException('Category not found');
+    return category;
+  }
+
+  private async findSubcategoryEntityById(id: string): Promise<Subcategory> {
+    const subcategory = await this.subcategoryRepo.findOne({ where: { id } });
+    if (!subcategory) throw new NotFoundException('Subcategory not found');
+    return subcategory;
+  }
 
   private async assertCategoryNameUnique(
     name: string,

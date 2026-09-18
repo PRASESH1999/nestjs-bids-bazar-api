@@ -62,6 +62,7 @@ export function mapProduct(
     basePrice: product.basePrice,
     biddingStartPrice: product.biddingStartPrice,
     instantBuyPrice: product.instantBuyPrice,
+    biddingEndPrice: product.biddingEndPrice,
     showInstantBuy:
       product.instantBuyPrice != null && currentBid < product.instantBuyPrice,
     currency: product.currency,

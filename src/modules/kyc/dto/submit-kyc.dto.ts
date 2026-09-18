@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  MaxLength,
 } from 'class-validator';
 import { DocumentType } from '@common/enums/document-type.enum';
 
@@ -87,6 +88,18 @@ export class SubmitKycDto {
   @IsOptional()
   @IsString()
   temporaryAddressCountry?: string;
+
+  // --- Remarks ---
+
+  @ApiPropertyOptional({
+    example: 'My legal name differs slightly from my NID due to marriage.',
+    description: 'Optional note from the applicant for the reviewer',
+    maxLength: 1000,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  remarks?: string;
 
   // --- Bank Details (mandatory at submission) ---
 

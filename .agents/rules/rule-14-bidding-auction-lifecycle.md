@@ -19,24 +19,34 @@ trigger: always_on
 
 ## Pricing & Increment Rules
 
+Every bound below — and the bid amount itself — is a multiple of Rs. 5.
+Minimums round **up** (`roundUpToMultipleOf5`, never weakened), maximums round
+**down** (`roundDownToMultipleOf5`, never exceeded). The cap on how high
+bidding can go is **`product.biddingEndPrice`** (basePrice × 1.6) — see Rule
+13 — never `instantBuyPrice`; the two ceilings are independent.
+
 ### First bid (product status: `PENDING`)
-- Amount must be ≥ `product.biddingStartPrice` (no upper cap on the first bid).
+- Amount must be ≥ `product.biddingStartPrice` (already a multiple of 5).
+- Amount must be ≤ `min(roundDownToMultipleOf5(biddingStartPrice × (1 +
+  BID_INCREMENT_PERCENT)), product.biddingEndPrice)`.
 - On success:
     - Transitions product → `ACTIVE`
     - Sets `product.biddingStartedAt = now`
     - Sets `product.biddingEndsAt = now + BIDDING_DURATION_HOURS`
 
 ### Subsequent bids (product status: `ACTIVE`)
-- Let `current` = `product.currentHighestBid`
+- Let `current` = `product.currentHighestBid` (always a multiple of 5)
 - Let `percentInc` = `current × BID_INCREMENT_PERCENT`
-- Let `minInc` = `max(BID_INCREMENT_MIN_FLAT, percentInc)`
+- Let `minInc` = `BID_INCREMENT_MIN_FLAT`
 - Let `maxInc` = `percentInc`
 - If `minInc > maxInc` (low-price edge case where the flat floor exceeds the percentage):
     - Only `current + BID_INCREMENT_MIN_FLAT` is accepted
 - Otherwise:
-    - `current + minInc ≤ amount ≤ current + maxInc`
-- All amounts are NPR, rounded to 2 decimal places.
-- Use a decimal arithmetic library (e.g. `decimal.js`) — never JS floats for money.
+    - `current + minInc ≤ amount ≤ min(roundDownToMultipleOf5(current + maxInc), product.biddingEndPrice)`
+- **The submitted bid amount itself must be an exact multiple of Rs. 5** — rejected
+  otherwise, even if it falls within the min/max window.
+- All amounts are NPR. Use a decimal arithmetic library (`decimal.js`) — never JS
+  floats for money.
 
 ### Self-outbid
 - A user whose bid is currently the highest may NOT place another bid until someone else
@@ -67,28 +77,42 @@ Note: The `CLOSED` status is a transient audit state — the product moves direc
 
 ## Closing Logic
 
-Two paths trigger auction close — both call the same idempotent method:
+An `ACTIVE` auction closes on **either** of two independent triggers — both handled
+by the same idempotent method:
 
 ```
 AuctionLifecycleService.closeIfExpired(productId)
 ```
 
-- **Path 1 (Phase 2)**: Cron job runs every 1 minute.
-- **Path 2 (Phase 2)**: Lazy closure check inside `GET /products/:id` and `POST /products/:id/bids`.
+- **Timer expired**: `product.biddingEndsAt <= now`.
+- **Ceiling reached**: `product.currentHighestBid >= product.biddingEndPrice` — a
+  regular bid landed exactly on the 60% hard ceiling (Rule 13). This is what makes
+  reaching that ceiling end the auction immediately instead of waiting out the timer.
+
+Call sites:
+- Cron job runs every 1 minute (`closeAllExpiredAuctions`) — its query matches
+  either trigger, not just timer expiry.
+- Lazy closure check inside `GET /products/:id`, and **both before and after**
+  `POST /products/:id/bids` (the post-bid call is what closes the auction within
+  seconds of a bid hitting `biddingEndPrice`, rather than waiting for the cron).
 
 ### `closeIfExpired` must:
 - Open a transaction with `SELECT FOR UPDATE` on the product row.
-- Re-check `status` and `biddingEndsAt` INSIDE the transaction.
+- Re-check `status` and (timer-expired OR ceiling-reached) INSIDE the transaction.
 - If conditions are still met: pick the highest-amount bid as winner (tiebreaker: earliest
   `placedAt`), transition product to `AWAITING_PAYMENT`, set the winning bid's
   `paymentDeadline = now + PAYMENT_WINDOW_HOURS` and `isCurrentlyPaymentResponsible = true`.
+  This is identical regardless of which trigger fired — a ceiling-triggered close still
+  allows the normal fallback chain if the winner doesn't pay (unlike Instant Buy).
 - Notify winner and seller (Phase 3).
 - **Idempotent**: if status is already past `ACTIVE`, return without changes.
 
 ## Instant Buy
 
 - Every product has a mandatory `instantBuyPrice` (see Rule 13 for the
-  `1.4 × basePrice` formula and visibility rule). `AuctionLifecycleService
+  `1.4 × basePrice` formula and visibility rule) — completely independent of
+  `biddingEndPrice` (the `1.6 × basePrice` regular-bidding ceiling, also Rule 13).
+  `AuctionLifecycleService
   .executeInstantBuy(productId, buyerId)` is the purchase action:
   `POST /products/:id/instant-buy`.
 - Preconditions, re-validated **inside** a `pessimistic_write` lock on the

@@ -47,8 +47,37 @@ describe('ProductsService — Instant Buy pricing', () => {
       }
     });
 
-    it('rounds to 2 decimal places', () => {
-      expect(service.computeInstantBuyPrice(33.335)).toBe(46.67);
+    it('rounds down to the nearest multiple of 5 (ceiling value)', () => {
+      // 1590 * 1.4 = 2226 -> floors to 2225.
+      expect(service.computeInstantBuyPrice(1590)).toBe(2225);
+    });
+  });
+
+  describe('computeBiddingStartPrice', () => {
+    it('rounds up to the nearest multiple of 5 (floor value)', () => {
+      // 1590 * 1.2 (<=10000 band, 20% markup) = 1908 -> ceils to 1910.
+      expect(service.computeBiddingStartPrice(1590)).toBe(1910);
+    });
+  });
+
+  describe('computeBiddingEndPrice', () => {
+    it('is 1.6x basePrice, independent of instantBuyPrice', () => {
+      expect(service.computeBiddingEndPrice(100)).toBe(160);
+      expect(service.computeBiddingEndPrice(20000)).toBe(32000);
+    });
+
+    it('is always above computeInstantBuyPrice', () => {
+      const basePrices = [100, 1590, 5000, 15000, 25000, 60000];
+      for (const basePrice of basePrices) {
+        const instantBuyPrice = service.computeInstantBuyPrice(basePrice);
+        const biddingEndPrice = service.computeBiddingEndPrice(basePrice);
+        expect(biddingEndPrice).toBeGreaterThan(instantBuyPrice);
+      }
+    });
+
+    it('rounds down to the nearest multiple of 5 (ceiling value)', () => {
+      // 1590 * 1.6 = 2544 -> floors to 2540.
+      expect(service.computeBiddingEndPrice(1590)).toBe(2540);
     });
   });
 
@@ -86,6 +115,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       basePrice: 1000,
       biddingStartPrice: 1200,
       instantBuyPrice: 1400,
+      biddingEndPrice: 1600,
       currency: 'NPR',
       biddingDurationHours: 72,
       currentHighestBid: null,
@@ -160,6 +190,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
     expect(result.basePrice).toBe(1000);
     expect(result.biddingStartPrice).toBe(1200);
     expect(result.instantBuyPrice).toBe(1400);
+    expect(result.biddingEndPrice).toBe(1600);
     expect(result.condition).toBe(ItemCondition.NEW);
   });
 
@@ -212,6 +243,7 @@ describe('ProductsService — isFavorited flag', () => {
       basePrice: 1000,
       biddingStartPrice: 1200,
       instantBuyPrice: 1400,
+      biddingEndPrice: 1600,
       currency: 'NPR',
       biddingDurationHours: 72,
       currentHighestBid: null,
@@ -327,6 +359,7 @@ describe('ProductsService — seller rating summary', () => {
       basePrice: 1000,
       biddingStartPrice: 1200,
       instantBuyPrice: 1400,
+      biddingEndPrice: 1600,
       currency: 'NPR',
       biddingDurationHours: 72,
       currentHighestBid: null,

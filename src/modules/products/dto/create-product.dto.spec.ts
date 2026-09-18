@@ -73,6 +73,20 @@ describe('CreateProductDto — pickup location validation', () => {
   });
 });
 
+describe('CreateProductDto — basePrice validation', () => {
+  it('accepts a whole-number basePrice', async () => {
+    const errors = await validateDto(buildPayload({ basePrice: '1590' }));
+    expect(errors.find((e) => e.property === 'basePrice')).toBeUndefined();
+  });
+
+  it('rejects a basePrice with decimals', async () => {
+    const errors = await validateDto(buildPayload({ basePrice: '1590.50' }));
+    expect(
+      errors.find((e) => e.property === 'basePrice')?.constraints,
+    ).toHaveProperty('isInt');
+  });
+});
+
 describe('CreateProductDto — draft creation with an empty payload', () => {
   it('passes with no fields at all — a DRAFT can start completely empty', async () => {
     const errors = await validateDto({});

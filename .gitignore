@@ -57,11 +57,8 @@ build/config\.gypi
 pnpm-lock.yaml
 /.history
 
-# uploaded user files (KYC documents, product images) — never commit
+# uploaded user files (KYC documents, product images, category icons) — never commit
 /uploads/
-
-# uploaded category icons — never commit user files
-/public/category-icons/
 
 # Environment variables
 .env

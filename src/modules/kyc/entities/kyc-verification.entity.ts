@@ -46,6 +46,11 @@ export class KycVerification extends BaseEntity {
   @Column({ type: 'jsonb', nullable: true })
   temporaryAddress: AddressData | null;
 
+  // Free-text note from the applicant, entered at submission time (e.g. to
+  // explain a name mismatch between documents). Optional, reviewer-facing.
+  @Column({ type: 'varchar', length: 1000, nullable: true })
+  remarks: string | null;
+
   @Column({ type: 'enum', enum: KycStatus, default: KycStatus.PENDING })
   status: KycStatus;
 

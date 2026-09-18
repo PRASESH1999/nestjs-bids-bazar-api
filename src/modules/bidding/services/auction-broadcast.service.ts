@@ -21,6 +21,7 @@ export interface AuctionUpdatePayload {
   biddingEndsAt: string | null;
   instantBuyPrice: number;
   showInstantBuy: boolean;
+  biddingEndPrice: number;
   topBidders: Array<{ username: string; highestBid: number }>;
   recentBids: RecentBidItem[];
 }
@@ -128,6 +129,7 @@ export class AuctionBroadcastService {
         : null,
       instantBuyPrice: Number(product.instantBuyPrice),
       showInstantBuy: currentBid < Number(product.instantBuyPrice),
+      biddingEndPrice: Number(product.biddingEndPrice),
       topBidders,
       recentBids,
     };

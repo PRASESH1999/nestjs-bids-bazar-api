@@ -87,10 +87,10 @@ export const CategorySchema = {
       example: '11000000-0000-0000-0000-000000000001',
     },
     name: { type: 'string', example: 'Electronics' },
-    iconPath: {
+    iconUrl: {
       type: 'string',
       nullable: true,
-      example: '/category-icons/electronics.png',
+      example: '/api/v1/categories/11000000-0000-0000-0000-000000000001/icon',
     },
     displayOrder: { type: 'number', example: 0 },
     isActive: { type: 'boolean', example: true },
@@ -121,10 +121,11 @@ export const SubcategorySchema = {
       example: '11000000-0000-0000-0000-000000000001',
     },
     name: { type: 'string', example: 'Mobile Phones' },
-    iconPath: {
+    iconUrl: {
       type: 'string',
       nullable: true,
-      example: '/category-icons/mobile.png',
+      example:
+        '/api/v1/subcategories/22000000-0000-0000-0000-000000000001/icon',
     },
     displayOrder: { type: 'number', example: 0 },
     isActive: { type: 'boolean', example: true },

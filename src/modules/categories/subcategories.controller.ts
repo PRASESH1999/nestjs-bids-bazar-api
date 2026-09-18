@@ -5,10 +5,13 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   Patch,
   Post,
   Query,
+  Response as NestResponse,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -25,6 +28,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { existsSync, createReadStream } from 'fs';
+import type { Response } from 'express';
 import {
   R400,
   R401,
@@ -71,6 +76,28 @@ export class SubcategoriesController {
       categoryId,
       includeInactive: false,
     });
+  }
+
+  @Get(':id/icon')
+  @Public()
+  @ApiOperation({ summary: 'Stream a subcategory icon file' })
+  async getSubcategoryIcon(
+    @Param('id') id: string,
+    @NestResponse({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { absolutePath, mimeType } =
+      await this.categoriesService.getSubcategoryIconFile(id);
+
+    if (!existsSync(absolutePath)) {
+      throw new NotFoundException('Icon file not found on server');
+    }
+
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': 'inline',
+    });
+
+    return new StreamableFile(createReadStream(absolutePath));
   }
 
   @Get(':id')

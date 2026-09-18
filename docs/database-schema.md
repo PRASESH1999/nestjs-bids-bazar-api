@@ -91,6 +91,7 @@ erDiagram
         string secondaryPhone
         json permanentAddress
         json temporaryAddress
+        string remarks
         enum status
         string rejectionReason
         uuid reviewedBy
@@ -160,6 +161,7 @@ erDiagram
         decimal basePrice
         decimal biddingStartPrice
         decimal instantBuyPrice
+        decimal biddingEndPrice
         string currency
         int biddingDurationHours
         decimal currentHighestBid
@@ -352,6 +354,7 @@ erDiagram
   level (existing rows predate the column); `secondaryPhone` (emergency contact) is always
   optional.
 - `permanentAddress` and `temporaryAddress` are `jsonb` columns with shape `{ street, city, district, province, country }`.
+- `remarks`: optional free-text note (max 1000 chars) entered by the applicant at submission time, shown to the reviewer.
 - `reviewedBy` is a UUID referencing `users.id` (the admin who reviewed) — stored as a plain column, no TypeORM relation defined.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
@@ -368,7 +371,7 @@ erDiagram
 ### CATEGORY
 - `name` and `slug` are both globally unique across all categories.
 - `slug` is auto-generated from `name` at creation time and is immutable after creation.
-- `iconPath` stores the relative path to the icon file under `/public/category-icons/`.
+- `iconPath` stores the relative path to the icon file under `UPLOAD_BASE_DIR/category-icons/` (private storage, not a public static path). Never exposed directly over the API — responses carry `iconUrl`, an opaque URL to `GET /categories/:id/icon`, mirroring how product images are streamed.
 - `displayOrder` controls the sort order in category listings (ascending).
 - `isActive` soft-disables the category without deletion. Categories with active subcategories cannot be deleted.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
@@ -376,7 +379,7 @@ erDiagram
 ### SUBCATEGORY
 - `categoryId` + `slug` has a **composite unique index** — slug must be unique within its parent category only (not globally).
 - `slug` is auto-generated from `name` at creation time.
-- `iconPath` stores the relative path to the icon file under `/public/category-icons/`.
+- `iconPath` stores the relative path to the icon file under `UPLOAD_BASE_DIR/category-icons/` (private storage, not a public static path). Never exposed directly over the API — responses carry `iconUrl`, an opaque URL to `GET /subcategories/:id/icon`, mirroring how product images are streamed.
 - `displayOrder` controls sort order within the parent category.
 - `isActive` soft-disables the subcategory without deletion.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
@@ -393,8 +396,9 @@ erDiagram
 - `ownerId` references `users.id` — stored as a plain UUID column (no TypeORM `@ManyToOne` relation defined to avoid joins on every load).
 - `condition` enum values: `NEW`, `LIKE_NEW`, `USED_GOOD`, `USED_FAIR`, `FOR_PARTS`.
 - `status` enum values: `DRAFT`, `SUBMITTED`, `REJECTED`, `APPROVED`, `PENDING`, `ACTIVE`, `CLOSED`, `AWAITING_PAYMENT`, `SETTLED`, `PAYMENT_FAILED`, `ABANDONED`, `WITHDRAWN`. Default: `DRAFT`. See Rule 13 for full state machine.
-- `basePrice` is the user-entered desired price. `biddingStartPrice` is auto-computed by applying a **tiered margin** to `basePrice` (20% ≤10k, 18% ≤20k, 16% ≤30k, 14% ≤40k, 12% ≤50k, 10% >50k — see Rule 13) and stored so the bidding module never recomputes it.
-- `instantBuyPrice` is auto-computed as `1.4 × basePrice` (always above `biddingStartPrice`) — mandatory on every product, not seller-set. See Rule 13/14.
+- `basePrice` is the user-entered desired price — a whole number, no decimals. `biddingStartPrice` is auto-computed by applying a **tiered margin** to `basePrice` (20% ≤10k, 18% ≤20k, 16% ≤30k, 14% ≤40k, 12% ≤50k, 10% >50k — see Rule 13), rounded **up** to the nearest multiple of Rs. 5, and stored so the bidding module never recomputes it.
+- `instantBuyPrice` is auto-computed as `1.4 × basePrice`, rounded **down** to the nearest multiple of Rs. 5 (always above `biddingStartPrice`) — mandatory on every product, not seller-set. See Rule 13/14.
+- `biddingEndPrice` is auto-computed as `1.6 × basePrice`, rounded **down** to the nearest multiple of Rs. 5 — the hard ceiling on regular bidding, independent of `instantBuyPrice`. Reaching it closes the auction immediately. See Rule 13/14.
 - `biddingDurationHours` — countdown duration (hours) after the first bid is placed; configurable per product, default 72.
 - `currentHighestBid`, `currentHighestBidderId`, `biddingStartedAt`, `biddingEndsAt` — null until the first bid is placed.
 - `viewCount` — detail-page view counter (default `0`). Incremented **atomically** (`UPDATE ... SET "viewCount" = "viewCount" + 1`) by `POST /products/:id/view`. Owner and admin (ADMIN/SUPERADMIN) views are excluded, and only `PUBLICLY_VISIBLE_STATUSES` count. No index — current scope has no view-based sort (Rule 13).

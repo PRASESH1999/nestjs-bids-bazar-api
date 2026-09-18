@@ -11,7 +11,8 @@ trigger: always_on
 - One product = one auction = one winning buyer.
 
 ## Pricing Model
-- User sets a base price (their desired sale price).
+- User sets a base price (their desired sale price) — a **whole number, no
+  decimals** (`CreateProductDto.basePrice` is `@IsInt()`).
 - The platform applies a **tiered margin** on top of `basePrice` — the lower the
   base price, the higher the margin. The markup is selected by which band the
   `basePrice` (in NPR) falls into:
@@ -25,12 +26,17 @@ trigger: always_on
   | 40,001 – 50,000     | 12%    |
   | > 50,000            | 10%    |
 
-- `biddingStartPrice = round(basePrice × (1 + markup), 2)` — rounded to 2 decimal
-  places. The single source of truth is `ProductsService.computeBiddingStartPrice`.
-- Both values are stored on the product:
-    `basePrice`          : user-entered desired price
+- `biddingStartPrice = roundUpToMultipleOf5(basePrice × (1 + markup))` — a floor
+  value, so it rounds **up** to the nearest multiple of Rs. 5, never down (never
+  weakens the minimum). The single source of truth is
+  `ProductsService.computeBiddingStartPrice`.
+- Three values are stored on the product:
+    `basePrice`          : user-entered desired price (whole rupees)
     `biddingStartPrice`  : auto-computed via the tiered markup above
+    `biddingEndPrice`    : auto-computed hard ceiling on regular bidding (see below)
 - First bid must be ≥ `biddingStartPrice`.
+- Every price a bidder can actually place — the increment bounds and the bid
+  amount itself — must be a multiple of Rs. 5 too. See Rule 14.
 - Bidding logic, countdown, and increments are governed by Rule 3: Bidding Domain
   Logic — do NOT duplicate that logic here.
 - For the full bidding mechanics including increment rules, payment windows, auction
@@ -40,19 +46,35 @@ trigger: always_on
 ### Instant Buy
 - Every product also gets a fixed, **mandatory** Instant Buy price — not
   seller-set, not optional, present on every listing:
-  `instantBuyPrice = round(basePrice × 1.4, 2)`, computed alongside
+  `instantBuyPrice = roundDownToMultipleOf5(basePrice × 1.4)`, computed alongside
   `biddingStartPrice` via `ProductsService.computeInstantBuyPrice`
   (`GET /products/calculate-instant-buy-price` exposes it the same way
-  `GET /products/calculate-bidding-price` does).
+  `GET /products/calculate-bidding-price` does). It's a ceiling value, so it
+  rounds **down** to the nearest multiple of Rs. 5 (never rounds up past 1.4×).
 - `instantBuyPrice` is always strictly above `biddingStartPrice` — the
   markup table above tops out at 1.20× `basePrice`, well under 1.40×.
 - Visibility (derived, never stored): `showInstantBuy = currentBid <
   instantBuyPrice`, where `currentBid = currentHighestBid ??
   biddingStartPrice`. Hidden once the current bid meets or exceeds it.
+- **`instantBuyPrice` is completely independent of `biddingEndPrice`** (the 60%
+  bidding ceiling below) — Instant Buy disappearing at the 40% mark has no
+  effect on regular bidding, which keeps going up to its own, higher ceiling.
 - The actual Instant Buy purchase action, its no-fallback fulfillment
   rule, and its interaction with the bidding state machine are owned by
   **Rule 14: Bidding & Auction Lifecycle** — do not duplicate that logic
   here.
+
+### Bidding End Price (hard ceiling on regular bidding)
+- Every product also gets a fixed, mandatory ceiling on regular bidding,
+  separate from and higher than `instantBuyPrice`:
+  `biddingEndPrice = roundDownToMultipleOf5(basePrice × 1.6)`, computed via
+  `ProductsService.computeBiddingEndPrice` (`GET
+  /products/calculate-bidding-end-price` exposes it the same way the other two
+  calculators do). It's a ceiling value, so it rounds **down**.
+- Regular bids can never exceed `biddingEndPrice` — see Rule 14's Pricing &
+  Increment Rules. Once a bid reaches it exactly, the auction closes
+  immediately (does not wait for the countdown timer) and that bidder wins —
+  see Rule 14's Closing Logic.
 
 ## Required Pre-conditions to Sell
 - User must have `isEmailVerified === true` (enforced via login gate).

@@ -3,7 +3,6 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
-  IsNumber,
   IsPositive,
   IsString,
   IsUUID,
@@ -62,12 +61,13 @@ export class CreateProductDto {
   condition?: ItemCondition;
 
   @ApiPropertyOptional({
-    description: 'User desired sale price (NPR)',
+    description:
+      'User desired sale price (NPR). Whole rupees only, no decimals.',
     minimum: 1,
   })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsInt()
   @IsPositive()
   basePrice?: number;
 

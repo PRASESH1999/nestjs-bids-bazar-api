@@ -1,8 +1,13 @@
+import Decimal from 'decimal.js';
 import {
   OWNER_EDITABLE_STATUSES,
   PUBLICLY_VISIBLE_STATUSES,
   ProductStatus,
 } from '@common/enums/product-status.enum';
+import {
+  roundDownToMultipleOf5,
+  roundUpToMultipleOf5,
+} from '@common/utils/rounding.util';
 import { CategoriesService } from '@modules/categories/categories.service';
 import { KycService } from '@modules/kyc/kyc.service';
 import { MailService } from '@modules/mail/mail.service';
@@ -128,6 +133,10 @@ export class ProductsService {
       dto.basePrice !== undefined
         ? this.computeInstantBuyPrice(dto.basePrice)
         : null;
+    const biddingEndPrice =
+      dto.basePrice !== undefined
+        ? this.computeBiddingEndPrice(dto.basePrice)
+        : null;
 
     // Save product first to get the UUID for the image directory.
     const product = this.productsRepository.createProduct({
@@ -141,6 +150,7 @@ export class ProductsService {
       basePrice: dto.basePrice ?? null,
       biddingStartPrice,
       instantBuyPrice,
+      biddingEndPrice,
       biddingDurationHours: dto.biddingDurationHours ?? 72,
       status: ProductStatus.DRAFT,
       currentHighestBid: null,
@@ -239,6 +249,7 @@ export class ProductsService {
       product.basePrice = dto.basePrice;
       product.biddingStartPrice = this.computeBiddingStartPrice(dto.basePrice);
       product.instantBuyPrice = this.computeInstantBuyPrice(dto.basePrice);
+      product.biddingEndPrice = this.computeBiddingEndPrice(dto.basePrice);
     }
 
     if (newImageFiles && newImageFiles.length > 0) {
@@ -1032,6 +1043,8 @@ export class ProductsService {
     }
   }
 
+  // Floor value (minimum first bid) — rounds UP to the nearest multiple of 5
+  // so the minimum is never weakened.
   computeBiddingStartPrice(basePrice: number): number {
     let markup: number;
     if (basePrice <= 10000) markup = 0.2;
@@ -1040,13 +1053,25 @@ export class ProductsService {
     else if (basePrice <= 40000) markup = 0.14;
     else if (basePrice <= 50000) markup = 0.12;
     else markup = 0.1;
-    return Math.round(basePrice * (1 + markup) * 100) / 100;
+    return roundUpToMultipleOf5(
+      new Decimal(basePrice).mul(new Decimal(1).plus(markup)),
+    );
   }
 
   // Fixed buy-now price: 1.4 × basePrice. Always above biddingStartPrice
-  // (max markup band is 1.2×), per Rule 13.
+  // (max markup band is 1.2×), per Rule 13. Independent of biddingEndPrice —
+  // Instant Buy availability is unaffected by the 60% bidding ceiling.
+  // Ceiling value — rounds DOWN to the nearest multiple of 5 so it's never exceeded.
   computeInstantBuyPrice(basePrice: number): number {
-    return Math.round(basePrice * 1.4 * 100) / 100;
+    return roundDownToMultipleOf5(new Decimal(basePrice).mul(1.4));
+  }
+
+  // Hard ceiling on regular bidding: 1.6 × basePrice. Separate from
+  // instantBuyPrice — once currentHighestBid reaches this, the auction closes
+  // immediately regardless of the countdown timer (Rule 14). Ceiling value —
+  // rounds DOWN to the nearest multiple of 5 so it's never exceeded.
+  computeBiddingEndPrice(basePrice: number): number {
+    return roundDownToMultipleOf5(new Decimal(basePrice).mul(1.6));
   }
 
   // Single batch query for the whole product list/detail being built — never

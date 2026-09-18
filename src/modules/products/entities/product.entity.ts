@@ -57,6 +57,13 @@ export class Product extends BaseEntity {
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
   instantBuyPrice: number | null;
 
+  // Hard ceiling on regular bidding = 1.6 × basePrice — independent of
+  // instantBuyPrice. Once currentHighestBid reaches this, the auction closes
+  // immediately (see AuctionLifecycleService.closeIfExpired). Mandatory by
+  // submission time; stored, not recomputed on read.
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  biddingEndPrice: number | null;
+
   @Column({ type: 'varchar', length: 10, default: 'NPR' })
   currency: string;
 

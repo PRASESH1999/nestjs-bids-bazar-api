@@ -26,6 +26,7 @@ function buildKyc(overrides: Partial<KycVerification> = {}): KycVerification {
       country: 'Nepal',
     },
     temporaryAddress: null,
+    remarks: null,
     status: KycStatus.PENDING,
     rejectionReason: null,
     reviewedBy: null,

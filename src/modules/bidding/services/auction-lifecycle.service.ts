@@ -79,7 +79,17 @@ export class AuctionLifecycleService {
 
       const now = new Date();
 
-      if (!product.biddingEndsAt || product.biddingEndsAt > now) {
+      // Two independent triggers close an ACTIVE auction: the countdown
+      // timer expiring, or a regular bid reaching biddingEndPrice (the 60%
+      // hard ceiling — see Rule 14). Either one is sufficient.
+      const timerExpired =
+        product.biddingEndsAt !== null && product.biddingEndsAt <= now;
+      const ceilingReached =
+        product.currentHighestBid !== null &&
+        product.biddingEndPrice !== null &&
+        Number(product.currentHighestBid) >= Number(product.biddingEndPrice);
+
+      if (!timerExpired && !ceilingReached) {
         if (isOwnQr) await qr.commitTransaction();
         return;
       }
@@ -986,11 +996,18 @@ export class AuctionLifecycleService {
     processed: number;
     errors: number;
   }> {
+    // Picks up both close triggers: timer expiry, and a bid having already
+    // reached biddingEndPrice (normally closed immediately after that bid via
+    // the controller's post-bid closeIfExpired call — this is the safety net
+    // for when that immediate call fails).
     const expiredProducts = await this.dataSource
       .getRepository(Product)
       .createQueryBuilder('product')
       .where('product.status = :status', { status: ProductStatus.ACTIVE })
-      .andWhere('product.biddingEndsAt <= :now', { now: new Date() })
+      .andWhere(
+        '(product.biddingEndsAt <= :now OR product.currentHighestBid >= product.biddingEndPrice)',
+        { now: new Date() },
+      )
       .getMany();
 
     let processed = 0;

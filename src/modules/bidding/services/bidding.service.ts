@@ -10,6 +10,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { EventNames } from '@common/events/event-names';
+import { roundDownToMultipleOf5 } from '@common/utils/rounding.util';
 import type { BidSubmittedPayload } from '@common/events/event-payloads.type';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
@@ -153,6 +154,12 @@ export class BiddingService {
 
       const range = this.computeValidBidRange(product);
       const bidAmount = new Decimal(String(dto.amount));
+
+      if (!bidAmount.modulo(5).isZero()) {
+        throw new BadRequestException(
+          'Bid amount must be a multiple of Rs. 5.',
+        );
+      }
 
       if (range.maxAmount === null) {
         if (bidAmount.lessThan(range.minAmount)) {
@@ -518,23 +525,31 @@ export class BiddingService {
 
   // ─── Private helpers ──────────────────────────────────────────────────────
 
+  // Bids are capped by biddingEndPrice (the 60% hard ceiling on regular
+  // bidding) — never by instantBuyPrice. The two are independent: Instant Buy
+  // (40%) can disappear well before regular bidding reaches its own, higher
+  // ceiling. Every bound below is a multiple of Rs. 5 — minimums round up
+  // (never weakened), maximums round down (never exceeded) — see
+  // roundUpToMultipleOf5/roundDownToMultipleOf5.
   private computeValidBidRange(product: Product): BidRange {
-    const instantBuyPrice = new Decimal(String(product.instantBuyPrice));
+    const biddingEndPrice = new Decimal(String(product.biddingEndPrice));
     const percentRaw = this.configService.getOrThrow<number>(
       'BID_INCREMENT_PERCENT',
     );
     const incrementPercent = new Decimal(String(percentRaw));
 
     if (product.status === ProductStatus.PENDING) {
+      // biddingStartPrice is already stored as a multiple of 5 — only the
+      // computed ceiling needs rounding here.
       const minAmount = new Decimal(String(product.biddingStartPrice));
-      const uncappedMax = minAmount
-        .add(minAmount.mul(incrementPercent))
-        .toDecimalPlaces(2);
-      const maxAmount = Decimal.min(uncappedMax, instantBuyPrice);
+      const uncappedMax = roundDownToMultipleOf5(
+        minAmount.add(minAmount.mul(incrementPercent)),
+      );
+      const maxAmount = Decimal.min(uncappedMax, biddingEndPrice);
 
       if (minAmount.greaterThan(maxAmount)) {
         throw new BadRequestException(
-          `Bidding is not available below the Instant Buy price of Rs. ${instantBuyPrice.toFixed(2)} — use Instant Buy to purchase this product.`,
+          `Bidding is not available below the maximum bidding price of Rs. ${biddingEndPrice.toFixed(2)}.`,
         );
       }
 
@@ -551,7 +566,7 @@ export class BiddingService {
     );
     const incrementFlat = new Decimal(String(flatRaw));
 
-    const percentInc = current.mul(incrementPercent).toDecimalPlaces(2);
+    const percentInc = current.mul(incrementPercent);
     const minInc = incrementFlat;
     const maxInc = percentInc;
 
@@ -559,22 +574,25 @@ export class BiddingService {
     let uncappedMax: Decimal;
 
     if (minInc.greaterThan(maxInc)) {
-      minAmount = current.add(incrementFlat).toDecimalPlaces(2);
+      // incrementFlat (Rs. 5) is already a multiple of 5, and `current` always
+      // is too (every stored bid amount is), so no rounding needed here.
+      minAmount = current.add(incrementFlat);
       uncappedMax = minAmount;
     } else {
-      minAmount = current.add(minInc).toDecimalPlaces(2);
-      uncappedMax = current.add(maxInc).toDecimalPlaces(2);
+      minAmount = current.add(minInc);
+      uncappedMax = new Decimal(roundDownToMultipleOf5(current.add(maxInc)));
     }
 
-    // Bids can never cross the Instant Buy price — once the increment floor
-    // itself would exceed it, there's no valid amount left to bid and the
-    // auction can only be won by the current leader at close (or by Instant
-    // Buy, while it's still available to a different buyer).
-    const maxAmount = Decimal.min(uncappedMax, instantBuyPrice);
+    // Bids can never cross biddingEndPrice — once the increment floor itself
+    // would exceed it, there's no valid amount left to bid and the auction
+    // can only be won by the current leader (the next bid to reach
+    // biddingEndPrice exactly closes the auction immediately — see
+    // AuctionLifecycleService.closeIfExpired).
+    const maxAmount = Decimal.min(uncappedMax, biddingEndPrice);
 
     if (minAmount.greaterThan(maxAmount)) {
       throw new BadRequestException(
-        `Bidding has reached the Instant Buy price of Rs. ${instantBuyPrice.toFixed(2)} — no further bids can be placed on this product.`,
+        `Bidding has reached the maximum bidding price of Rs. ${biddingEndPrice.toFixed(2)} — no further bids can be placed on this product.`,
       );
     }
 

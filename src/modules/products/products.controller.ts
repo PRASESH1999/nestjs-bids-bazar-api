@@ -102,6 +102,21 @@ export class ProductsController {
     return { basePrice: price, instantBuyPrice };
   }
 
+  @Get('products/calculate-bidding-end-price')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Calculate the bidding end price (60% ceiling on regular bidding) for a given base price',
+  })
+  calculateBiddingEndPrice(@Query('basePrice') basePrice: string) {
+    const price = parseFloat(basePrice);
+    if (isNaN(price) || price <= 0) {
+      throw new BadRequestException('basePrice must be a positive number');
+    }
+    const biddingEndPrice = this.productsService.computeBiddingEndPrice(price);
+    return { basePrice: price, biddingEndPrice };
+  }
+
   @Get('products/home/hot-product')
   @Public()
   @UseGuards(OptionalJwtGuard)

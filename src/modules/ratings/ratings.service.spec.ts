@@ -37,6 +37,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     basePrice: 1000,
     biddingStartPrice: 1200,
     instantBuyPrice: 1400,
+    biddingEndPrice: 1600,
     currency: 'NPR',
     biddingDurationHours: 72,
     currentHighestBid: 1300,

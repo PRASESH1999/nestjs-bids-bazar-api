@@ -67,7 +67,25 @@ export class BiddingController {
       );
     }
 
-    return this.biddingService.placeBid(req.user.sub, productId, dto);
+    const bid = await this.biddingService.placeBid(
+      req.user.sub,
+      productId,
+      dto,
+    );
+
+    // If this bid reached biddingEndPrice (the 60% hard ceiling), close the
+    // auction immediately rather than waiting for the once-a-minute cron.
+    // Failures are non-fatal — the cron remains the safety net.
+    try {
+      await this.auctionLifecycleService.closeIfExpired(productId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Post-bid closeIfExpired failed for product ${productId}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    return bid;
   }
 
   // ─── USER: instant buy ────────────────────────────────────────────────────

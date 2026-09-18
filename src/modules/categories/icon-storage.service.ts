@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { extname, join } from 'path';
+import { extname, resolve } from 'path';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -19,11 +20,26 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/webp': '.webp',
 };
 
+const EXT_TO_MIME: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+};
+
 const ICONS_SUBPATH = 'category-icons';
 
 @Injectable()
 export class IconStorageService {
-  private readonly iconsDir = join(process.cwd(), 'public', ICONS_SUBPATH);
+  private readonly baseDir: string;
+
+  constructor(private readonly configService: ConfigService) {
+    this.baseDir = this.configService.get<string>(
+      'UPLOAD_BASE_DIR',
+      './uploads',
+    );
+  }
 
   async saveIcon(file: Express.Multer.File): Promise<string> {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
@@ -40,18 +56,31 @@ export class IconStorageService {
       MIME_TO_EXT[file.mimetype] ||
       '';
     const filename = `${randomUUID()}${ext}`;
+    const relativePath = `${ICONS_SUBPATH}/${filename}`;
 
-    await mkdir(this.iconsDir, { recursive: true });
-    await writeFile(join(this.iconsDir, filename), file.buffer);
+    await mkdir(resolve(this.baseDir, ICONS_SUBPATH), { recursive: true });
+    await writeFile(resolve(this.baseDir, relativePath), file.buffer);
 
-    return `/${ICONS_SUBPATH}/${filename}`;
+    return relativePath;
+  }
+
+  getMimeType(iconPath: string): string {
+    return (
+      EXT_TO_MIME[extname(iconPath).toLowerCase()] || 'application/octet-stream'
+    );
+  }
+
+  getAbsolutePath(iconPath: string): string {
+    // Strip a legacy leading slash (old paths were stored as `/category-icons/…`
+    // for direct static-asset serving) and any traversal attempts.
+    const safe = iconPath.replace(/^\/+/, '').replace(/\.\./g, '');
+    return resolve(this.baseDir, safe);
   }
 
   async deleteIcon(iconPath: string | null): Promise<void> {
     if (!iconPath) return;
-    const filename = iconPath.replace(`/${ICONS_SUBPATH}/`, '');
     try {
-      await unlink(join(this.iconsDir, filename));
+      await unlink(this.getAbsolutePath(iconPath));
     } catch {
       // File may already be gone — ignore
     }

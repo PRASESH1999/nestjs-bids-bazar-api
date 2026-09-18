@@ -12,8 +12,8 @@ trigger: always_on
 ## Management
 - Created, edited, and deleted by ADMIN and SUPERADMIN only.
 - Soft delete via isActive flag — never hard delete (items reference these records).
-- Icons are uploaded images, optional, stored on the local server filesystem and served
-  as public static assets.
+- Icons are uploaded images, optional, stored privately on the local server filesystem
+  and streamed through a dedicated API endpoint (same pattern as product images).
 
 ## Public Access
 - Anyone (including unauthenticated users) can LIST categories and subcategories.
@@ -38,8 +38,12 @@ trigger: always_on
 ## Icon Rules
 - Optional field on both Category and Subcategory.
 - Image upload only (JPEG, PNG, SVG, WebP), max 1 MB.
-- Stored under /public/category-icons/ — served as public static assets.
-- DB stores the relative path (e.g. /category-icons/electronics-uuid.png).
+- Stored under UPLOAD_BASE_DIR/category-icons/ (private, not statically served) — same
+  base directory as product image uploads.
+- DB stores the relative path internally (`iconPath` column), but this is never exposed
+  over the API. Responses expose `iconUrl` instead, an opaque URL to the streaming
+  endpoint: GET /categories/:id/icon or GET /subcategories/:id/icon (both public, no
+  auth required, mirroring GET products/:id/images/:imageId).
 - On update with a new icon, the old icon file is deleted from disk.
 - On category/subcategory delete (soft), icon file remains until hard cleanup.
 
@@ -56,6 +60,8 @@ trigger: always_on
 |---------------------------|--------|------|-------|------------|
 | GET  /categories          | ✅     | ✅   | ✅    | ✅         |
 | GET  /subcategories       | ✅     | ✅   | ✅    | ✅         |
+| GET  /categories/:id/icon | ✅     | ✅   | ✅    | ✅         |
+| GET  /subcategories/:id/icon | ✅  | ✅   | ✅    | ✅         |
 | GET  /categories/:id      | ❌     | ❌   | ✅    | ✅         |
 | GET  /subcategories/:id   | ❌     | ❌   | ✅    | ✅         |
 | GET  /admin/categories    | ❌     | ❌   | ✅    | ✅         |
