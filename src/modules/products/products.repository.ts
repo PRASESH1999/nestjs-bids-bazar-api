@@ -87,7 +87,7 @@ export class ProductsRepository {
       .createQueryBuilder('product')
       .select('product.id', 'id')
       .where('product.status IN (:...statuses)', {
-        statuses: [ProductStatus.PENDING, ProductStatus.ACTIVE],
+        statuses: [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE],
       });
 
     if (excludeIds.length > 0) {
@@ -171,7 +171,7 @@ export class ProductsRepository {
       .leftJoin(Bid, 'bid', 'bid.productId = product.id')
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.status = :status', { status: ProductStatus.PENDING })
+      .where('product.status = :status', { status: ProductStatus.AWAITING_FIRST_BID })
       .groupBy('product.id')
       .orderBy('product.createdAt', 'DESC')
       .limit(limit)
@@ -190,7 +190,7 @@ export class ProductsRepository {
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.isRare = true')
       .andWhere('product.status IN (:...statuses)', {
-        statuses: [ProductStatus.PENDING, ProductStatus.ACTIVE],
+        statuses: [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE],
       })
       .groupBy('product.id')
       .orderBy('product.createdAt', 'DESC')

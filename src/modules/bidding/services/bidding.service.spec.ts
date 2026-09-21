@@ -254,7 +254,7 @@ describe('BiddingService.placeBid — bidding end price cap (60% ceiling)', () =
 
   function makePendingProduct(biddingEndPrice: number) {
     return makeProduct({
-      status: ProductStatus.PENDING,
+      status: ProductStatus.AWAITING_FIRST_BID,
       currentHighestBid: null,
       currentHighestBidderId: null,
       biddingStartPrice: 1000,

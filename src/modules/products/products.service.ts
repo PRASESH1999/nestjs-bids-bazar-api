@@ -67,10 +67,8 @@ export type ProductDetailResponse = Omit<ProductResponse, 'winningBidId'> & {
 
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
   ProductStatus.ACTIVE,
-  ProductStatus.CLOSED,
   ProductStatus.AWAITING_PAYMENT,
   ProductStatus.SETTLED,
-  ProductStatus.PAYMENT_FAILED,
   ProductStatus.ABANDONED,
 ];
 
@@ -317,7 +315,7 @@ export class ProductsService {
       product.reviewedAt = null;
     }
 
-    product.status = ProductStatus.SUBMITTED;
+    product.status = ProductStatus.AWAITING_APPROVAL;
     product.submittedAt = new Date();
 
     const saved = await this.productsRepository.saveProduct(product);
@@ -357,10 +355,9 @@ export class ProductsService {
 
     const withdrawableStatuses: ProductStatus[] = [
       ProductStatus.DRAFT,
-      ProductStatus.SUBMITTED,
+      ProductStatus.AWAITING_APPROVAL,
       ProductStatus.REJECTED,
-      ProductStatus.APPROVED,
-      ProductStatus.PENDING,
+      ProductStatus.AWAITING_FIRST_BID,
     ];
 
     if (!withdrawableStatuses.includes(product.status)) {
@@ -861,15 +858,13 @@ export class ProductsService {
       await this.productsRepository.findByIdWithoutImages(productId);
     if (!product) throw new NotFoundException('Product not found');
 
-    if (product.status !== ProductStatus.SUBMITTED) {
+    if (product.status !== ProductStatus.AWAITING_APPROVAL) {
       throw new BadRequestException(
-        'Only products in SUBMITTED status can be approved',
+        'Only products in AWAITING_APPROVAL status can be approved',
       );
     }
 
-    // APPROVED is transient — immediately transition to PENDING (publicly listed,
-    // awaiting first bid). This avoids a second round-trip.
-    product.status = ProductStatus.PENDING;
+    product.status = ProductStatus.AWAITING_FIRST_BID;
     product.reviewedById = adminId;
     product.reviewedAt = new Date();
     if (dto.isRare !== undefined) product.isRare = dto.isRare;
@@ -906,9 +901,9 @@ export class ProductsService {
       await this.productsRepository.findByIdWithoutImages(productId);
     if (!product) throw new NotFoundException('Product not found');
 
-    if (product.status !== ProductStatus.SUBMITTED) {
+    if (product.status !== ProductStatus.AWAITING_APPROVAL) {
       throw new BadRequestException(
-        'Only products in SUBMITTED status can be rejected',
+        'Only products in AWAITING_APPROVAL status can be rejected',
       );
     }
 

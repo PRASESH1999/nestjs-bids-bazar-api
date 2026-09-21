@@ -144,9 +144,9 @@ describe('ReportsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws BadRequestException when reporting an inactive/closed product (e.g. CLOSED)', async () => {
+    it('throws BadRequestException when reporting an inactive/closed product (e.g. AWAITING_PAYMENT)', async () => {
       mockReportsRepository.findProductById.mockResolvedValue(
-        makeProduct({ status: ProductStatus.CLOSED }),
+        makeProduct({ status: ProductStatus.AWAITING_PAYMENT }),
       );
 
       await expect(

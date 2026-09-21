@@ -41,7 +41,7 @@ type BidRange = {
 const MAX_ACTIVE_BIDS_PER_USER = 10;
 
 // Bidding-open statuses — mirrors the status check earlier in placeBid().
-const ACTIVE_BIDDING_STATUSES = [ProductStatus.PENDING, ProductStatus.ACTIVE];
+const ACTIVE_BIDDING_STATUSES = [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE];
 
 @Injectable()
 export class BiddingService {
@@ -89,7 +89,7 @@ export class BiddingService {
       }
 
       if (
-        product.status !== ProductStatus.PENDING &&
+        product.status !== ProductStatus.AWAITING_FIRST_BID &&
         product.status !== ProductStatus.ACTIVE
       ) {
         throw new BadRequestException(
@@ -193,11 +193,11 @@ export class BiddingService {
         amount: dto.amount,
         placedAt: now,
         previousHighestAmount: previousBidAmount,
-        wasFirstBid: product.status === ProductStatus.PENDING,
+        wasFirstBid: product.status === ProductStatus.AWAITING_FIRST_BID,
         paymentStatus: BidPaymentStatus.NOT_RESPONSIBLE,
       });
 
-      if (product.status === ProductStatus.PENDING) {
+      if (product.status === ProductStatus.AWAITING_FIRST_BID) {
         const biddingDurationHours = this.configService.getOrThrow<number>(
           'BIDDING_DURATION_HOURS',
         );
@@ -538,7 +538,7 @@ export class BiddingService {
     );
     const incrementPercent = new Decimal(String(percentRaw));
 
-    if (product.status === ProductStatus.PENDING) {
+    if (product.status === ProductStatus.AWAITING_FIRST_BID) {
       // biddingStartPrice is already stored as a multiple of 5 — only the
       // computed ceiling needs rounding here.
       const minAmount = new Decimal(String(product.biddingStartPrice));

@@ -247,7 +247,7 @@ export class AuctionLifecycleService {
       }
 
       if (
-        product.status !== ProductStatus.PENDING &&
+        product.status !== ProductStatus.AWAITING_FIRST_BID &&
         product.status !== ProductStatus.ACTIVE
       ) {
         throw new BadRequestException('Product is not open for Instant Buy');
