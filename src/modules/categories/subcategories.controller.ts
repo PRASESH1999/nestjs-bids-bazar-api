@@ -47,6 +47,7 @@ import { PermissionsGuard } from '@common/guards/permissions.guard';
 import { CategoriesService } from './categories.service';
 import { CreateSubcategoryDto } from './dto/create-subcategory.dto';
 import { UpdateSubcategoryDto } from './dto/update-subcategory.dto';
+import { categoryIconHeaders } from '@common/utils/media-headers.util';
 
 @ApiTags('subcategories')
 @Controller('subcategories')
@@ -92,10 +93,7 @@ export class SubcategoriesController {
       throw new NotFoundException('Icon file not found on server');
     }
 
-    res.set({
-      'Content-Type': mimeType,
-      'Content-Disposition': 'inline',
-    });
+    res.set(categoryIconHeaders(mimeType));
 
     return new StreamableFile(createReadStream(absolutePath));
   }

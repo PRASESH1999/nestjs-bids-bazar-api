@@ -47,6 +47,7 @@ import { SetPreviewImageDto } from './dto/set-preview-image.dto';
 import { ReorderImagesDto } from './dto/reorder-images.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
+import { productImageHeaders } from '@common/utils/media-headers.util';
 
 const multerOptions = { storage: memoryStorage() };
 
@@ -236,10 +237,7 @@ export class ProductsController {
       throw new NotFoundException('Image file not found on server');
     }
 
-    res.set({
-      'Content-Type': mimeType,
-      'Content-Disposition': 'inline',
-    });
+    res.set(productImageHeaders(mimeType));
 
     return new StreamableFile(createReadStream(absolutePath));
   }
