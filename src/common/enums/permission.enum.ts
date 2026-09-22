@@ -42,6 +42,10 @@ export enum Permission {
   SETTLEMENT_MANAGE = 'settlement:manage',
   POINTS_ADJUST = 'points:adjust',
 
+  // Boost permissions
+  BOOST_MANAGE_OWN = 'boost:manage_own',
+  BOOST_VIEW_ALL = 'boost:view_all',
+
   // Notification permissions
   NOTIFICATION_VIEW_OWN = 'notification:view_own',
 

@@ -9,6 +9,7 @@ import { CommonModule } from '@common/common.module';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { AuthModule } from '@modules/auth/auth.module';
 import { BiddingModule } from '@modules/bidding/bidding.module';
+import { BoostsModule } from '@modules/boosts/boosts.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
 import { FavoritesModule } from '@modules/favorites/favorites.module';
 import { FonepayModule } from '@modules/fonepay/fonepay.module';
@@ -80,6 +81,7 @@ import { envValidationSchema } from './config/env.validation';
     RewardsModule,
     ReportsModule,
     RatingsModule,
+    BoostsModule,
   ],
   controllers: [AppController],
   providers: [
