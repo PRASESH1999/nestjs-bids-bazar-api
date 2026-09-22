@@ -30,6 +30,7 @@ describe('ProductsService — Instant Buy pricing', () => {
     {} as never,
     {} as never,
     mockFavoritesService as never,
+    {} as never, // boostsService
   );
 
   describe('computeInstantBuyPrice', () => {
@@ -165,6 +166,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       {} as never,
       {} as never,
       mockFavoritesService as never,
+      {} as never, // boostsService
     );
 
     const dto: UpdateProductDto = {
@@ -214,6 +216,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       {} as never,
       {} as never,
       mockFavoritesService as never,
+      {} as never, // boostsService
     );
 
     const dto: UpdateProductDto = { title: 'Updated title' };
@@ -300,6 +303,7 @@ describe('ProductsService — isFavorited flag', () => {
       {} as never,
       {} as never,
       favoritesService as never,
+      {} as never, // boostsService
     );
 
     const result = await service.listPublicProducts({}, 'user-1');
@@ -338,6 +342,7 @@ describe('ProductsService — isFavorited flag', () => {
       {} as never,
       {} as never,
       favoritesService as never,
+      {} as never, // boostsService
     );
 
     const result = await service.listPublicProducts({}, null);
@@ -428,6 +433,7 @@ describe('ProductsService — seller rating summary', () => {
       {} as never,
       {} as never,
       mockFavoritesService as never,
+      {} as never, // boostsService
     );
 
     const result = await service.listPublicProducts({}, null);

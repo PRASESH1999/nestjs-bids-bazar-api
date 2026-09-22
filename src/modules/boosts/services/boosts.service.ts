@@ -289,13 +289,17 @@ export class BoostsService {
 
   // ─── Featured section ──────────────────────────────────────────────────────
 
-  // Boosted products still within their (ACTIVE) boost window AND still
-  // biddable — a product drops out the moment either its boost or its
-  // auction ends, whichever comes first. Ordered by latest boost first.
-  async listFeatured(
+  // Paginated product ids of boosted products still within their (ACTIVE)
+  // boost window AND still biddable — a product drops out the moment either
+  // its boost or its auction ends, whichever comes first. Latest boost
+  // first. Consumed by ProductsService.getFeaturedProducts (GET
+  // /products/home/featured) so the featured section renders through the
+  // same home-page product-card pipeline (images, favorited state, seller
+  // summary, bid count) as trending/new/rare.
+  async getFeaturedProductIds(
     page: number,
     limit: number,
-  ): Promise<PaginatedResult<Product>> {
+  ): Promise<{ ids: string[]; total: number }> {
     const baseQb = () =>
       this.boostItemRepo
         .createQueryBuilder('boostItem')
@@ -316,21 +320,7 @@ export class BoostsService {
       .take(limit)
       .getRawMany<{ productId: string }>();
 
-    const ids = rows.map((row) => row.productId);
-    if (ids.length === 0) return { data: [], meta: { page, limit, total } };
-
-    const products = await this.productRepo.find({
-      where: { id: In(ids) },
-      relations: ['images'],
-      order: { images: { displayOrder: 'ASC' } },
-    });
-    const productsById = new Map(products.map((p) => [p.id, p]));
-
-    const data = ids
-      .map((id) => productsById.get(id))
-      .filter((p): p is Product => p !== undefined);
-
-    return { data, meta: { page, limit, total } };
+    return { ids: rows.map((row) => row.productId), total };
   }
 
   // ─── Admin: boost records ──────────────────────────────────────────────────

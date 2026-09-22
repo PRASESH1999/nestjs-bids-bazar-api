@@ -1,8 +1,6 @@
 import { Public } from '@common/decorators/public.decorator';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
-import { PaginationDto } from '@common/dto/pagination.dto';
 import { Permission } from '@common/enums/permission.enum';
-import { OptionalJwtGuard } from '@common/guards/optional-jwt.guard';
 import { PermissionsGuard } from '@common/guards/permissions.guard';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
 import {
@@ -37,18 +35,10 @@ export class BoostsController {
     return this.boostsService.getPlans();
   }
 
-  @Get('boosts/featured')
-  @Public()
-  @UseGuards(OptionalJwtGuard)
-  @ApiOperation({
-    summary:
-      'Featured section: boosted products, latest boost first. A product ' +
-      'stays featured until its boost window or its auction ends, whichever ' +
-      'comes first.',
-  })
-  async getFeatured(@Query() query: PaginationDto) {
-    return this.boostsService.listFeatured(query.page ?? 1, query.limit ?? 20);
-  }
+  // Featured-section listing lives on ProductsController
+  // (GET /products/home/featured) so it renders through the same home-page
+  // product-card pipeline as trending/new-arrivals/rare-items — see
+  // BoostsService.getFeaturedProductIds for the underlying query.
 
   // ─── Seller endpoints ─────────────────────────────────────────────────────
 
