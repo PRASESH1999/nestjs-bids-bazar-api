@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { DeliveryZone } from '@common/enums/delivery-zone.enum';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
@@ -68,7 +68,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
   };
 }
 
-function makePayment(overrides: Partial<Payment> = {}): Payment {
+function makePayment(overrides: Partial<ProductPayment> = {}): ProductPayment {
   return {
     id: 'payment-1',
     productId: 'product-1',
@@ -94,7 +94,7 @@ function makePayment(overrides: Partial<Payment> = {}): Payment {
     updatedAt: new Date(),
     deletedAt: null,
     ...overrides,
-  } as Payment;
+  } as ProductPayment;
 }
 
 function makeRating(overrides: Partial<SellerRating> = {}): SellerRating {
@@ -198,7 +198,7 @@ describe('RatingsService', () => {
     });
 
     it('allows the same buyer to rate the same seller again via a separate payment', async () => {
-      const paymentsById: Record<string, Payment> = {
+      const paymentsById: Record<string, ProductPayment> = {
         'payment-1': makePayment({ id: 'payment-1' }),
         'payment-2': makePayment({
           id: 'payment-2',

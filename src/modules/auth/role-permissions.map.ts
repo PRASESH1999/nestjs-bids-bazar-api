@@ -37,6 +37,7 @@ export const RolePermissionsMap: Record<Role, Permission[]> = {
     Permission.PRODUCT_VIEW_ALL,
     Permission.BID_VIEW_ALL,
     Permission.PAYMENT_CONFIRM_MANUAL,
+    Permission.PAYMENT_VIEW_ALL,
     Permission.SETTLEMENT_MANAGE,
     Permission.POINTS_ADJUST,
     Permission.REPORT_MANAGE,

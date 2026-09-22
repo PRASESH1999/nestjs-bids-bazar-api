@@ -3,8 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from '@modules/users/users.module';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
 import { Product } from '@modules/products/entities/product.entity';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Bid } from './entities/bid.entity';
+import { ProductSettlement } from './entities/product-settlement.entity';
 import { BiddingController } from './bidding.controller';
 import { BiddingService } from './services/bidding.service';
 import { AuctionLifecycleService } from './services/auction-lifecycle.service';
@@ -16,7 +17,7 @@ import { AuctionSettledHandler } from './handlers/auction-settled.handler';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Bid, Product, Payment]),
+    TypeOrmModule.forFeature([Bid, Product, ProductPayment, ProductSettlement]),
     UsersModule,
     NotificationsModule,
   ],

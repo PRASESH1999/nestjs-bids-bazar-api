@@ -3,10 +3,10 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
-import { Payment } from '../entities/payment.entity';
+import { ProductPayment } from '../entities/product-payment.entity';
 import { PaymentsService } from '../services/payments.service';
 
-// How often to scan for overdue Payment rows (every 10 minutes)
+// How often to scan for overdue ProductPayment rows (every 10 minutes)
 const PAYMENTS_EXPIRY_CRON = '*/10 * * * *';
 
 @Injectable()
@@ -14,19 +14,19 @@ export class PaymentsCron {
   private readonly logger = new Logger(PaymentsCron.name);
 
   constructor(
-    @InjectRepository(Payment)
-    private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(ProductPayment)
+    private readonly paymentRepo: Repository<ProductPayment>,
     private readonly paymentsService: PaymentsService,
   ) {}
 
   /**
-   * Mark PENDING Fonepay Payment rows EXPIRED when their payment window passes.
+   * Mark PENDING Fonepay ProductPayment rows EXPIRED when their payment window passes.
    *
    * This is complementary to AuctionLifecycleCron.expireOverduePayments() which
    * handles the Bid-level promotion (next winner selection). That cron also emits
    * the WIN_TRANSFERRED event via AuctionLifecycleService.handlePaymentExpiry().
    *
-   * This cron only updates the Payment table and closes any stale sockets.
+   * This cron only updates the ProductPayment table and closes any stale sockets.
    * It is idempotent — running it multiple times for the same payment is safe.
    */
   @Cron(PAYMENTS_EXPIRY_CRON)

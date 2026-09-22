@@ -20,12 +20,20 @@ import type {
   WinTransferredPayload,
 } from '@common/events/event-payloads.type';
 import { NotificationType } from '@common/enums/notification-type.enum';
+import { SettlementStatus } from '@common/enums/settlement-status.enum';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { NotificationsService } from '@modules/notifications/notifications.service';
 import { Bid } from '../entities/bid.entity';
+import { ProductSettlement } from '../entities/product-settlement.entity';
+
+// A fallback round's rank is capped at 2 (0 = original winner, 1 = 2nd
+// bidder, 2 = 3rd bidder). If the 3rd bidder also fails to pay, the product
+// goes straight to ABANDONED — no 4th round is ever created, regardless of
+// how many more distinct bidders exist below it.
+const MAX_FALLBACK_RANK = 2;
 
 @Injectable()
 export class AuctionLifecycleService {
@@ -129,6 +137,18 @@ export class AuctionLifecycleService {
 
       await qr.manager.getRepository(Bid).save(highestBid);
       await qr.manager.getRepository(Product).save(product);
+
+      const settlement = qr.manager.getRepository(ProductSettlement).create({
+        productId: product.id,
+        sellerId: product.ownerId,
+        bidId: highestBid.id,
+        bidWinnerId: highestBid.bidderId,
+        fallbackRank: 0,
+        amount: highestBid.amount,
+        status: SettlementStatus.PENDING_PAYMENT,
+        paymentDeadline: computedDeadline,
+      });
+      await qr.manager.getRepository(ProductSettlement).save(settlement);
 
       if (isOwnQr) await qr.commitTransaction();
 
@@ -328,6 +348,18 @@ export class AuctionLifecycleService {
 
       savedProduct = await qr.manager.getRepository(Product).save(product);
 
+      const settlement = qr.manager.getRepository(ProductSettlement).create({
+        productId: product.id,
+        sellerId: product.ownerId,
+        bidId: savedBid.id,
+        bidWinnerId: buyerId,
+        fallbackRank: 0,
+        amount: instantBuyPrice,
+        status: SettlementStatus.PENDING_PAYMENT,
+        paymentDeadline: computedDeadline,
+      });
+      await qr.manager.getRepository(ProductSettlement).save(settlement);
+
       await qr.commitTransaction();
 
       winnerId = buyerId;
@@ -472,27 +504,55 @@ export class AuctionLifecycleService {
       failedBidderId = responsibleBid.bidderId;
       responsibleBid.paymentStatus = BidPaymentStatus.EXPIRED;
       responsibleBid.isCurrentlyPaymentResponsible = false;
+      // Saved before the fallback lookup below so that lookup's "already had
+      // a turn" exclusion sees this bidder as EXPIRED within the same transaction.
+      await qr.manager.getRepository(Bid).save(responsibleBid);
+
+      const currentSettlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .findOne({ where: { bidId: responsibleBid.id } });
+      if (currentSettlement) {
+        currentSettlement.status = SettlementStatus.EXPIRED;
+        currentSettlement.resolvedAt = now;
+        await qr.manager
+          .getRepository(ProductSettlement)
+          .save(currentSettlement);
+      }
+
+      // Cap: round rank 2 (the 3rd bidder) is the last chance — no 4th round.
+      const cascadeExhausted = responsibleBid.fallbackRank >= MAX_FALLBACK_RANK;
 
       // Instant Buy never falls back to another bidder — the auction closed
       // to exactly one buyer at click time, even if other (now
       // NOT_RESPONSIBLE) bids exist below it. Skip the fallback search
-      // entirely and go straight to ABANDONED.
-      const nextBid = responsibleBid.isInstantBuy
-        ? null
-        : await qr.manager
-            .getRepository(Bid)
-            .createQueryBuilder('bid')
-            .where(
-              'bid.productId = :productId AND bid.paymentStatus = :status AND bid.id != :id',
-              {
-                productId,
+      // entirely and go straight to ABANDONED. Same for a cascade that has
+      // already used up its 3 rounds.
+      //
+      // The fallback candidate is chosen by UNIQUE BIDDER, not by raw bid
+      // row: a bidder who already had (and failed) a turn is excluded
+      // entirely, even if they have another, lower bid still sitting as
+      // NOT_RESPONSIBLE — otherwise the win could cycle back to someone who
+      // already proved they wouldn't pay.
+      const nextBid =
+        responsibleBid.isInstantBuy || cascadeExhausted
+          ? null
+          : await qr.manager
+              .getRepository(Bid)
+              .createQueryBuilder('bid')
+              .where('bid.productId = :productId', { productId })
+              .andWhere('bid.paymentStatus = :status', {
                 status: BidPaymentStatus.NOT_RESPONSIBLE,
-                id: responsibleBid.id,
-              },
-            )
-            .orderBy('bid.amount', 'DESC')
-            .addOrderBy('bid.placedAt', 'ASC')
-            .getOne();
+              })
+              .andWhere(
+                `bid.bidderId NOT IN (
+                  SELECT b2."bidderId" FROM bids b2
+                  WHERE b2."productId" = :productId AND b2."paymentStatus" = :expiredStatus
+                )`,
+                { productId, expiredStatus: BidPaymentStatus.EXPIRED },
+              )
+              .orderBy('bid.amount', 'DESC')
+              .addOrderBy('bid.placedAt', 'ASC')
+              .getOne();
 
       if (nextBid) {
         const paymentWindowHours = this.configService.getOrThrow<number>(
@@ -507,8 +567,21 @@ export class AuctionLifecycleService {
         nextBid.paymentStatus = BidPaymentStatus.PENDING;
         nextBid.paymentDeadline = computedDeadline;
 
-        await qr.manager.getRepository(Bid).save(responsibleBid);
         await qr.manager.getRepository(Bid).save(nextBid);
+
+        const nextSettlement = qr.manager
+          .getRepository(ProductSettlement)
+          .create({
+            productId: product.id,
+            sellerId: product.ownerId,
+            bidId: nextBid.id,
+            bidWinnerId: nextBid.bidderId,
+            fallbackRank: nextBid.fallbackRank,
+            amount: nextBid.amount,
+            status: SettlementStatus.PENDING_PAYMENT,
+            paymentDeadline: computedDeadline,
+          });
+        await qr.manager.getRepository(ProductSettlement).save(nextSettlement);
 
         if (isOwnQr) await qr.commitTransaction();
 
@@ -526,7 +599,6 @@ export class AuctionLifecycleService {
         product.status = ProductStatus.ABANDONED;
         product.abandonedAt = now;
 
-        await qr.manager.getRepository(Bid).save(responsibleBid);
         await qr.manager.getRepository(Product).save(product);
 
         if (isOwnQr) await qr.commitTransaction();
@@ -677,7 +749,7 @@ export class AuctionLifecycleService {
         label += chars[bytes[i] % chars.length];
       }
       const exists = await qr.manager
-        .getRepository(Payment)
+        .getRepository(ProductPayment)
         .findOne({ where: { referenceLabel: label } });
       if (!exists) return label;
     }
@@ -754,15 +826,31 @@ export class AuctionLifecycleService {
 
       savedProduct = await qr.manager.getRepository(Product).save(product);
 
-      // Create a matching Payment/settlement record so this sale flows
-      // through the same seller-settlement + points/commission pipeline as
-      // a gateway-paid sale (RewardsModule queries Payment for pending
-      // settlements — this path has no Fonepay-generated Payment row
+      const currentSettlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .findOne({ where: { bidId: responsibleBid.id } });
+      if (!currentSettlement) {
+        throw new InternalServerErrorException(
+          'No settlement round found for the responsible bid — data inconsistency',
+        );
+      }
+      currentSettlement.status = SettlementStatus.SETTLED;
+      currentSettlement.resolvedAt = now;
+      await qr.manager
+        .getRepository(ProductSettlement)
+        .save(currentSettlement);
+
+      // Create a matching ProductPayment record so this sale flows through
+      // the same seller-settlement + points/commission pipeline as a
+      // gateway-paid sale (RewardsModule queries ProductPayment for pending
+      // settlements — this path has no Fonepay-generated payment row
       // otherwise). sellerPaidAt stays null: settlement-to-seller is a
       // separate, later admin action (see RewardsService.markSellerPaid).
       const referenceLabel = await this.generateManualReferenceLabel(qr);
-      const manualPayment = qr.manager.getRepository(Payment).create({
+      const manualPayment = qr.manager.getRepository(ProductPayment).create({
         productId,
+        productSettlementId: currentSettlement.id,
+        sellerId: product.ownerId,
         winnerUserId: responsibleBid.bidderId,
         amount: Number(responsibleBid.amount),
         referenceLabel,
@@ -775,7 +863,7 @@ export class AuctionLifecycleService {
         deliveryZone,
         deliveryCharge: this.resolveDeliveryCharge(deliveryZone),
       });
-      await qr.manager.getRepository(Payment).save(manualPayment);
+      await qr.manager.getRepository(ProductPayment).save(manualPayment);
 
       await qr.commitTransaction();
 
@@ -856,8 +944,19 @@ export class AuctionLifecycleService {
    *
    * Throws BadRequestException if the product is not in AWAITING_PAYMENT status
    * (callers should handle this as a no-op if the product is already SETTLED).
+   *
+   * `expectedProductSettlementId`, when passed, must match the settlement
+   * round currently responsible for this product. A Fonepay QR is never
+   * cancelled when the win cascades to a new bidder (Fonepay has no cancel
+   * API), so a stale, superseded QR can still be paid late — without this
+   * check, that payment would silently settle the product to whoever is
+   * CURRENTLY responsible instead of the person who actually paid. Passing
+   * this rejects that mismatch instead of settling on stale/incorrect data.
    */
-  async confirmPaymentGateway(productId: string): Promise<Product> {
+  async confirmPaymentGateway(
+    productId: string,
+    expectedProductSettlementId?: string,
+  ): Promise<Product> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -897,6 +996,24 @@ export class AuctionLifecycleService {
         );
       }
 
+      const currentSettlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .findOne({ where: { bidId: responsibleBid.id } });
+      if (!currentSettlement) {
+        throw new InternalServerErrorException(
+          'No settlement round found for the responsible bid — data inconsistency',
+        );
+      }
+
+      if (
+        expectedProductSettlementId !== undefined &&
+        expectedProductSettlementId !== currentSettlement.id
+      ) {
+        throw new BadRequestException(
+          'This payment is for a settlement round that is no longer active — the win has since moved to a different bidder',
+        );
+      }
+
       const now = new Date();
 
       responsibleBid.paymentStatus = BidPaymentStatus.CONFIRMED;
@@ -919,6 +1036,12 @@ export class AuctionLifecycleService {
           id: responsibleBid.id,
         })
         .execute();
+
+      currentSettlement.status = SettlementStatus.SETTLED;
+      currentSettlement.resolvedAt = now;
+      await qr.manager
+        .getRepository(ProductSettlement)
+        .save(currentSettlement);
 
       savedProduct = await qr.manager.getRepository(Product).save(product);
 
@@ -988,6 +1111,20 @@ export class AuctionLifecycleService {
     }
 
     return savedProduct;
+  }
+
+  // ─── Admin: settlement round history ───────────────────────────────────────
+
+  // Full per-round history for a product — every winner offered the win, in
+  // order, and how each round resolved. Unlike Bid's live columns (which
+  // only expose current state), this is the append-only trail: admin views
+  // this on a sold product's detail page.
+  async getSettlementHistory(productId: string): Promise<ProductSettlement[]> {
+    return this.dataSource.getRepository(ProductSettlement).find({
+      where: { productId },
+      relations: ['bidWinner'],
+      order: { fallbackRank: 'ASC' },
+    });
   }
 
   // ─── Cron-friendly batch helpers ─────────────────────────────────────────

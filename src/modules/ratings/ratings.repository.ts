@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, In, Repository } from 'typeorm';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { User } from '@modules/users/entities/user.entity';
 import { SellerRating } from './entities/seller-rating.entity';
 
@@ -15,14 +15,14 @@ export interface CreateRatingData {
 @Injectable()
 export class RatingsRepository {
   private readonly repo: Repository<SellerRating>;
-  private readonly paymentRepo: Repository<Payment>;
+  private readonly paymentRepo: Repository<ProductPayment>;
 
   constructor(private readonly dataSource: DataSource) {
     this.repo = this.dataSource.getRepository(SellerRating);
-    this.paymentRepo = this.dataSource.getRepository(Payment);
+    this.paymentRepo = this.dataSource.getRepository(ProductPayment);
   }
 
-  async findPaymentWithProduct(paymentId: string): Promise<Payment | null> {
+  async findPaymentWithProduct(paymentId: string): Promise<ProductPayment | null> {
     return this.paymentRepo.findOne({
       where: { id: paymentId },
       relations: ['product'],

@@ -8,6 +8,7 @@ import type {
   PaymentSucceededPayload,
 } from '@common/events/event-payloads.type';
 import { Bid } from '@modules/bidding/entities/bid.entity';
+import { ProductSettlement } from '@modules/bidding/entities/product-settlement.entity';
 import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
 import type { FonepayPaymentStatusResponse } from '@modules/fonepay/dto/fonepay.dto';
 import { FonepayClientService } from '@modules/fonepay/services/fonepay-client.service';
@@ -27,11 +28,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
 import { DataSource, Repository } from 'typeorm';
 import { WebSocket } from 'ws';
+import { PaginatedResult } from '@common/types/paginated-result.type';
 import type {
   InitiatePaymentResponseDto,
   PaymentStatusResponseDto,
 } from '../dto/payment.dto';
-import { Payment } from '../entities/payment.entity';
+import {
+  ListPaymentsAdminQueryDto,
+  SortOrder,
+} from '../dto/list-payments-admin.query.dto';
+import { ProductPayment } from '../entities/product-payment.entity';
 
 @Injectable()
 export class PaymentsService implements OnModuleInit {
@@ -45,12 +51,14 @@ export class PaymentsService implements OnModuleInit {
   private static readonly MAX_RECONNECT_ATTEMPTS = 5;
 
   constructor(
-    @InjectRepository(Payment)
-    private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(ProductPayment)
+    private readonly paymentRepo: Repository<ProductPayment>,
     @InjectRepository(Bid)
     private readonly bidRepo: Repository<Bid>,
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
+    @InjectRepository(ProductSettlement)
+    private readonly settlementRepo: Repository<ProductSettlement>,
     private readonly dataSource: DataSource,
     private readonly fonepayClientService: FonepayClientService,
     private readonly auctionLifecycleService: AuctionLifecycleService,
@@ -133,6 +141,18 @@ export class PaymentsService implements OnModuleInit {
       );
     }
 
+    // Resolve the settlement round this attempt belongs to — stamped onto
+    // the ProductPayment row so a later gateway confirmation can verify it's
+    // still for the currently-active round, not a stale/superseded one.
+    const activeSettlement = await this.settlementRepo.findOne({
+      where: { productId, bidId: responsibleBid.id },
+    });
+    if (!activeSettlement) {
+      throw new BadRequestException(
+        'No active settlement round found for this product',
+      );
+    }
+
     // Check the deadline
     const now = new Date();
     if (
@@ -179,9 +199,11 @@ export class PaymentsService implements OnModuleInit {
       referenceLabel,
     });
 
-    // Persist the Payment row
+    // Persist the ProductPayment row
     const payment = this.paymentRepo.create({
       productId,
+      productSettlementId: activeSettlement.id,
+      sellerId: product.ownerId,
       winnerUserId: requestingUserId,
       amount: Number(responsibleBid.amount),
       referenceLabel,
@@ -224,10 +246,15 @@ export class PaymentsService implements OnModuleInit {
     if (!payment) return;
     if (payment.status === PaymentStatus.SUCCESS) return; // idempotent
 
-    // Settle the product via the auction lifecycle (has its own transaction)
+    // Settle the product via the auction lifecycle (has its own transaction).
+    // Passing productSettlementId lets confirmPaymentGateway reject this if
+    // the win has since moved to a different bidder (stale/superseded QR
+    // paid late) instead of incorrectly settling to whoever is currently
+    // responsible.
     try {
       await this.auctionLifecycleService.confirmPaymentGateway(
         payment.productId,
+        payment.productSettlementId,
       );
     } catch (err: unknown) {
       // If product is already SETTLED (parallel admin confirmation or duplicate WS message)
@@ -241,6 +268,7 @@ export class PaymentsService implements OnModuleInit {
           err instanceof Error ? err.stack : String(err),
         );
         // Don't mark the Payment SUCCESS if we couldn't settle the product
+        // (e.g. this was a stale round — see confirmPaymentGateway's check)
         return;
       }
     }
@@ -348,9 +376,48 @@ export class PaymentsService implements OnModuleInit {
     this.logger.log(`expirePayment: payment ${paymentId} marked EXPIRED`);
   }
 
+  // ─── Admin: payment records (includes FAILED/EXPIRED attempts) ────────────
+
+  async listAllPayments(
+    query: ListPaymentsAdminQueryDto,
+  ): Promise<PaginatedResult<ProductPayment>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const sortBy = query.sortBy ?? 'createdAt';
+    const sortOrder: SortOrder = query.sortOrder ?? SortOrder.DESC;
+
+    const qb = this.paymentRepo
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.winner', 'winner')
+      .leftJoinAndSelect('payment.seller', 'seller')
+      .leftJoinAndSelect('payment.product', 'product');
+
+    if (query.productId) {
+      qb.andWhere('payment.productId = :productId', {
+        productId: query.productId,
+      });
+    }
+    if (query.winnerUserId) {
+      qb.andWhere('payment.winnerUserId = :winnerUserId', {
+        winnerUserId: query.winnerUserId,
+      });
+    }
+    if (query.status) {
+      qb.andWhere('payment.status = :status', { status: query.status });
+    }
+
+    qb.orderBy(`payment.${sortBy}`, sortOrder)
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return { data, meta: { page, limit, total } };
+  }
+
   // ─── Fonepay WebSocket management ─────────────────────────────────────────
 
-  private openFonepaySocket(payment: Payment, attempt = 0): void {
+  private openFonepaySocket(payment: ProductPayment, attempt = 0): void {
     if (!payment.websocketUrl) return;
 
     this.reconnectAttempts.set(payment.id, attempt);
@@ -467,7 +534,7 @@ export class PaymentsService implements OnModuleInit {
     );
   }
 
-  private toInitiateResponse(p: Payment): InitiatePaymentResponseDto {
+  private toInitiateResponse(p: ProductPayment): InitiatePaymentResponseDto {
     return {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
@@ -479,7 +546,7 @@ export class PaymentsService implements OnModuleInit {
     };
   }
 
-  private toStatusResponse(p: Payment): PaymentStatusResponseDto {
+  private toStatusResponse(p: ProductPayment): PaymentStatusResponseDto {
     return {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,

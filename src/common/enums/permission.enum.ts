@@ -36,6 +36,7 @@ export enum Permission {
   BID_VIEW_ALL = 'bid:view_all',
   PAYMENT_INITIATE = 'payment:initiate',
   PAYMENT_CONFIRM_MANUAL = 'payment:confirm_manual',
+  PAYMENT_VIEW_ALL = 'payment:view_all',
 
   // Rewards permissions (Rule 16)
   SETTLEMENT_MANAGE = 'settlement:manage',

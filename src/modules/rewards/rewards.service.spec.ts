@@ -1,6 +1,6 @@
 import { SellerTier } from '@common/enums/seller-tier.enum';
 import { Product } from '@modules/products/entities/product.entity';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { RewardsService } from './rewards.service';
 
 describe('RewardsService — tier resolution & commission', () => {
@@ -36,7 +36,7 @@ describe('RewardsService — tier resolution & commission', () => {
   describe('calculateCommission (worked example from the agreed spec)', () => {
     it('reproduces basePrice 100 -> biddingStartPrice 120 -> soldPrice 150 -> payout 110', () => {
       const product = { basePrice: 100 } as Product;
-      const payment = { amount: 150 } as Payment;
+      const payment = { amount: 150 } as ProductPayment;
 
       // Seller has 0 pre-existing points -> Bronze, 20% band.
       const result = service.calculateCommission(product, payment, 0);
@@ -49,7 +49,7 @@ describe('RewardsService — tier resolution & commission', () => {
 
     it('prices the sale off the CURRENT (pre-this-sale) tier, not a hypothetical post-sale one', () => {
       const product = { basePrice: 100 } as Product;
-      const payment = { amount: 150 } as Payment;
+      const payment = { amount: 150 } as ProductPayment;
 
       // Seller already has 3000 points (Gold, 50%) BEFORE this sale.
       const result = service.calculateCommission(product, payment, 3000);
@@ -62,7 +62,7 @@ describe('RewardsService — tier resolution & commission', () => {
       const basePrice = 100;
       const instantBuyPrice = basePrice * 1.4;
       const product = { basePrice } as Product;
-      const payment = { amount: instantBuyPrice } as Payment;
+      const payment = { amount: instantBuyPrice } as ProductPayment;
 
       const result = service.calculateCommission(product, payment, 0);
 

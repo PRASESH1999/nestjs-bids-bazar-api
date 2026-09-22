@@ -7,6 +7,7 @@ import { Product } from '@modules/products/entities/product.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { NotificationsService } from '@modules/notifications/notifications.service';
 import { Bid } from '../entities/bid.entity';
+import { ProductSettlement } from '../entities/product-settlement.entity';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
 
 // Same fluent-stub approach as bidding.service.spec.ts — every chain method
@@ -76,6 +77,11 @@ function buildService(product: Product, highestBid: Bid | null) {
     createQueryBuilder: jest.fn(() => makeQueryBuilder({ getOne: highestBid })),
     save: jest.fn((b: Bid) => b),
   };
+  const settlementRepo = {
+    create: jest.fn((s: Partial<ProductSettlement>) => s as ProductSettlement),
+    save: jest.fn((s: ProductSettlement) => s),
+    findOne: jest.fn().mockResolvedValue(null),
+  };
 
   const qr = {
     connect: jest.fn(),
@@ -87,6 +93,7 @@ function buildService(product: Product, highestBid: Bid | null) {
       getRepository: jest.fn((entity: unknown) => {
         if (entity === Product) return productRepo;
         if (entity === Bid) return bidRepo;
+        if (entity === ProductSettlement) return settlementRepo;
         throw new Error('Unexpected repository requested in test');
       }),
     },
@@ -108,7 +115,7 @@ function buildService(product: Product, highestBid: Bid | null) {
     notificationsService,
   );
 
-  return { service, qr, productRepo, bidRepo };
+  return { service, qr, productRepo, bidRepo, settlementRepo };
 }
 
 describe('AuctionLifecycleService.closeIfExpired — two independent close triggers', () => {
@@ -137,7 +144,10 @@ describe('AuctionLifecycleService.closeIfExpired — two independent close trigg
       biddingEndsAt: new Date('2000-01-01T00:00:00Z'), // in the past
     });
     const highestBid = makeBid({ amount: 1000 });
-    const { service, productRepo, bidRepo } = buildService(product, highestBid);
+    const { service, productRepo, bidRepo, settlementRepo } = buildService(
+      product,
+      highestBid,
+    );
 
     await service.closeIfExpired('product-1');
 
@@ -149,6 +159,9 @@ describe('AuctionLifecycleService.closeIfExpired — two independent close trigg
         isCurrentlyPaymentResponsible: true,
         paymentStatus: BidPaymentStatus.PENDING,
       }),
+    );
+    expect(settlementRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ fallbackRank: 0, bidId: highestBid.id }),
     );
   });
 

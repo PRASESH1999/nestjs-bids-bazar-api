@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
 import { UserRewards } from './entities/user-rewards.entity';
 import { PointsTransaction } from './entities/points-transaction.entity';
@@ -12,7 +12,7 @@ import { AdminRewardsController } from './admin-rewards.controller';
     TypeOrmModule.forFeature([
       UserRewards,
       PointsTransaction,
-      Payment,
+      ProductPayment,
       Product,
     ]),
   ],

@@ -4,19 +4,21 @@ import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
+import { ProductSettlement } from '@modules/bidding/entities/product-settlement.entity';
 
-@Entity('payments')
+@Entity('product_payments')
 @Index(['productId', 'status'])
 @Index(['winnerUserId', 'status'])
-// Partial unique index: at most one PENDING (in-flight QR attempt) per product at a time.
-// SUCCESS payments are guarded at the service layer — initiatePayment must reject if a
-// SUCCESS row already exists for this product, regardless of winner.
-@Index(['productId'], {
+// Partial unique index: at most one PENDING (in-flight QR attempt) per
+// settlement round at a time — scoped to the round, not the product, so a
+// new round's payment attempt is never blocked by a prior round's row that
+// hasn't been cron-expired yet.
+@Index(['productSettlementId'], {
   where: `"status" = 'PENDING'`,
   unique: true,
 })
-export class Payment extends BaseEntity {
-  // ─── Product & winner ─────────────────────────────────────────────────────
+export class ProductPayment extends BaseEntity {
+  // ─── Product, settlement round & winner ────────────────────────────────────
 
   @Index()
   @Column({ type: 'uuid' })
@@ -29,6 +31,30 @@ export class Payment extends BaseEntity {
   })
   @JoinColumn({ name: 'productId' })
   product: Product;
+
+  // The settlement round (fallback rank) this payment attempt belongs to.
+  // Used to verify a gateway confirmation still matches the currently-active
+  // round before settling — see AuctionLifecycleService.confirmPaymentGateway.
+  @Index()
+  @Column({ type: 'uuid' })
+  productSettlementId: string;
+
+  @ManyToOne(() => ProductSettlement, {
+    onDelete: 'RESTRICT',
+    nullable: false,
+    eager: false,
+  })
+  @JoinColumn({ name: 'productSettlementId' })
+  productSettlement: ProductSettlement;
+
+  @Column({ type: 'uuid' })
+  sellerId: string;
+
+  // Denormalized from product.ownerId at initiation time — avoids a join for
+  // admin payment-records views.
+  @ManyToOne(() => User, { nullable: false, eager: false })
+  @JoinColumn({ name: 'sellerId' })
+  seller: User;
 
   @Index()
   @Column({ type: 'uuid' })

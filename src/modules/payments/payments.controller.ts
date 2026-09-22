@@ -15,6 +15,7 @@ import { PermissionsGuard } from '@common/guards/permissions.guard';
 import type { RequestWithUser } from '@common/interfaces/request-with-user.interface';
 import { PaymentsService } from './services/payments.service';
 import { GetBanksQueryDto, InitiatePaymentDto } from './dto/payment.dto';
+import { ListPaymentsAdminQueryDto } from './dto/list-payments-admin.query.dto';
 import { FonepayClientService } from '@modules/fonepay/services/fonepay-client.service';
 
 @ApiTags('payments')
@@ -79,5 +80,19 @@ export class PaymentsController {
     @Request() req: RequestWithUser,
   ) {
     return this.paymentsService.getStatus(productId, req.user.sub);
+  }
+
+  /**
+   * Admin payment-records page — every attempt, including FAILED/EXPIRED
+   * ones, so admins can spot patterns in payment failures.
+   */
+  @Get('admin/all')
+  @RequirePermissions(Permission.PAYMENT_VIEW_ALL)
+  @ApiOperation({
+    summary:
+      'Admin: list all payment records with optional filters and pagination (includes failed/expired attempts)',
+  })
+  async listAllPayments(@Query() query: ListPaymentsAdminQueryDto) {
+    return this.paymentsService.listAllPayments(query);
   }
 }

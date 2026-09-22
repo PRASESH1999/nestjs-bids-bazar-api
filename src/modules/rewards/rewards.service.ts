@@ -12,7 +12,7 @@ import { SellerTier } from '@common/enums/seller-tier.enum';
 import { PointsTransactionType } from '@common/enums/points-transaction-type.enum';
 import { EventNames } from '@common/events/event-names';
 import type { SellerMarkedPaidPayload } from '@common/events/event-payloads.type';
-import { Payment } from '@modules/payments/entities/payment.entity';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
 import { UserRewards } from './entities/user-rewards.entity';
 import { PointsTransaction } from './entities/points-transaction.entity';
@@ -74,7 +74,7 @@ export class RewardsService {
   // this sale's own points only affect the NEXT sale (see Rule 16).
   calculateCommission(
     product: Product,
-    payment: Payment,
+    payment: ProductPayment,
     sellerPoints: number,
   ): CommissionResult {
     const basePrice = Number(product.basePrice);
@@ -93,22 +93,22 @@ export class RewardsService {
    * paid the seller offline (per the reference sellerPayoutAmount computed
    * here) — NOT automatically on gateway payment success.
    */
-  async markSellerPaid(paymentId: string, adminId: string): Promise<Payment> {
+  async markSellerPaid(paymentId: string, adminId: string): Promise<ProductPayment> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
 
     let payload: SellerMarkedPaidPayload | null = null;
-    let savedPayment: Payment;
+    let savedPayment: ProductPayment;
 
     try {
-      const payment = await qr.manager.getRepository(Payment).findOne({
+      const payment = await qr.manager.getRepository(ProductPayment).findOne({
         where: { id: paymentId },
       });
-      if (!payment) throw new NotFoundException('Payment not found');
+      if (!payment) throw new NotFoundException('ProductPayment not found');
       if (payment.status !== PaymentStatus.SUCCESS) {
         throw new BadRequestException(
-          'Payment has not succeeded — cannot settle seller payout yet',
+          'ProductPayment has not succeeded — cannot settle seller payout yet',
         );
       }
       if (payment.sellerPaidAt) {
@@ -186,7 +186,7 @@ export class RewardsService {
       payment.sellerPayoutAmount = commission.sellerPayoutAmount;
       payment.sellerCommissionPercent = commission.commissionPercent;
 
-      savedPayment = await qr.manager.getRepository(Payment).save(payment);
+      savedPayment = await qr.manager.getRepository(ProductPayment).save(payment);
 
       await qr.commitTransaction();
 
@@ -267,8 +267,8 @@ export class RewardsService {
       .findOne({ where: { userId } });
   }
 
-  async listPendingSettlements(): Promise<Payment[]> {
-    return this.dataSource.getRepository(Payment).find({
+  async listPendingSettlements(): Promise<ProductPayment[]> {
+    return this.dataSource.getRepository(ProductPayment).find({
       where: { status: PaymentStatus.SUCCESS, sellerPaidAt: IsNull() },
       order: { createdAt: 'ASC' },
     });

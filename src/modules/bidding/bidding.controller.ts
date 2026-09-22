@@ -183,6 +183,19 @@ export class BiddingController {
     return this.biddingService.getBidsForProduct(productId, 'admin');
   }
 
+  // ─── ADMIN: settlement round history (who won, in order, and how each
+  // round resolved — abandoned/settled) ──────────────────────────────────────
+
+  @Get('admin/products/:id/settlements')
+  @RequirePermissions(Permission.BID_VIEW_ALL)
+  @ApiOperation({
+    summary:
+      'Admin: get the full settlement-round history for a product (winner cascade + payment outcome per round)',
+  })
+  async adminGetSettlementHistory(@Param('id') productId: string) {
+    return this.auctionLifecycleService.getSettlementHistory(productId);
+  }
+
   // ─── ADMIN: confirm payment manually ─────────────────────────────────────
 
   @Post('admin/products/:id/confirm-payment')
