@@ -13,6 +13,10 @@ interface HttpExceptionResponseBody {
   message?: string;
   errorCode?: string;
   fields?: { field: string; message: string }[];
+  // A bare list of field names, as thrown by the product submission gate. Kept
+  // distinct from `fields` (which pairs a name with a message) rather than
+  // flattened into it, so a client can act on the names directly.
+  missingFields?: string[];
 }
 
 interface PostgresQueryError extends QueryFailedError {
@@ -32,6 +36,7 @@ export class GlobalExceptionFilter implements ExceptionFilter<unknown> {
     let message = 'Internal server error';
     let code = 'INTERNAL_SERVER_ERROR';
     let fields: { field: string; message: string }[] | undefined;
+    let missingFields: string[] | undefined;
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
@@ -41,6 +46,10 @@ export class GlobalExceptionFilter implements ExceptionFilter<unknown> {
         message = res.message ?? exception.message;
         code = res.errorCode ?? this.getErrorCodeFromStatus(statusCode);
         fields = res.fields;
+        // Was silently dropped here, so the submission gate's carefully
+        // computed field list never reached a client and every caller had to
+        // re-derive it. See OPEN-ITEMS A20.
+        missingFields = res.missingFields;
       } else {
         message = String(rawRes);
         code = this.getErrorCodeFromStatus(statusCode);
@@ -77,6 +86,7 @@ export class GlobalExceptionFilter implements ExceptionFilter<unknown> {
         message,
         statusCode,
         ...(fields ? { fields } : {}),
+        ...(missingFields ? { missingFields } : {}),
         ...(process.env.NODE_ENV === 'development'
           ? { stack: errorStack }
           : {}),

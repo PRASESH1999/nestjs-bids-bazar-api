@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from '@modules/users/users.module';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
+import { RatingsModule } from '@modules/ratings/ratings.module';
 import { Product } from '@modules/products/entities/product.entity';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Bid } from './entities/bid.entity';
@@ -20,6 +21,9 @@ import { AuctionSettledHandler } from './handlers/auction-settled.handler';
     TypeOrmModule.forFeature([Bid, Product, ProductPayment, ProductSettlement]),
     UsersModule,
     NotificationsModule,
+    // For the hasRated/canRate context on GET /bids/me (OPEN-ITEMS A15).
+    // RatingsModule takes no dependency on this one, so there is no cycle.
+    RatingsModule,
   ],
   controllers: [BiddingController],
   providers: [

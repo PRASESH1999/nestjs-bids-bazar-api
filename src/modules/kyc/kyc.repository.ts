@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { KycStatus } from '@common/enums/kyc-status.enum';
 import { BankDetail } from './entities/bank-detail.entity';
+import { DocumentType } from '@common/enums/document-type.enum';
 import { KycVerification } from './entities/kyc-verification.entity';
 
 @Injectable()
@@ -26,6 +27,20 @@ export class KycRepository {
     return this.kycRepo.findOneBy({ userId });
   }
 
+  /**
+   * The submission holding a given identity document, if any.
+   *
+   * Scoped to the document type: citizenship, passport and NID numbers are
+   * unrelated sequences, so the same digits under two types are two documents.
+   * Mirrors the partial unique index on the entity.
+   */
+  async findByDocumentIdentity(
+    documentType: DocumentType,
+    documentId: string,
+  ): Promise<KycVerification | null> {
+    return this.kycRepo.findOneBy({ documentType, documentId });
+  }
+
   async findKycById(id: string): Promise<KycVerification | null> {
     return this.kycRepo.findOneBy({ id });
   }
@@ -34,10 +49,14 @@ export class KycRepository {
     page: number,
     limit: number,
     status?: KycStatus,
+    userId?: string,
   ): Promise<[KycVerification[], number]> {
     const qb = this.kycRepo.createQueryBuilder('kyc');
     if (status) {
-      qb.where('kyc.status = :status', { status });
+      qb.andWhere('kyc.status = :status', { status });
+    }
+    if (userId) {
+      qb.andWhere('kyc.userId = :userId', { userId });
     }
     return qb
       .orderBy('kyc.createdAt', 'ASC')

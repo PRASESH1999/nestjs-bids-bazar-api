@@ -4,13 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
+import { Product } from '@modules/products/entities/product.entity';
 import { Category } from './entities/category.entity';
 import { Subcategory } from './entities/subcategory.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateSubcategoryDto } from './dto/create-subcategory.dto';
 import { UpdateSubcategoryDto } from './dto/update-subcategory.dto';
+import { ReorderTaxonomyDto } from './dto/reorder-taxonomy.dto';
 import { IconStorageService } from './icon-storage.service';
 import {
   CategoryResponse,
@@ -27,16 +29,42 @@ export class CategoriesService {
     @InjectRepository(Subcategory)
     private readonly subcategoryRepo: Repository<Subcategory>,
     private readonly iconStorage: IconStorageService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ─── Public ──────────────────────────────────────────────────────────────
 
-  async listCategories(includeInactive = false): Promise<CategoryResponse[]> {
+  async listCategories(
+    includeInactive = false,
+    withCounts = false,
+  ): Promise<CategoryResponse[]> {
     const categories = await this.categoryRepo.find({
       where: includeInactive ? {} : { isActive: true },
       order: { displayOrder: 'ASC', name: 'ASC' },
     });
-    return categories.map(mapCategory);
+
+    if (!withCounts) return categories.map((c) => mapCategory(c));
+
+    // One grouped count for the whole page rather than one query per row —
+    // the point of the flag is to remove N requests, not to move them here.
+    // Counts follow the same active/inactive scope as the rows themselves.
+    const counts = await this.countSubcategoriesByCategory(includeInactive);
+    return categories.map((c) => mapCategory(c, counts.get(c.id) ?? 0));
+  }
+
+  private async countSubcategoriesByCategory(
+    includeInactive: boolean,
+  ): Promise<Map<string, number>> {
+    const qb = this.subcategoryRepo
+      .createQueryBuilder('sub')
+      .select('sub.categoryId', 'categoryId')
+      .addSelect('COUNT(sub.id)', 'count')
+      .groupBy('sub.categoryId');
+
+    if (!includeInactive) qb.where('sub.isActive = true');
+
+    const rows = await qb.getRawMany<{ categoryId: string; count: string }>();
+    return new Map(rows.map((r) => [r.categoryId, Number(r.count)]));
   }
 
   async listSubcategories(filters: {
@@ -273,5 +301,117 @@ export class CategoriesService {
         `A subcategory with name '${name}' already exists under this category`,
       );
     }
+  }
+
+  // ─── Bulk reorder (A18) ──────────────────────────────────────────────────
+
+  /**
+   * Applies a whole new display order in one transaction.
+   *
+   * All-or-nothing on purpose: a partially-applied reorder is worse than a
+   * rejected one, because the list is left in an order nobody chose and the
+   * client has no record of what did and did not land.
+   */
+  async reorderCategories(dto: ReorderTaxonomyDto): Promise<void> {
+    const ids = dto.items.map((i) => i.id);
+    const found = await this.categoryRepo.countBy({ id: In(ids) });
+    if (found !== ids.length) {
+      throw new NotFoundException('One or more categories were not found');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      for (const item of dto.items) {
+        await manager.update(
+          Category,
+          { id: item.id },
+          {
+            displayOrder: item.displayOrder,
+          },
+        );
+      }
+    });
+  }
+
+  async reorderSubcategories(dto: ReorderTaxonomyDto): Promise<void> {
+    const ids = dto.items.map((i) => i.id);
+    const found = await this.subcategoryRepo.countBy({ id: In(ids) });
+    if (found !== ids.length) {
+      throw new NotFoundException('One or more subcategories were not found');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      for (const item of dto.items) {
+        await manager.update(
+          Subcategory,
+          { id: item.id },
+          {
+            displayOrder: item.displayOrder,
+          },
+        );
+      }
+    });
+  }
+
+  // ─── Hard delete (A19) ───────────────────────────────────────────────────
+
+  /**
+   * Permanently removes a category that nothing references.
+   *
+   * `DELETE /categories/:id` is a soft delete (`isActive = false`) and that is
+   * the right default — products carry a `categoryId`, so removing a row with
+   * listings under it would orphan them. But a row created five minutes ago by
+   * mistake has no listings and no subcategories, and until now nothing could
+   * take it away. That matters more than it looks: `categories.name` is unique,
+   * so a typo'd "Electroincs" permanently occupies a name the correct row can
+   * never be renamed into. See OPEN-ITEMS A19.
+   *
+   * Refuses with 409 if anything at all references the row, active or not —
+   * an inactive subcategory is still a row with a foreign key.
+   */
+  async hardDeleteCategory(id: string): Promise<void> {
+    const category = await this.findCategoryEntityById(id);
+
+    const subcategoryCount = await this.subcategoryRepo.countBy({
+      categoryId: id,
+    });
+    if (subcategoryCount > 0) {
+      throw new ConflictException(
+        `Cannot permanently delete: ${subcategoryCount} subcategor${
+          subcategoryCount === 1 ? 'y' : 'ies'
+        } still reference this category. Delete them first.`,
+      );
+    }
+
+    const productCount = await this.dataSource
+      .getRepository(Product)
+      .countBy({ categoryId: id });
+    if (productCount > 0) {
+      throw new ConflictException(
+        `Cannot permanently delete: ${productCount} listing(s) reference this category. Deactivate it instead.`,
+      );
+    }
+
+    if (category.iconPath) {
+      await this.iconStorage.deleteIcon(category.iconPath);
+    }
+    await this.categoryRepo.remove(category);
+  }
+
+  async hardDeleteSubcategory(id: string): Promise<void> {
+    const subcategory = await this.findSubcategoryEntityById(id);
+
+    const productCount = await this.dataSource
+      .getRepository(Product)
+      .countBy({ subcategoryId: id });
+    if (productCount > 0) {
+      throw new ConflictException(
+        `Cannot permanently delete: ${productCount} listing(s) reference this subcategory. Deactivate it instead.`,
+      );
+    }
+
+    if (subcategory.iconPath) {
+      await this.iconStorage.deleteIcon(subcategory.iconPath);
+    }
+    await this.subcategoryRepo.remove(subcategory);
   }
 }

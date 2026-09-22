@@ -10,6 +10,7 @@ import { ProductImage } from '../modules/products/entities/product-image.entity'
 import { Bid } from '../modules/bidding/entities/bid.entity';
 import { ProductSettlement } from '../modules/bidding/entities/product-settlement.entity';
 import { ProductPayment } from '../modules/payments/entities/product-payment.entity';
+import { ShippingAddress } from '../modules/shipping/entities/shipping-address.entity';
 import { EmailVerificationToken } from '../modules/auth/entities/email-verification-token.entity';
 import { PasswordResetToken } from '../modules/auth/entities/password-reset-token.entity';
 import { PendingEmailChange } from '../modules/auth/entities/pending-email-change.entity';
@@ -42,6 +43,7 @@ export const dataSourceOptions: DataSourceOptions = {
     Bid,
     ProductSettlement,
     ProductPayment,
+    ShippingAddress,
     EmailVerificationToken,
     PasswordResetToken,
     PendingEmailChange,

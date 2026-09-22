@@ -1,6 +1,11 @@
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  ClassSerializerInterceptor,
+  Logger,
+  ValidationPipe,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from '@common/filters/global-exception.filter';
@@ -26,6 +31,12 @@ async function bootstrap() {
     origin: corsOrigins,
     credentials: true,
   });
+
+  // A silently wrong allow-list is invisible until a browser refuses a request,
+  // and the failure surfaces in the browser console rather than in these logs —
+  // so it gets printed at startup. `.env.development` overriding `.env` with
+  // stale ports is exactly how the SSE streams sat broken (OPEN-ITEMS A24).
+  new Logger('Bootstrap').log(`CORS allow-list: ${corsOrigins.join(', ')}`);
 
   const prefix = configService.get<string>('API_PREFIX', 'api');
   const version = configService.get<string>('API_VERSION', 'v1');
@@ -60,6 +71,25 @@ async function bootstrap() {
           fields,
         });
       },
+    }),
+  );
+
+  /*
+   * Strips every `@Exclude()`-marked property on the way out — which is where
+   * the credential hashes on `User` are caught (see the entity). Registered
+   * globally rather than per-controller on purpose: the endpoints that leaked
+   * them did so by returning an entity with a joined User relation, and any
+   * future endpoint that does the same is covered without anyone remembering.
+   *
+   * `excludeExtraneousValues` is deliberately NOT set — that would require an
+   * `@Expose()` on every field of every entity and would silently blank most
+   * responses.
+   */
+  app.useGlobalInterceptors(
+    new ClassSerializerInterceptor(app.get(Reflector), {
+      // Decimal columns arrive from pg as strings; leave every value alone and
+      // only act on the exclusions.
+      enableImplicitConversion: false,
     }),
   );
 

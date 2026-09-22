@@ -7,18 +7,24 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import Decimal from 'decimal.js';
 import { EventNames } from '@common/events/event-names';
-import { roundDownToMultipleOf5 } from '@common/utils/rounding.util';
+import {
+  roundDownToMultipleOf5,
+  roundUpToMultipleOf5,
+} from '@common/utils/rounding.util';
 import type { BidSubmittedPayload } from '@common/events/event-payloads.type';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
+import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { PaginatedResult } from '@common/types/paginated-result.type';
 import { PaginationDto } from '@common/dto/pagination.dto';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
 import { MailService } from '@modules/mail/mail.service';
+import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
+import { RatingsService } from '@modules/ratings/ratings.service';
 import { Bid } from '../entities/bid.entity';
 import { BidListItemAdminDto } from '../dto/bid-list-item-admin.dto';
 import { BidListItemDto } from '../dto/bid-list-item.dto';
@@ -34,6 +40,44 @@ type BidRange = {
   message: string;
 };
 
+/**
+ * The valid bid range, in a shape safe to serialise to a client.
+ *
+ * Nothing used to return this. `computeValidBidRange` decides what a bid may
+ * be, but the only way a client could learn the range was to send a bid and
+ * read the rejection — so the frontend re-implemented the arithmetic, along
+ * with `BID_INCREMENT_MIN_FLAT`, `BID_INCREMENT_PERCENT` and three rounding
+ * rules that live in this file and in the API's environment. Reconfigure
+ * either and the copy silently drifts; that is exactly what happened when the
+ * 60% ceiling landed. See OPEN-ITEMS A14.
+ */
+/**
+ * A row from `GET /bids/me`: the bid plus the context a client needs to decide
+ * whether to offer a "Rate seller" action. See attachRatingContext.
+ */
+export type MyBidResponse = Bid & {
+  /** The caller's successful payment for this lot, if there is one. */
+  paymentId: string | null;
+  hasRated: boolean;
+  canRate: boolean;
+};
+
+export type PublicBidRange = {
+  /**
+   * `open`     — any multiple of `stepAmount` in [minAmount, maxAmount].
+   * `closed`   — the ceiling is reached; no further bid is possible.
+   * `unavailable` — the lot is not accepting bids at all.
+   */
+  kind: 'open' | 'closed' | 'unavailable';
+  minAmount: number | null;
+  maxAmount: number | null;
+  /** Every valid amount is an exact multiple of this. */
+  stepAmount: number;
+  /** The ceiling regular bidding can never cross. Independent of Instant Buy. */
+  biddingEndPrice: number | null;
+  message: string;
+};
+
 // A user may hold an active (highest-or-not, still-open) bid on at most this
 // many distinct products at once. Raising a bid on a product they're already
 // bidding on doesn't consume a new slot — only a bid on a product they don't
@@ -41,7 +85,10 @@ type BidRange = {
 const MAX_ACTIVE_BIDS_PER_USER = 10;
 
 // Bidding-open statuses — mirrors the status check earlier in placeBid().
-const ACTIVE_BIDDING_STATUSES = [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE];
+const ACTIVE_BIDDING_STATUSES = [
+  ProductStatus.AWAITING_FIRST_BID,
+  ProductStatus.ACTIVE,
+];
 
 @Injectable()
 export class BiddingService {
@@ -52,6 +99,7 @@ export class BiddingService {
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly ratingsService: RatingsService,
   ) {}
 
   // ─── Place a bid ──────────────────────────────────────────────────────────
@@ -237,7 +285,7 @@ export class BiddingService {
           .findOne({ where: { id: productOwnerId } });
         if (seller) {
           await this.mailService.sendBidPlacedSeller(seller.email, {
-            sellerName: seller.name,
+            sellerName: seller.username,
             productTitle,
             bidAmount: newBidAmount,
             biddingEndsAt: biddingEndsAt!,
@@ -254,7 +302,7 @@ export class BiddingService {
           .findOne({ where: { id: previousHighestBidderId } });
         if (previousBidder) {
           await this.mailService.sendBidOutbid(previousBidder.email, {
-            bidderName: previousBidder.name,
+            bidderName: previousBidder.username,
             productTitle,
             yourBidAmount: previousBidAmount!,
             newHighestBid: newBidAmount,
@@ -326,7 +374,7 @@ export class BiddingService {
           amount: Number(bid.amount),
           placedAt: bid.placedAt.toISOString(),
           bidderId: bid.bidderId,
-          bidderName: bid.bidder?.name ?? '',
+          bidderName: bid.bidder?.username ?? '',
           bidderEmail: bid.bidder?.email ?? '',
           paymentStatus: bid.paymentStatus,
           paymentDeadline: bid.paymentDeadline
@@ -462,7 +510,7 @@ export class BiddingService {
   async getMyBids(
     userId: string,
     query: PaginationDto,
-  ): Promise<PaginatedResult<Bid>> {
+  ): Promise<PaginatedResult<MyBidResponse>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
@@ -476,10 +524,58 @@ export class BiddingService {
       .take(limit)
       .getManyAndCount();
 
+    const enriched = await this.attachRatingContext(userId, bids);
+
     return {
-      data: bids,
+      data: enriched,
       meta: { page, limit, total },
     };
+  }
+
+  /**
+   * Adds `paymentId` / `hasRated` / `canRate` to a page of the caller's bids.
+   *
+   * Ratings are one-per-payment and immutable — a second attempt answers 409 —
+   * but nothing exposed whether one already existed, so a "Rate seller" button
+   * stayed enabled forever and the user found out by pressing it. `/bids/me`
+   * also carried no `paymentId` at all, so the button had to fetch
+   * `GET /payments/:productId/status` on click purely to learn one id.
+   * See OPEN-ITEMS A15.
+   *
+   * Two batched queries for the whole page, never one per row.
+   */
+  private async attachRatingContext(
+    userId: string,
+    bids: Bid[],
+  ): Promise<MyBidResponse[]> {
+    if (bids.length === 0) return [];
+
+    // A rating hangs off a *successful* payment made by this user.
+    const payments = await this.dataSource.getRepository(ProductPayment).find({
+      where: {
+        productId: In(bids.map((b) => b.productId)),
+        winnerUserId: userId,
+        status: PaymentStatus.SUCCESS,
+      },
+      select: { id: true, productId: true },
+    });
+
+    const paymentByProduct = new Map(payments.map((p) => [p.productId, p.id]));
+    const ratedPaymentIds = await this.ratingsService.getRatedPaymentIds(
+      payments.map((p) => p.id),
+    );
+
+    return bids.map((bid) => {
+      const paymentId = paymentByProduct.get(bid.productId) ?? null;
+      const hasRated = paymentId !== null && ratedPaymentIds.has(paymentId);
+      return {
+        ...bid,
+        paymentId,
+        hasRated,
+        // Only the buyer who actually paid can rate, and only once.
+        canRate: paymentId !== null && !hasRated,
+      };
+    });
   }
 
   // ─── Query: all bids (admin) ──────────────────────────────────────────────
@@ -601,5 +697,110 @@ export class BiddingService {
       : `Bid must be between Rs. ${minAmount.toFixed(2)} and Rs. ${maxAmount.toFixed(2)} (currently leading: Rs. ${current.toFixed(2)})`;
 
     return { minAmount, maxAmount, message };
+  }
+
+  /**
+   * The same range `placeBid` enforces, as data instead of an exception.
+   *
+   * Deliberately total: it never throws. `computeValidBidRange` raises a
+   * BadRequestException for the two "no valid amount left" cases because it is
+   * called on the write path, but a read that renders a bidding panel needs
+   * those as states, not failures.
+   */
+  getPublicBidRange(product: Product): PublicBidRange {
+    const stepAmount = Number(
+      this.configService.getOrThrow<number>('BID_INCREMENT_MIN_FLAT'),
+    );
+    const biddingEndPrice =
+      product.biddingEndPrice == null ? null : Number(product.biddingEndPrice);
+
+    const biddable =
+      product.status === ProductStatus.AWAITING_FIRST_BID ||
+      product.status === ProductStatus.ACTIVE;
+
+    if (!biddable || product.biddingEndPrice == null) {
+      return {
+        kind: 'unavailable',
+        minAmount: null,
+        maxAmount: null,
+        stepAmount,
+        biddingEndPrice,
+        message: 'This lot is not accepting bids.',
+      };
+    }
+
+    try {
+      const range = this.computeValidBidRange(product);
+
+      /*
+       * Snap the published bounds to the step, so every number here is itself a
+       * legal bid amount.
+       *
+       * placeBid rejects any amount that is not a multiple of Rs. 5, but
+       * `minAmount` is not guaranteed to be one: it can come straight from
+       * `biddingStartPrice`, and rows created before that value was rounded
+       * still carry things like 135435.30. Publishing that unrounded would
+       * hand clients a "bid the minimum" button that the API refuses — which
+       * is precisely the class of bug this endpoint exists to stop.
+       *
+       * Minimums round up (never weakened), maximums round down (never
+       * exceeded) — the same direction as the rest of the bidding arithmetic.
+       */
+      const minAmount = new Decimal(roundUpToMultipleOf5(range.minAmount));
+      const maxAmount =
+        range.maxAmount === null
+          ? null
+          : new Decimal(roundDownToMultipleOf5(range.maxAmount));
+
+      // Rounding can close a range that was open by less than a step.
+      if (maxAmount !== null && minAmount.greaterThan(maxAmount)) {
+        return {
+          kind: 'closed',
+          minAmount: null,
+          maxAmount: null,
+          stepAmount,
+          biddingEndPrice,
+          message: 'No valid bid amount remains on this lot.',
+        };
+      }
+
+      /*
+       * Rebuilt rather than reused from `range.message`: that string is
+       * composed from the unsnapped bounds, so it would quote a minimum the
+       * API will not actually accept (Rs. 135435.30 where the real floor is
+       * Rs. 135440). The message a user reads has to name the same numbers the
+       * buttons send.
+       */
+      const message =
+        maxAmount === null
+          ? `Bid must be at least Rs. ${minAmount.toFixed(2)}`
+          : minAmount.equals(maxAmount)
+            ? `Bid must be exactly Rs. ${minAmount.toFixed(2)}`
+            : `Bid must be between Rs. ${minAmount.toFixed(2)} and Rs. ${maxAmount.toFixed(2)}`;
+
+      return {
+        kind: 'open',
+        minAmount: minAmount.toNumber(),
+        maxAmount: maxAmount === null ? null : maxAmount.toNumber(),
+        stepAmount,
+        biddingEndPrice,
+        message,
+      };
+    } catch (err: unknown) {
+      // The only throw from computeValidBidRange is "the floor has crossed the
+      // ceiling" — a real, renderable state rather than an error. Anything
+      // else is a genuine fault and is left to propagate.
+      if (err instanceof BadRequestException) {
+        return {
+          kind: 'closed',
+          minAmount: null,
+          maxAmount: null,
+          stepAmount,
+          biddingEndPrice,
+          message: err.message,
+        };
+      }
+      throw err;
+    }
   }
 }

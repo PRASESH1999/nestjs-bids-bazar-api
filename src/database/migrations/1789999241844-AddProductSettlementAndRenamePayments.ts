@@ -4,17 +4,6 @@ export class AddProductSettlementAndRenamePayments1789999241844 implements Migra
     name = 'AddProductSettlementAndRenamePayments1789999241844'
 
     public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`ALTER TABLE "seller_ratings" DROP CONSTRAINT "FK_6f42babf8a7351f3cb827ade2ec"`);
-        // "payments" is replaced by "product_payments" below (new productSettlementId/
-        // sellerId columns + a partial unique index rescoped from productId to
-        // productSettlementId). TypeORM's diff can't tell this is a replacement rather
-        // than an unrelated new table, so it never generates a DROP for the old one —
-        // done explicitly here instead of leaving it as orphaned dead schema.
-        await queryRunner.query(`ALTER TABLE "payments" DROP CONSTRAINT "FK_df3c369970714c014a4bcd6b01a"`);
-        await queryRunner.query(`ALTER TABLE "payments" DROP CONSTRAINT "FK_80a2b377fa57b59dc5c0e138ef3"`);
-        await queryRunner.query(`DROP TABLE "payments"`);
-        await queryRunner.query(`DROP TYPE "public"."payments_deliveryzone_enum"`);
-        await queryRunner.query(`DROP TYPE "public"."payments_status_enum"`);
         await queryRunner.query(`CREATE TYPE "public"."product_settlements_status_enum" AS ENUM('PENDING_PAYMENT', 'SETTLED', 'EXPIRED')`);
         await queryRunner.query(`CREATE TABLE "product_settlements" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "deletedAt" TIMESTAMP WITH TIME ZONE, "productId" uuid NOT NULL, "sellerId" uuid NOT NULL, "bidId" uuid NOT NULL, "bidWinnerId" uuid NOT NULL, "fallbackRank" integer NOT NULL, "amount" numeric(12,2) NOT NULL, "status" "public"."product_settlements_status_enum" NOT NULL DEFAULT 'PENDING_PAYMENT', "paymentDeadline" TIMESTAMP WITH TIME ZONE NOT NULL, "resolvedAt" TIMESTAMP WITH TIME ZONE, CONSTRAINT "PK_32f94edcf989317ef8f6a408ac4" PRIMARY KEY ("id"))`);
         await queryRunner.query(`CREATE INDEX "IDX_f28509c6f4572e9e3e2b25e3b1" ON "product_settlements" ("productId") `);
@@ -31,6 +20,98 @@ export class AddProductSettlementAndRenamePayments1789999241844 implements Migra
         await queryRunner.query(`CREATE UNIQUE INDEX "IDX_d9dc1920b5fc46b8e5f7209f52" ON "product_payments" ("productSettlementId") WHERE "status" = 'PENDING'`);
         await queryRunner.query(`CREATE INDEX "IDX_e716286026f74a8bfe05b4502e" ON "product_payments" ("winnerUserId", "status") `);
         await queryRunner.query(`CREATE INDEX "IDX_9198b3dbab691f73c3c95c81bf" ON "product_payments" ("productId", "status") `);
+        // ─── Carry the existing data across ──────────────────────────────
+        //
+        // The tables are created above and only populated here, BEFORE the old
+        // "payments" table is dropped. Order matters: this migration originally
+        // dropped "payments" as its first statement and created the replacement
+        // empty, which works on a fresh database and destroys the entire payment
+        // history on any other. It also left product_settlements empty, so
+        // handlePaymentExpiry and confirmPaymentGateway — both of which look a
+        // round up by bidId and throw when there is none — would fail on every
+        // lot that had already closed. See OPEN-ITEMS A27.
+
+        // One settlement round per bid that actually held the win. A bid has a
+        // paymentDeadline if and only if it was handed a payment turn, which is
+        // exactly the set of rounds that existed before this table did.
+        await queryRunner.query(`
+            INSERT INTO "product_settlements"
+              ("productId", "sellerId", "bidId", "bidWinnerId", "fallbackRank",
+               "amount", "status", "paymentDeadline", "resolvedAt")
+            SELECT
+              b."productId",
+              p."ownerId",
+              b."id",
+              b."bidderId",
+              b."fallbackRank",
+              b."amount",
+              CASE b."paymentStatus"
+                WHEN 'CONFIRMED' THEN 'SETTLED'
+                WHEN 'PENDING'   THEN 'PENDING_PAYMENT'
+                ELSE 'EXPIRED'
+              END::"public"."product_settlements_status_enum",
+              b."paymentDeadline",
+              CASE WHEN b."paymentStatus" = 'PENDING' THEN NULL
+                   ELSE b."paymentDeadline" END
+            FROM "bids" b
+            JOIN "products" p ON p."id" = b."productId"
+            WHERE b."paymentDeadline" IS NOT NULL
+        `);
+
+        // Every payment row, with its id preserved so seller_ratings.paymentId
+        // keeps resolving. The round is matched on (product, winner); where a
+        // bidder had more than one turn, the amounts disambiguate and the later
+        // round wins the tie.
+        await queryRunner.query(`
+            INSERT INTO "product_payments" (
+              "id", "createdAt", "updatedAt", "deletedAt", "productId",
+              "productSettlementId", "sellerId", "winnerUserId", "amount",
+              "referenceLabel", "terminalId", "qrString", "qrMessage",
+              "websocketUrl", "status", "fonepayTraceId", "paymentMessage",
+              "paymentDeadline", "deliveryZone", "deliveryCharge", "sellerPaidAt",
+              "sellerPaidById", "sellerPayoutAmount", "sellerCommissionPercent")
+            SELECT
+              pay."id", pay."createdAt", pay."updatedAt", pay."deletedAt",
+              pay."productId",
+              (SELECT s."id" FROM "product_settlements" s
+                 WHERE s."productId" = pay."productId"
+                   AND s."bidWinnerId" = pay."winnerUserId"
+                 ORDER BY (s."amount" = pay."amount") DESC, s."fallbackRank" DESC
+                 LIMIT 1),
+              prod."ownerId", pay."winnerUserId", pay."amount",
+              pay."referenceLabel", pay."terminalId", pay."qrString",
+              pay."qrMessage", pay."websocketUrl",
+              pay."status"::text::"public"."product_payments_status_enum",
+              pay."fonepayTraceId", pay."paymentMessage", pay."paymentDeadline",
+              pay."deliveryZone"::text::"public"."product_payments_deliveryzone_enum",
+              pay."deliveryCharge", pay."sellerPaidAt", pay."sellerPaidById",
+              pay."sellerPayoutAmount", pay."sellerCommissionPercent"
+            FROM "payments" pay
+            JOIN "products" prod ON prod."id" = pay."productId"
+        `);
+
+        // Refuse to continue rather than drop "payments" while a row failed to
+        // find its round — the whole migration is one transaction, so this
+        // rolls the schema change back instead of losing the data.
+        const orphaned = await queryRunner.query(`
+            SELECT COUNT(*)::int AS count FROM "product_payments"
+            WHERE "productSettlementId" IS NULL
+        `) as { count: number }[];
+        if (orphaned[0]?.count > 0) {
+            throw new Error(
+                `AddProductSettlementAndRenamePayments: ${orphaned[0].count} payment row(s) ` +
+                `could not be matched to a settlement round. Aborting rather than dropping "payments".`,
+            );
+        }
+
+        // ─── Only now is the old table redundant ─────────────────────────────
+        await queryRunner.query(`ALTER TABLE "seller_ratings" DROP CONSTRAINT "FK_6f42babf8a7351f3cb827ade2ec"`);
+        await queryRunner.query(`ALTER TABLE "payments" DROP CONSTRAINT "FK_df3c369970714c014a4bcd6b01a"`);
+        await queryRunner.query(`ALTER TABLE "payments" DROP CONSTRAINT "FK_80a2b377fa57b59dc5c0e138ef3"`);
+        await queryRunner.query(`DROP TABLE "payments"`);
+        await queryRunner.query(`DROP TYPE "public"."payments_deliveryzone_enum"`);
+        await queryRunner.query(`DROP TYPE "public"."payments_status_enum"`);
+
         await queryRunner.query(`ALTER TABLE "product_settlements" ADD CONSTRAINT "FK_f28509c6f4572e9e3e2b25e3b10" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE RESTRICT ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "product_settlements" ADD CONSTRAINT "FK_44b3b4119737bafd73d85823a19" FOREIGN KEY ("sellerId") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "product_settlements" ADD CONSTRAINT "FK_e75a511dec4f30d4479b934b9f8" FOREIGN KEY ("bidId") REFERENCES "bids"("id") ON DELETE RESTRICT ON UPDATE NO ACTION`);

@@ -28,6 +28,7 @@ import type {
   PendingEmailChangeSummary,
   RewardsSummary,
 } from './interfaces/own-profile.interface';
+import { KycStatus } from '@common/enums/kyc-status.enum';
 import { formatGeneratedUsername } from './username-generator';
 
 @Injectable()
@@ -102,6 +103,13 @@ export class UsersService {
 
   async findByEmailIncludingDeleted(email: string): Promise<User | null> {
     return this.usersRepository.findByEmailIncludingDeleted(email);
+  }
+
+  /** Batch lookup — used where a list needs one user per row. */
+  async findByIds(ids: string[]): Promise<User[]> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    return this.usersRepository.findByIds(unique);
   }
 
   async findById(id: string): Promise<User | null> {
@@ -231,7 +239,7 @@ export class UsersService {
     try {
       await this.mailService.sendPasswordChangedConfirmation(
         user.email,
-        user.name,
+        user.username,
       );
     } catch (err: unknown) {
       this.logger.error(
@@ -261,9 +269,11 @@ export class UsersService {
     const kycSummary: KycSummary | null = kyc
       ? {
           status: kyc.status,
+          fullName: kyc.fullName,
           submittedAt: kyc.createdAt,
           reviewedAt: kyc.reviewedAt,
           rejectionReason: kyc.rejectionReason,
+          rejectedFields: kyc.rejectedFields ?? [],
         }
       : null;
 
@@ -281,13 +291,25 @@ export class UsersService {
 
     return {
       id: user.id,
-      name: user.name,
       username: user.username,
       email: user.email,
+      /*
+       * The legal name, surfaced from the KYC record and only once APPROVED.
+       * Null otherwise — a pending or rejected submission's name has not been
+       * checked against anything, and showing it as the account's name would
+       * give unreviewed input the authority of a verified one.
+       */
+      fullName:
+        kycSummary && kycSummary.status === KycStatus.APPROVED
+          ? kycSummary.fullName
+          : null,
+      phone: user.phone,
+      isPhoneVerified: user.phoneVerifiedAt !== null,
+      phoneVerifiedAt: user.phoneVerifiedAt,
+      pendingPhone: user.pendingPhone,
       role: user.role,
       isActive: user.isActive,
       isEmailVerified: user.isEmailVerified,
-      nameChangedAt: user.nameChangedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       kyc: kycSummary,
@@ -301,37 +323,17 @@ export class UsersService {
    * nameChangedAt null = available; non-null = already used.
    * Sends a confirmation email after the DB update.
    */
-  async updateSelfName(userId: string, newName: string): Promise<void> {
-    const user = await this.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
-
-    if (user.nameChangedAt !== null) {
-      throw new ForbiddenException(
-        'Display name can only be changed once. Please contact support.',
-      );
-    }
-
-    if (newName.trim() === user.name.trim()) {
-      throw new BadRequestException(
-        'New display name must be different from your current name.',
-      );
-    }
-
-    const now = new Date();
-    await this.usersRepository.updateUser(userId, {
-      name: newName,
-      nameChangedAt: now,
-    });
-
-    try {
-      await this.mailService.sendNameChangedConfirmation(user.email, newName);
-    } catch (err: unknown) {
-      this.logger.error(
-        '[updateSelfName] Failed to dispatch name-changed email',
-        err instanceof Error ? err.stack : String(err),
-      );
-    }
-  }
+  /*
+   * `updateSelfName` used to live here, with a one-change quota tracked by
+   * `nameChangedAt` and a SUPERADMIN endpoint to reset it.
+   *
+   * All of it is gone. A person's name is now whatever their identity document
+   * says (KycVerification.fullName), so it is not something to edit on a
+   * profile — correcting it means resubmitting KYC, where it is checked. The
+   * public identity is `username`, which is system-generated and does not
+   * change. That removes the quota, the reset endpoint, and the question of
+   * which of two names was the real one.
+   */
 
   /**
    * Initiate an email-address change.
@@ -389,7 +391,7 @@ export class UsersService {
     try {
       await this.mailService.sendEmailChangeVerification(
         normalizedNew,
-        user.name,
+        user.username,
         rawToken,
       );
     } catch (err: unknown) {
@@ -398,18 +400,6 @@ export class UsersService {
         err instanceof Error ? err.stack : String(err),
       );
     }
-  }
-
-  /**
-   * SUPERADMIN: reset a user's one-time name-change quota by setting nameChangedAt back to null.
-   */
-  async resetNameChangeQuota(targetUserId: string): Promise<void> {
-    const user = await this.findById(targetUserId);
-    if (!user) throw new NotFoundException('User not found');
-
-    await this.usersRepository.updateUser(targetUserId, {
-      nameChangedAt: null,
-    });
   }
 
   // ─── Public seller info ──────────────────────────────────────────────────

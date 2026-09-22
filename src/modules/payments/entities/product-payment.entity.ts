@@ -5,6 +5,20 @@ import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
 import { ProductSettlement } from '@modules/bidding/entities/product-settlement.entity';
+import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
+
+/** What the parcel was addressed to, frozen at payment time. */
+export interface ShippingAddressSnapshot {
+  label: string;
+  recipientName: string;
+  recipientPhone: string;
+  province: string;
+  district: string;
+  city: string;
+  street: string;
+  wardNumber: string | null;
+  landmark: string | null;
+}
 
 @Entity('product_payments')
 @Index(['productId', 'status'])
@@ -69,6 +83,35 @@ export class ProductPayment extends BaseEntity {
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
+
+  // ─── Delivery destination ─────────────────────────────────────────────────
+
+  /*
+   * The saved address the buyer picked at checkout, and a **snapshot** of it.
+   *
+   * Both, on purpose. The id answers "which of their addresses was this?" and
+   * keeps working while the row exists; the snapshot is what the parcel was
+   * actually addressed to. A buyer editing or deleting a saved address must not
+   * rewrite where a past order went, so the id is nullable with ON DELETE SET
+   * NULL and the snapshot is the record of truth for fulfilment.
+   *
+   * Nullable overall because payments made before saved addresses existed have
+   * neither, and because `deliveryZone` — not this — is what determines the fee
+   * (see InitiatePaymentDto, Rule 14).
+   */
+  @Column({ type: 'uuid', nullable: true })
+  shippingAddressId: string | null;
+
+  @ManyToOne(() => ShippingAddress, {
+    onDelete: 'SET NULL',
+    nullable: true,
+    eager: false,
+  })
+  @JoinColumn({ name: 'shippingAddressId' })
+  shippingAddress: ShippingAddress | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  shippingAddressSnapshot: ShippingAddressSnapshot | null;
 
   // ─── Fonepay identifiers ──────────────────────────────────────────────────
 

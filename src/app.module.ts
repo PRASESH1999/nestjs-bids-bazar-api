@@ -16,6 +16,7 @@ import { KycModule } from '@modules/kyc/kyc.module';
 import { MailModule } from '@modules/mail/mail.module';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
 import { PaymentsModule } from '@modules/payments/payments.module';
+import { ShippingModule } from '@modules/shipping/shipping.module';
 import { ProductsModule } from '@modules/products/products.module';
 import { RatingsModule } from '@modules/ratings/ratings.module';
 import { ReportsModule } from '@modules/reports/reports.module';
@@ -31,6 +32,12 @@ import { envValidationSchema } from './config/env.validation';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // FIRST FILE WINS for any key present in both. `.env.development` is
+      // therefore an override layer, not a fallback — a stale key in it
+      // silently beats the correct one in `.env`, which is how CORS_ORIGINS sat
+      // pointing at ports this project stopped using while `.env` had it right
+      // (OPEN-ITEMS A24). The resolved allow-list is logged at startup in
+      // main.ts so that failure mode is visible rather than browser-only.
       envFilePath: ['.env.development', '.env'],
       validationSchema: envValidationSchema,
       validationOptions: {
@@ -76,6 +83,7 @@ import { envValidationSchema } from './config/env.validation';
     BiddingModule,
     FavoritesModule,
     PaymentsModule,
+    ShippingModule,
     FonepayModule,
     RewardsModule,
     ReportsModule,

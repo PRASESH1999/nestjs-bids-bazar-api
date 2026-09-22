@@ -23,7 +23,6 @@ export async function seedUsers(dataSource: DataSource): Promise<void> {
         id: user.id,
         email: user.email,
         password: hashedPassword,
-        name: user.name,
         username: user.username,
         role: user.role,
         isActive: true,

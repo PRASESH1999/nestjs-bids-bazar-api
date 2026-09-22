@@ -1,9 +1,12 @@
-import * as crypto from 'crypto';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DocumentType } from '@common/enums/document-type.enum';
 import { KycStatus } from '@common/enums/kyc-status.enum';
 import { KycVerification } from './entities/kyc-verification.entity';
-import { KycService } from './kyc.service';
+import { KycService, type KycFiles } from './kyc.service';
 import { ReviewAction } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 
@@ -11,13 +14,14 @@ function buildKyc(overrides: Partial<KycVerification> = {}): KycVerification {
   return {
     id: 'kyc-1',
     userId: 'user-1',
+    fullName: 'Lily Shrestha',
     documentType: DocumentType.NID_CARD,
+    documentId: 'NID-001',
     citizenshipFrontPath: null,
     citizenshipBackPath: null,
     passportPath: null,
     nidFrontPath: '/nid-front.png',
-    primaryPhone: '+9779812345678',
-    secondaryPhone: null,
+    emergencyContactPhone: null,
     permanentAddress: {
       street: 'Kathmandu-10',
       city: 'Kathmandu',
@@ -29,12 +33,9 @@ function buildKyc(overrides: Partial<KycVerification> = {}): KycVerification {
     remarks: null,
     status: KycStatus.PENDING,
     rejectionReason: null,
+    rejectedFields: null,
     reviewedBy: null,
     reviewedAt: null,
-    phoneOtpHash: null,
-    phoneOtpExpiresAt: null,
-    phoneOtpAttempts: 0,
-    phoneVerifiedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -42,33 +43,59 @@ function buildKyc(overrides: Partial<KycVerification> = {}): KycVerification {
   };
 }
 
-function hashCode(code: string): string {
-  return crypto.createHash('sha256').update(code).digest('hex');
+function buildDto(overrides: Partial<SubmitKycDto> = {}): SubmitKycDto {
+  return {
+    fullName: 'Lily Shrestha',
+    documentType: DocumentType.NID_CARD,
+    documentId: 'NID-001',
+    permanentAddressStreet: 'Kathmandu-10',
+    permanentAddressCity: 'Kathmandu',
+    permanentAddressDistrict: 'Kathmandu',
+    permanentAddressProvince: 'Bagmati',
+    bankName: 'Nepal Bank',
+    accountHolderName: 'Lily Shrestha',
+    accountNumber: '1234567890',
+    branch: 'Kathmandu',
+    ...overrides,
+  };
 }
 
-describe('KycService — phone OTP verification', () => {
-  let mockKycRepository: {
+function fakeFile(name: string): Express.Multer.File {
+  return { originalname: name } as Express.Multer.File;
+}
+
+describe('KycService.submitKyc', () => {
+  let repo: {
     findKycByUserId: jest.Mock;
     findKycById: jest.Mock;
+    findByDocumentIdentity: jest.Mock;
     saveKyc: jest.Mock;
     createKyc: jest.Mock;
     findBankByUserId: jest.Mock;
     createBank: jest.Mock;
     saveBank: jest.Mock;
   };
-  let mockSmsService: { sendSms: jest.Mock };
-  let mockUsersService: { findById: jest.Mock };
-  let mockMailService: {
+  let storage: { saveFile: jest.Mock; deleteFile: jest.Mock };
+  let users: { findById: jest.Mock };
+  let mail: {
     sendKycApproved: jest.Mock;
     sendKycRejected: jest.Mock;
     sendKycReceived: jest.Mock;
   };
   let service: KycService;
 
+  const verifiedUser = {
+    id: 'user-1',
+    email: 'u@test.local',
+    username: 'BB000001-2026',
+    phoneVerifiedAt: new Date(),
+  };
+
   beforeEach(() => {
-    mockKycRepository = {
-      findKycByUserId: jest.fn(),
+    repo = {
+      findKycByUserId: jest.fn().mockResolvedValue(null),
       findKycById: jest.fn(),
+      findByDocumentIdentity: jest.fn().mockResolvedValue(null),
       saveKyc: jest.fn((kyc: KycVerification) => Promise.resolve(kyc)),
       createKyc: jest.fn((data: Partial<KycVerification>) => ({
         ...buildKyc(),
@@ -80,240 +107,332 @@ describe('KycService — phone OTP verification', () => {
         Promise.resolve(bank),
       ),
     };
-    mockSmsService = { sendSms: jest.fn().mockResolvedValue(undefined) };
-    mockUsersService = { findById: jest.fn().mockResolvedValue(null) };
-    mockMailService = {
+    storage = {
+      saveFile: jest
+        .fn()
+        .mockImplementation((_f, _u, prefix: string) =>
+          Promise.resolve(`/uploads/${prefix}.png`),
+        ),
+      deleteFile: jest.fn().mockResolvedValue(undefined),
+    };
+    users = { findById: jest.fn().mockResolvedValue(verifiedUser) };
+    mail = {
       sendKycApproved: jest.fn().mockResolvedValue(undefined),
       sendKycRejected: jest.fn().mockResolvedValue(undefined),
       sendKycReceived: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new KycService(
-      mockKycRepository as never,
+      repo as never,
       { encrypt: jest.fn((v: string) => `enc(${v})`) } as never,
-      {
-        saveFile: jest.fn().mockResolvedValue('/some/path'),
-        deleteFile: jest.fn().mockResolvedValue(undefined),
-      } as never,
-      mockMailService as never,
-      mockUsersService as never,
-      mockSmsService as never,
+      storage as never,
+      mail as never,
+      users as never,
     );
   });
 
-  describe('sendPhoneOtp', () => {
-    it('throws if the caller has no KYC submission', async () => {
-      mockKycRepository.findKycByUserId.mockResolvedValue(null);
-      await expect(service.sendPhoneOtp('user-1')).rejects.toThrow(
-        NotFoundException,
-      );
+  // ─── The phone gate ───────────────────────────────────────────────────────
+
+  it('refuses a submission from an account with no verified phone', async () => {
+    users.findById.mockResolvedValue({
+      ...verifiedUser,
+      phoneVerifiedAt: null,
     });
 
-    it('throws if the phone is already verified', async () => {
-      mockKycRepository.findKycByUserId.mockResolvedValue(
-        buildKyc({ phoneVerifiedAt: new Date() }),
-      );
-      await expect(service.sendPhoneOtp('user-1')).rejects.toThrow(
-        BadRequestException,
-      );
+    await expect(
+      service.submitKyc('user-1', buildDto(), {
+        nidFront: [fakeFile('nid.png')],
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  // ─── One document, one account ────────────────────────────────────────────
+
+  it('refuses a document already registered to someone else', async () => {
+    repo.findByDocumentIdentity.mockResolvedValue(
+      buildKyc({ userId: 'someone-else' }),
+    );
+
+    await expect(
+      service.submitKyc('user-1', buildDto(), {
+        nidFront: [fakeFile('nid.png')],
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows resubmitting the same document the caller already holds', async () => {
+    const existing = buildKyc({ status: KycStatus.REJECTED });
+    repo.findKycByUserId.mockResolvedValue(existing);
+    repo.findByDocumentIdentity.mockResolvedValue(existing);
+
+    await expect(
+      service.submitKyc('user-1', buildDto(), {}),
+    ).resolves.toMatchObject({ status: KycStatus.PENDING });
+  });
+
+  // ─── First submission requires every file ─────────────────────────────────
+
+  it('requires the document files on a first submission', async () => {
+    await expect(service.submitKyc('user-1', buildDto(), {})).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('names the missing slots for CITIZENSHIP', async () => {
+    const dto = buildDto({
+      documentType: DocumentType.CITIZENSHIP,
+      documentId: 'CTZ-1',
     });
-
-    it('sends an SMS and persists the OTP hash + expiry', async () => {
-      const kyc = buildKyc();
-      mockKycRepository.findKycByUserId.mockResolvedValue(kyc);
-
-      const result = await service.sendPhoneOtp('user-1');
-
-      expect(mockSmsService.sendSms).toHaveBeenCalledTimes(1);
-      const [to, text] = mockSmsService.sendSms.mock.calls[0] as [
-        string,
-        string,
-      ];
-      expect(to).toBe(kyc.primaryPhone);
-      expect(text).toMatch(/\d{6}/);
-      expect(kyc.phoneOtpHash).not.toBeNull();
-      expect(kyc.phoneOtpExpiresAt).not.toBeNull();
-      expect(kyc.phoneOtpAttempts).toBe(0);
-      expect(result).toEqual({ message: 'Verification code sent' });
-    });
-
-    it('propagates the SMS gateway failure instead of persisting an OTP', async () => {
-      mockKycRepository.findKycByUserId.mockResolvedValue(buildKyc());
-      mockSmsService.sendSms.mockRejectedValue(new Error('Sparrow is down'));
-
-      await expect(service.sendPhoneOtp('user-1')).rejects.toThrow(
-        'Sparrow is down',
-      );
+    await expect(
+      service.submitKyc('user-1', dto, {
+        citizenshipFront: [fakeFile('front.png')],
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: expect.stringContaining('citizenshipBack') as unknown,
+      }) as unknown,
     });
   });
 
-  describe('verifyPhoneOtp', () => {
-    it('verifies on a correct, unexpired code', async () => {
-      const code = '123456';
-      const kyc = buildKyc({
-        phoneOtpHash: hashCode(code),
-        phoneOtpExpiresAt: new Date(Date.now() + 60_000),
-        phoneOtpAttempts: 0,
-      });
-      mockKycRepository.findKycByUserId.mockResolvedValue(kyc);
+  // ─── Resubmission keeps what it is not given ──────────────────────────────
 
-      const result = await service.verifyPhoneOtp('user-1', { code });
+  it('keeps the existing document when the slot is omitted on a resubmission', async () => {
+    repo.findKycByUserId.mockResolvedValue(
+      buildKyc({ status: KycStatus.REJECTED, nidFrontPath: '/old-nid.png' }),
+    );
 
-      expect(result).toEqual({ message: 'Phone number verified' });
-      expect(kyc.phoneVerifiedAt).not.toBeNull();
-      expect(kyc.phoneOtpHash).toBeNull();
-      expect(kyc.phoneOtpExpiresAt).toBeNull();
-    });
+    await service.submitKyc('user-1', buildDto(), {});
 
-    it('is idempotent once already verified — does not check the code', async () => {
-      const kyc = buildKyc({ phoneVerifiedAt: new Date() });
-      mockKycRepository.findKycByUserId.mockResolvedValue(kyc);
-
-      const result = await service.verifyPhoneOtp('user-1', {
-        code: '000000',
-      });
-
-      expect(result).toEqual({ message: 'Phone number already verified' });
-      expect(mockKycRepository.saveKyc).not.toHaveBeenCalled();
-    });
-
-    it('rejects an incorrect code and increments attempts', async () => {
-      const kyc = buildKyc({
-        phoneOtpHash: hashCode('123456'),
-        phoneOtpExpiresAt: new Date(Date.now() + 60_000),
-        phoneOtpAttempts: 0,
-      });
-      mockKycRepository.findKycByUserId.mockResolvedValue(kyc);
-
-      await expect(
-        service.verifyPhoneOtp('user-1', { code: '999999' }),
-      ).rejects.toThrow(BadRequestException);
-      expect(kyc.phoneOtpAttempts).toBe(1);
-      expect(kyc.phoneVerifiedAt).toBeNull();
-    });
-
-    it('rejects once the max attempt count is reached', async () => {
-      const kyc = buildKyc({
-        phoneOtpHash: hashCode('123456'),
-        phoneOtpExpiresAt: new Date(Date.now() + 60_000),
-        phoneOtpAttempts: 5,
-      });
-      mockKycRepository.findKycByUserId.mockResolvedValue(kyc);
-
-      await expect(
-        service.verifyPhoneOtp('user-1', { code: '123456' }),
-      ).rejects.toThrow('Too many incorrect attempts');
-    });
-
-    it('rejects an expired code', async () => {
-      const kyc = buildKyc({
-        phoneOtpHash: hashCode('123456'),
-        phoneOtpExpiresAt: new Date(Date.now() - 1000),
-        phoneOtpAttempts: 0,
-      });
-      mockKycRepository.findKycByUserId.mockResolvedValue(kyc);
-
-      await expect(
-        service.verifyPhoneOtp('user-1', { code: '123456' }),
-      ).rejects.toThrow('expired');
-    });
-
-    it('rejects when no OTP was ever requested', async () => {
-      mockKycRepository.findKycByUserId.mockResolvedValue(buildKyc());
-
-      await expect(
-        service.verifyPhoneOtp('user-1', { code: '123456' }),
-      ).rejects.toThrow('No verification code requested');
-    });
+    expect(storage.saveFile).not.toHaveBeenCalled();
+    expect(repo.saveKyc).toHaveBeenCalledWith(
+      expect.objectContaining({ nidFrontPath: '/old-nid.png' }),
+    );
+    // The retained file must not be deleted as if it had been superseded.
+    expect(storage.deleteFile).not.toHaveBeenCalled();
   });
 
-  describe('reviewKyc — phone verification gate', () => {
-    it('blocks APPROVE when the phone is not verified', async () => {
-      mockKycRepository.findKycById.mockResolvedValue(
-        buildKyc({ phoneVerifiedAt: null }),
-      );
+  it('replaces only the slot that was re-uploaded, and deletes just the old one', async () => {
+    repo.findKycByUserId.mockResolvedValue(
+      buildKyc({
+        status: KycStatus.REJECTED,
+        documentType: DocumentType.CITIZENSHIP,
+        documentId: 'CTZ-1',
+        citizenshipFrontPath: '/old-front.png',
+        citizenshipBackPath: '/old-back.png',
+        nidFrontPath: null,
+      }),
+    );
 
-      await expect(
-        service.reviewKyc('kyc-1', { action: ReviewAction.APPROVE }, 'admin-1'),
-      ).rejects.toThrow('phone number is not verified');
-    });
+    await service.submitKyc(
+      'user-1',
+      buildDto({ documentType: DocumentType.CITIZENSHIP, documentId: 'CTZ-1' }),
+      { citizenshipBack: [fakeFile('back.png')] },
+    );
 
-    it('allows APPROVE once the phone is verified', async () => {
-      mockKycRepository.findKycById.mockResolvedValue(
-        buildKyc({ phoneVerifiedAt: new Date() }),
-      );
-
-      const result = await service.reviewKyc(
-        'kyc-1',
-        { action: ReviewAction.APPROVE },
-        'admin-1',
-      );
-
-      expect(result.status).toBe(KycStatus.APPROVED);
-    });
-
-    it('allows REJECT regardless of phone verification', async () => {
-      mockKycRepository.findKycById.mockResolvedValue(
-        buildKyc({ phoneVerifiedAt: null }),
-      );
-
-      const result = await service.reviewKyc(
-        'kyc-1',
-        { action: ReviewAction.REJECT, rejectionReason: 'Blurry document' },
-        'admin-1',
-      );
-
-      expect(result.status).toBe(KycStatus.REJECTED);
-    });
+    expect(repo.saveKyc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        citizenshipFrontPath: '/old-front.png',
+        citizenshipBackPath: '/uploads/citizenship-back.png',
+      }),
+    );
+    expect(storage.deleteFile).toHaveBeenCalledTimes(1);
+    expect(storage.deleteFile).toHaveBeenCalledWith('/old-back.png');
   });
 
-  describe('submitKyc — phone verification carry-over on resubmission', () => {
-    function buildDto(primaryPhone: string): SubmitKycDto {
-      return {
-        documentType: DocumentType.NID_CARD,
-        primaryPhone,
-        permanentAddressStreet: 'Kathmandu-10',
-        permanentAddressCity: 'Kathmandu',
-        permanentAddressDistrict: 'Kathmandu',
-        permanentAddressProvince: 'Bagmati',
-        bankName: 'Nepal Bank',
-        accountHolderName: 'John Doe',
-        accountNumber: '123456789',
-        branch: 'Kathmandu Branch',
-      };
-    }
+  it('carries nothing over when the document type changes', async () => {
+    repo.findKycByUserId.mockResolvedValue(
+      buildKyc({ status: KycStatus.REJECTED, nidFrontPath: '/old-nid.png' }),
+    );
 
-    const files = {
-      nidFront: [{ buffer: Buffer.from('') } as Express.Multer.File],
+    // Switching NID → PASSPORT with no passport file has nothing to fall back on.
+    await expect(
+      service.submitKyc(
+        'user-1',
+        buildDto({ documentType: DocumentType.PASSPORT, documentId: 'P-1' }),
+        {},
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  // ─── Write before delete ──────────────────────────────────────────────────
+
+  it('leaves the old files intact when an upload fails part-way', async () => {
+    repo.findKycByUserId.mockResolvedValue(
+      buildKyc({
+        status: KycStatus.REJECTED,
+        documentType: DocumentType.CITIZENSHIP,
+        documentId: 'CTZ-1',
+        citizenshipFrontPath: '/old-front.png',
+        citizenshipBackPath: '/old-back.png',
+        nidFrontPath: null,
+      }),
+    );
+    storage.saveFile
+      .mockResolvedValueOnce('/uploads/citizenship-front.png')
+      .mockRejectedValueOnce(new Error('disk full'));
+
+    const files: KycFiles = {
+      citizenshipFront: [fakeFile('front.png')],
+      citizenshipBack: [fakeFile('back.png')],
     };
 
-    it('keeps phoneVerifiedAt when resubmitting with the same number', async () => {
-      const verifiedAt = new Date('2026-01-01T00:00:00Z');
-      const existing = buildKyc({
+    await expect(
+      service.submitKyc(
+        'user-1',
+        buildDto({
+          documentType: DocumentType.CITIZENSHIP,
+          documentId: 'CTZ-1',
+        }),
+        files,
+      ),
+    ).rejects.toThrow('disk full');
+
+    // The record is untouched, and only the half-written new file is cleaned up.
+    expect(repo.saveKyc).not.toHaveBeenCalled();
+    expect(storage.deleteFile).toHaveBeenCalledWith(
+      '/uploads/citizenship-front.png',
+    );
+    expect(storage.deleteFile).not.toHaveBeenCalledWith('/old-front.png');
+    expect(storage.deleteFile).not.toHaveBeenCalledWith('/old-back.png');
+  });
+
+  // ─── A resubmission is a fresh application ────────────────────────────────
+
+  it('clears the previous verdict and its flagged fields', async () => {
+    repo.findKycByUserId.mockResolvedValue(
+      buildKyc({
         status: KycStatus.REJECTED,
-        phoneVerifiedAt: verifiedAt,
-        primaryPhone: '+9779812345678',
-      });
-      mockKycRepository.findKycByUserId.mockResolvedValue(existing);
+        rejectionReason: 'Blurry photo',
+        rejectedFields: ['nidFront'],
+      }),
+    );
 
-      await service.submitKyc('user-1', buildDto('+9779812345678'), files);
+    await service.submitKyc('user-1', buildDto(), {});
 
-      expect(existing.phoneVerifiedAt).toEqual(verifiedAt);
-      expect(mockSmsService.sendSms).not.toHaveBeenCalled();
+    expect(repo.saveKyc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: KycStatus.PENDING,
+        rejectionReason: null,
+        rejectedFields: null,
+      }),
+    );
+  });
+});
+
+describe('KycService.reviewKyc', () => {
+  let repo: { findKycById: jest.Mock; saveKyc: jest.Mock };
+  let users: { findById: jest.Mock };
+  let mail: { sendKycApproved: jest.Mock; sendKycRejected: jest.Mock };
+  let service: KycService;
+
+  beforeEach(() => {
+    repo = {
+      findKycById: jest.fn().mockResolvedValue(buildKyc()),
+      saveKyc: jest.fn((kyc: KycVerification) => Promise.resolve(kyc)),
+    };
+    users = { findById: jest.fn() };
+    mail = {
+      sendKycApproved: jest.fn().mockResolvedValue(undefined),
+      sendKycRejected: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new KycService(
+      repo as never,
+      {} as never,
+      {} as never,
+      mail as never,
+      users as never,
+    );
+  });
+
+  it('refuses to approve while the applicant’s phone is unverified', async () => {
+    users.findById.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@test.local',
+      username: 'BB000001-2026',
+      phoneVerifiedAt: null,
     });
 
-    it('resets phoneVerifiedAt and re-sends an OTP when the number changes', async () => {
-      const existing = buildKyc({
-        status: KycStatus.REJECTED,
-        phoneVerifiedAt: new Date('2026-01-01T00:00:00Z'),
-        primaryPhone: '+9779812345678',
-      });
-      mockKycRepository.findKycByUserId.mockResolvedValue(existing);
+    await expect(
+      service.reviewKyc('kyc-1', { action: ReviewAction.APPROVE }, 'admin-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
 
-      await service.submitKyc('user-1', buildDto('+9779887654321'), files);
-
-      expect(existing.phoneVerifiedAt).toBeNull();
-      expect(mockSmsService.sendSms).toHaveBeenCalledTimes(1);
+  it('records the flagged fields on a rejection', async () => {
+    users.findById.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@test.local',
+      username: 'BB000001-2026',
+      phoneVerifiedAt: new Date(),
     });
+
+    await service.reviewKyc(
+      'kyc-1',
+      {
+        action: ReviewAction.REJECT,
+        rejectionReason: 'Photo unreadable',
+        rejectedFields: ['nidFront'],
+      },
+      'admin-1',
+    );
+
+    expect(repo.saveKyc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: KycStatus.REJECTED,
+        rejectedFields: ['nidFront'],
+      }),
+    );
+  });
+
+  it('clears any previous flags on an approval', async () => {
+    repo.findKycById.mockResolvedValue(
+      buildKyc({ rejectedFields: ['nidFront'], rejectionReason: 'old' }),
+    );
+    users.findById.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@test.local',
+      username: 'BB000001-2026',
+      phoneVerifiedAt: new Date(),
+    });
+
+    await service.reviewKyc(
+      'kyc-1',
+      { action: ReviewAction.APPROVE },
+      'admin-1',
+    );
+
+    expect(repo.saveKyc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: KycStatus.APPROVED,
+        rejectionReason: null,
+        rejectedFields: null,
+      }),
+    );
+  });
+
+  it('addresses the applicant by handle, never by the name under review', async () => {
+    users.findById.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@test.local',
+      username: 'BB000001-2026',
+      phoneVerifiedAt: new Date(),
+    });
+
+    await service.reviewKyc(
+      'kyc-1',
+      { action: ReviewAction.APPROVE },
+      'admin-1',
+    );
+
+    expect(mail.sendKycApproved).toHaveBeenCalledWith(
+      'u@test.local',
+      'BB000001-2026',
+    );
+  });
+
+  it('404s on an unknown record', async () => {
+    repo.findKycById.mockResolvedValue(null);
+    await expect(
+      service.reviewKyc('nope', { action: ReviewAction.APPROVE }, 'admin-1'),
+    ).rejects.toThrow(NotFoundException);
   });
 });

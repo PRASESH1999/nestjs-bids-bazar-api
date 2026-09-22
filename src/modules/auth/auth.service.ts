@@ -31,7 +31,6 @@ interface SocialLoginParams {
   provider: 'google' | 'facebook';
   providerId: string;
   email: string | null;
-  name: string;
 }
 
 interface FacebookProfile {
@@ -143,7 +142,6 @@ export class AuthService {
       provider: 'google',
       providerId: payload.sub,
       email: payload.email ?? null,
-      name: payload.name ?? payload.email ?? 'Google User',
     });
 
     return this.login(user);
@@ -156,7 +154,6 @@ export class AuthService {
       provider: 'facebook',
       providerId: profile.id,
       email: profile.email,
-      name: profile.name,
     });
 
     return this.login(user);
@@ -258,7 +255,9 @@ export class AuthService {
     const username = await this.usersService.generateNextUsername();
     return this.usersService.create({
       email: normalizedEmail,
-      name: params.name,
+      // The provider's display name is deliberately dropped: User carries no
+      // name, and an unverified one from Google/Facebook is exactly the
+      // second, non-authoritative copy that moving names to KYC removed.
       username,
       password: null,
       isEmailVerified: true,
@@ -459,7 +458,7 @@ export class AuthService {
       await this.mailService.sendPasswordResetEmail(
         user.email,
         rawToken,
-        user.name,
+        user.username,
       );
     } catch (err: unknown) {
       this.logger.error(
@@ -534,7 +533,7 @@ export class AuthService {
     try {
       await this.mailService.sendPasswordChangedConfirmation(
         user.email,
-        user.name,
+        user.username,
       );
     } catch (err: unknown) {
       this.logger.error(
@@ -614,7 +613,7 @@ export class AuthService {
     try {
       await this.mailService.sendEmailChangedNotificationToOld(
         oldEmail,
-        user.name,
+        user.username,
         newEmail,
       );
     } catch (err: unknown) {
@@ -627,7 +626,7 @@ export class AuthService {
     try {
       await this.mailService.sendEmailChangedNotificationToNew(
         newEmail,
-        user.name,
+        user.username,
       );
     } catch (err: unknown) {
       this.logger.error(

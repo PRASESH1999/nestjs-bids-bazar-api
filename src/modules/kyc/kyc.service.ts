@@ -5,7 +5,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import * as crypto from 'crypto';
 import { EncryptionService } from '@common/services/encryption.service';
 import { StorageService } from '@common/services/storage.service';
 import { DocumentType } from '@common/enums/document-type.enum';
@@ -15,21 +14,32 @@ import { BankDetailDto } from './dto/bank-detail.dto';
 import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewAction, ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
-import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
-import { KycVerification } from './entities/kyc-verification.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { UsersService } from '@modules/users/users.service';
-import { SparrowSmsService } from '@modules/sms/sparrow-sms.service';
 
-const PHONE_OTP_TTL_MS = 5 * 60 * 1000;
-const PHONE_OTP_MAX_ATTEMPTS = 5;
+/** The multipart field names a KYC submission can carry a document in. */
+export type KycFileSlot =
+  | 'citizenshipFront'
+  | 'citizenshipBack'
+  | 'passport'
+  | 'nidFront';
 
-export interface KycFiles {
-  citizenshipFront?: Express.Multer.File[];
-  citizenshipBack?: Express.Multer.File[];
-  passport?: Express.Multer.File[];
-  nidFront?: Express.Multer.File[];
-}
+/** The matching columns on KycVerification. */
+export type KycPathKey =
+  | 'citizenshipFrontPath'
+  | 'citizenshipBackPath'
+  | 'passportPath'
+  | 'nidFrontPath';
+
+export type KycFiles = Partial<Record<KycFileSlot, Express.Multer.File[]>>;
+
+/** Filename prefix each slot is stored under. */
+const SLOT_STORAGE_PREFIX: Record<KycFileSlot, string> = {
+  citizenshipFront: 'citizenship-front',
+  citizenshipBack: 'citizenship-back',
+  passport: 'passport',
+  nidFront: 'nid-front',
+};
 
 export interface SellEligibility {
   kycApproved: boolean;
@@ -47,8 +57,26 @@ export class KycService {
     private readonly storageService: StorageService,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
-    private readonly smsService: SparrowSmsService,
   ) {}
+
+  /**
+   * Document slots each type requires. Single source of truth for "is this
+   * submission complete?", used both to validate and to decide which existing
+   * file may be carried over on a resubmission.
+   */
+  private static readonly REQUIRED_SLOTS: Record<DocumentType, KycFileSlot[]> =
+    {
+      [DocumentType.CITIZENSHIP]: ['citizenshipFront', 'citizenshipBack'],
+      [DocumentType.PASSPORT]: ['passport'],
+      [DocumentType.NID_CARD]: ['nidFront'],
+    };
+
+  private static readonly SLOT_TO_PATH: Record<KycFileSlot, KycPathKey> = {
+    citizenshipFront: 'citizenshipFrontPath',
+    citizenshipBack: 'citizenshipBackPath',
+    passport: 'passportPath',
+    nidFront: 'nidFrontPath',
+  };
 
   async submitKyc(userId: string, dto: SubmitKycDto, files: KycFiles) {
     const existing = await this.kycRepository.findKycByUserId(userId);
@@ -60,90 +88,132 @@ export class KycService {
       throw new ConflictException('Your KYC has already been approved');
     }
 
-    // Validate document + file combination
-    const front = files.citizenshipFront?.[0];
-    const back = files.citizenshipBack?.[0];
-    const passport = files.passport?.[0];
-    const nidFront = files.nidFront?.[0];
-
-    if (dto.documentType === DocumentType.CITIZENSHIP) {
-      if (!front || !back) {
-        throw new BadRequestException(
-          'Both citizenshipFront and citizenshipBack files are required for CITIZENSHIP',
-        );
-      }
-    } else if (dto.documentType === DocumentType.PASSPORT) {
-      if (!passport) {
-        throw new BadRequestException(
-          'A passport file is required for PASSPORT',
-        );
-      }
-    } else {
-      if (!nidFront) {
-        throw new BadRequestException(
-          'A nidFront file is required for NID_CARD',
-        );
-      }
-    }
-
-    // Delete old files when resubmitting after REJECTED
-    if (existing) {
-      const oldPaths = [
-        existing.citizenshipFrontPath,
-        existing.citizenshipBackPath,
-        existing.passportPath,
-        existing.nidFrontPath,
-      ].filter((p): p is string => p !== null);
-      await Promise.all(oldPaths.map((p) => this.storageService.deleteFile(p)));
-    }
-
-    // Persist new files
-    let citizenshipFrontPath: string | null = null;
-    let citizenshipBackPath: string | null = null;
-    let passportPath: string | null = null;
-    let nidFrontPath: string | null = null;
-
-    if (dto.documentType === DocumentType.CITIZENSHIP) {
-      citizenshipFrontPath = await this.storageService.saveFile(
-        front!,
-        userId,
-        'citizenship-front',
-      );
-      citizenshipBackPath = await this.storageService.saveFile(
-        back!,
-        userId,
-        'citizenship-back',
-      );
-    } else if (dto.documentType === DocumentType.PASSPORT) {
-      passportPath = await this.storageService.saveFile(
-        passport!,
-        userId,
-        'passport',
-      );
-    } else {
-      nidFrontPath = await this.storageService.saveFile(
-        nidFront!,
-        userId,
-        'nid-front',
+    /*
+     * The phone gate. Verification now precedes KYC rather than hanging off it,
+     * so a submission cannot be accepted from an account that has not proved a
+     * number — there would be no reliable way to reach the applicant about it.
+     */
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+    if (!user.phoneVerifiedAt) {
+      throw new BadRequestException(
+        'Verify your phone number before submitting KYC',
       );
     }
 
-    // A previously-verified phone survives resubmission only if the number
-    // didn't change — otherwise it must be re-verified from scratch.
-    const keepPhoneVerification =
-      existing?.phoneVerifiedAt != null &&
-      existing.primaryPhone === dto.primaryPhone;
+    /*
+     * One document backs one account. Checked here so the applicant gets an
+     * explanation; the partial unique index on (documentType, documentId) is
+     * what actually guarantees it under a race.
+     */
+    const documentHolder = await this.kycRepository.findByDocumentIdentity(
+      dto.documentType,
+      dto.documentId,
+    );
+    if (documentHolder && documentHolder.userId !== userId) {
+      throw new ConflictException(
+        'That document is already registered to another account',
+      );
+    }
 
-    // Save KYC record (update on resubmission, create otherwise)
+    /*
+     * Which files this submission needs, and where each one comes from.
+     *
+     * On a **first** submission every required slot must be uploaded. On a
+     * **resubmission** an omitted slot keeps the file already on file — a
+     * rejection is usually about one thing, and forcing someone to
+     * re-photograph a passport because their ward number was wrong is the kind
+     * of friction that makes people give up. Changing document type is the
+     * exception: nothing from the old type carries over.
+     */
+    const requiredSlots = KycService.REQUIRED_SLOTS[dto.documentType];
+    const sameDocumentType = existing?.documentType === dto.documentType;
+
+    const resolved: Record<KycPathKey, string | null> = {
+      citizenshipFrontPath: null,
+      citizenshipBackPath: null,
+      passportPath: null,
+      nidFrontPath: null,
+    };
+    const missing: string[] = [];
+    const uploads: { slot: KycFileSlot; file: Express.Multer.File }[] = [];
+
+    for (const slot of requiredSlots) {
+      const pathKey = KycService.SLOT_TO_PATH[slot];
+      const uploaded = files[slot]?.[0];
+      const retained = sameDocumentType ? (existing?.[pathKey] ?? null) : null;
+
+      if (uploaded) {
+        uploads.push({ slot, file: uploaded });
+      } else if (retained) {
+        resolved[pathKey] = retained;
+      } else {
+        missing.push(slot);
+      }
+    }
+
+    if (missing.length > 0) {
+      throw new BadRequestException({
+        message: `Missing required document file(s) for ${dto.documentType}: ${missing.join(', ')}`,
+        fields: missing.map((slot) => ({
+          field: slot,
+          message: 'is required',
+        })),
+      });
+    }
+
+    /*
+     * Write every new file BEFORE deleting anything it replaces.
+     *
+     * The previous order deleted the old files first, so a failure part-way
+     * through the uploads left the applicant with a record pointing at files
+     * that no longer existed — unreviewable, and unrecoverable without support.
+     * If a save throws here, whatever was already written is cleaned up and the
+     * record is left exactly as it was.
+     */
+    const written: string[] = [];
+    try {
+      for (const { slot, file } of uploads) {
+        const savedPath = await this.storageService.saveFile(
+          file,
+          userId,
+          SLOT_STORAGE_PREFIX[slot],
+        );
+        written.push(savedPath);
+        resolved[KycService.SLOT_TO_PATH[slot]] = savedPath;
+      }
+    } catch (err: unknown) {
+      await Promise.all(
+        written.map((path) =>
+          this.storageService.deleteFile(path).catch(() => undefined),
+        ),
+      );
+      throw err;
+    }
+
+    // Files the record no longer points at: the slots just replaced, plus
+    // everything belonging to a document type that was switched away from.
+    const supersededPaths = existing
+      ? (
+          [
+            'citizenshipFrontPath',
+            'citizenshipBackPath',
+            'passportPath',
+            'nidFrontPath',
+          ] as KycPathKey[]
+        )
+          .map((key) => existing[key])
+          .filter((path): path is string => path !== null)
+          .filter((path) => !Object.values(resolved).includes(path))
+      : [];
+
     const kycPayload = {
       userId,
+      fullName: dto.fullName,
       documentType: dto.documentType,
-      citizenshipFrontPath,
-      citizenshipBackPath,
-      passportPath,
-      nidFrontPath,
-      primaryPhone: dto.primaryPhone,
-      secondaryPhone: dto.secondaryPhone ?? null,
+      documentId: dto.documentId,
+      ...resolved,
+      emergencyContactPhone: dto.emergencyContactPhone ?? null,
       permanentAddress: {
         street: dto.permanentAddressStreet,
         city: dto.permanentAddressCity ?? '',
@@ -162,13 +232,12 @@ export class KycService {
         : null,
       remarks: dto.remarks ?? null,
       status: KycStatus.PENDING,
+      // A resubmission is a fresh application: the previous verdict and the
+      // fields it flagged must not follow it back into the queue.
       rejectionReason: null,
+      rejectedFields: null,
       reviewedBy: null,
       reviewedAt: null,
-      phoneVerifiedAt: keepPhoneVerification ? existing.phoneVerifiedAt : null,
-      phoneOtpHash: null,
-      phoneOtpExpiresAt: null,
-      phoneOtpAttempts: 0,
     };
 
     let kyc;
@@ -181,18 +250,18 @@ export class KycService {
       );
     }
 
-    if (!keepPhoneVerification) {
-      // Non-fatal: a Sparrow outage must not fail the whole submission —
-      // the seller can always request a fresh code later via send-otp.
-      try {
-        await this.issueAndSendOtp(kyc);
-      } catch (err: unknown) {
-        this.logger.error(
-          `Failed to auto-send phone OTP on submit for KYC ${kyc.id}: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
+    // Only now that the record points at the new files. Best-effort: an
+    // orphaned file is a housekeeping problem, a failed submission is not.
+    await Promise.all(
+      supersededPaths.map((path) =>
+        this.storageService.deleteFile(path).catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to delete superseded KYC file ${path}: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          );
+        }),
+      ),
+    );
 
     await this.upsertBankDetails(userId, {
       bankName: dto.bankName,
@@ -202,11 +271,7 @@ export class KycService {
       swiftCode: dto.swiftCode,
     });
 
-    // Send notification email
-    const user = await this.usersService.findById(userId);
-    if (user) {
-      await this.mailService.sendKycReceived(user.email, user.name);
-    }
+    await this.mailService.sendKycReceived(user.email, user.username);
 
     return {
       id: kyc.id,
@@ -298,18 +363,39 @@ export class KycService {
     return {
       id: kyc.id,
       status: kyc.status,
+      fullName: kyc.fullName,
       documentType: kyc.documentType,
+      documentId: kyc.documentId,
       citizenshipFrontUploaded: !!kyc.citizenshipFrontPath,
       citizenshipBackUploaded: !!kyc.citizenshipBackPath,
       passportUploaded: !!kyc.passportPath,
       nidFrontUploaded: !!kyc.nidFrontPath,
-      primaryPhone: kyc.primaryPhone,
-      secondaryPhone: kyc.secondaryPhone,
+      /*
+       * The applicant's own documents, viewable by them.
+       *
+       * Previously only the booleans above were returned, so someone correcting
+       * a rejected submission could see *that* a passport was on file but not
+       * which image it was — and since resubmission demanded every file again,
+       * they had to re-photograph it blind. Now that omitted files are
+       * retained, being able to look at what is already there is what makes
+       * "replace only the flagged one" a decision rather than a guess.
+       */
+      citizenshipFrontUrl: kyc.citizenshipFrontPath
+        ? this.getOwnDocumentUrl('citizenshipFront')
+        : null,
+      citizenshipBackUrl: kyc.citizenshipBackPath
+        ? this.getOwnDocumentUrl('citizenshipBack')
+        : null,
+      passportUrl: kyc.passportPath ? this.getOwnDocumentUrl('passport') : null,
+      nidFrontUrl: kyc.nidFrontPath ? this.getOwnDocumentUrl('nidFront') : null,
+      emergencyContactPhone: kyc.emergencyContactPhone,
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
       remarks: kyc.remarks,
       rejectionReason: kyc.rejectionReason,
-      phoneVerifiedAt: kyc.phoneVerifiedAt,
+      // Empty array rather than null on a rejection with no flags, so the form
+      // can tell "reviewer named nothing" from "not rejected".
+      rejectedFields: kyc.rejectedFields ?? [],
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
       updatedAt: kyc.updatedAt,
@@ -322,36 +408,47 @@ export class KycService {
             ),
           }
         : null,
-      citizenshipFrontUrl: kyc.citizenshipFrontPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipFront')
-        : null,
-      citizenshipBackUrl: kyc.citizenshipBackPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'citizenshipBack')
-        : null,
-      passportUrl: kyc.passportPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'passport')
-        : null,
-      nidFrontUrl: kyc.nidFrontPath
-        ? this.getVirtualDocumentUrl(kyc.id, 'nidFront')
-        : null,
+      // NOTE: the document URLs above are the self-service ones. This response
+      // used to carry `getVirtualDocumentUrl(kyc.id, …)` here instead, which
+      // points at the ADMIN-only `/kyc/:id/documents/:fileKey` — so the
+      // applicant was handed four links that answered 403 for them. That is
+      // why the correction form never showed what was already on file.
     };
   }
 
+  /** Self-service document URL — no KYC id in it, the JWT decides the record. */
+  private getOwnDocumentUrl(fileKey: string): string {
+    return `/api/v1/kyc/me/documents/${fileKey}`;
+  }
+
   async getAllKyc(query: FindKycDto) {
-    const { page = 1, limit = 20, status } = query;
+    const { page = 1, limit = 20, status, userId } = query;
     const [records, total] = await this.kycRepository.findAllKycPaginated(
       page,
       limit,
       status,
+      userId,
     );
+
+    // One lookup for the page, never one per row.
+    const applicants = await this.usersService.findByIds(
+      records.map((kyc) => kyc.userId),
+    );
+    const applicantById = new Map(applicants.map((u) => [u.id, u]));
 
     const data = records.map((kyc) => ({
       id: kyc.id,
       userId: kyc.userId,
       status: kyc.status,
+      fullName: kyc.fullName,
       documentType: kyc.documentType,
+      documentId: kyc.documentId,
+      applicantUsername: applicantById.get(kyc.userId)?.username ?? null,
+      applicantPhone: applicantById.get(kyc.userId)?.phone ?? null,
+      applicantPhoneVerified:
+        applicantById.get(kyc.userId)?.phoneVerifiedAt != null,
       rejectionReason: kyc.rejectionReason,
-      phoneVerifiedAt: kyc.phoneVerifiedAt,
+      rejectedFields: kyc.rejectedFields ?? [],
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
       citizenshipFrontUrl: kyc.citizenshipFrontPath
@@ -377,20 +474,33 @@ export class KycService {
       throw new NotFoundException('KYC record not found');
     }
 
-    const bank = await this.kycRepository.findBankByUserId(kyc.userId);
+    const [bank, applicant] = await Promise.all([
+      this.kycRepository.findBankByUserId(kyc.userId),
+      this.usersService.findById(kyc.userId),
+    ]);
 
     return {
       id: kyc.id,
       userId: kyc.userId,
+      fullName: kyc.fullName,
       documentType: kyc.documentType,
-      primaryPhone: kyc.primaryPhone,
-      secondaryPhone: kyc.secondaryPhone,
+      documentId: kyc.documentId,
+      /*
+       * The applicant's account phone, read off the user rather than the
+       * submission — that is where it lives now. The reviewer needs it because
+       * approval is refused while it is unverified, so without it the Approve
+       * button fails for a reason nothing on the page explains.
+       */
+      applicantUsername: applicant?.username ?? null,
+      applicantPhone: applicant?.phone ?? null,
+      applicantPhoneVerified: applicant?.phoneVerifiedAt != null,
+      emergencyContactPhone: kyc.emergencyContactPhone,
       permanentAddress: kyc.permanentAddress,
       temporaryAddress: kyc.temporaryAddress,
       remarks: kyc.remarks,
       status: kyc.status,
       rejectionReason: kyc.rejectionReason,
-      phoneVerifiedAt: kyc.phoneVerifiedAt,
+      rejectedFields: kyc.rejectedFields ?? [],
       reviewedBy: kyc.reviewedBy,
       reviewedAt: kyc.reviewedAt,
       createdAt: kyc.createdAt,
@@ -431,9 +541,16 @@ export class KycService {
       );
     }
 
-    if (dto.action === ReviewAction.APPROVE && !kyc.phoneVerifiedAt) {
+    const user = await this.usersService.findById(kyc.userId);
+    if (!user) throw new NotFoundException('Applicant not found');
+
+    // The gate moved to User along with the number itself. Kept on approval as
+    // well as on submission: a submission predating the move may never have
+    // been verified, and approving it would hand out seller rights to an
+    // account nobody can reach.
+    if (dto.action === ReviewAction.APPROVE && !user.phoneVerifiedAt) {
       throw new BadRequestException(
-        'Cannot approve: phone number is not verified yet',
+        'Cannot approve: the applicant’s phone number is not verified',
       );
     }
 
@@ -445,121 +562,35 @@ export class KycService {
     kyc.reviewedAt = new Date();
     kyc.rejectionReason =
       dto.action === ReviewAction.REJECT ? (dto.rejectionReason ?? null) : null;
+    // Cleared on approval so a later rejection cannot inherit stale flags.
+    kyc.rejectedFields =
+      dto.action === ReviewAction.REJECT ? (dto.rejectedFields ?? null) : null;
 
     const updatedKyc = await this.kycRepository.saveKyc(kyc);
 
-    // Send notification email
-    const user = await this.usersService.findById(kyc.userId);
-    if (user) {
-      if (dto.action === ReviewAction.APPROVE) {
-        await this.mailService.sendKycApproved(user.email, user.name);
-      } else {
-        await this.mailService.sendKycRejected(
-          user.email,
-          user.name,
-          dto.rejectionReason!,
-        );
-      }
+    // Addressed by handle: User carries no name, and the KYC full name is only
+    // authoritative once approved — using it on a rejection would address
+    // someone by a name the platform has just declined to accept.
+    if (dto.action === ReviewAction.APPROVE) {
+      await this.mailService.sendKycApproved(user.email, user.username);
+    } else {
+      await this.mailService.sendKycRejected(
+        user.email,
+        user.username,
+        dto.rejectionReason!,
+      );
     }
 
     return updatedKyc;
   }
 
-  // ─── Phone verification ───────────────────────────────────────────────────
-
-  /**
-   * Generates a fresh OTP, sends it via Sparrow, and persists its hash.
-   * Throws (propagates the SMS failure) if the send itself fails — callers
-   * that want a non-fatal auto-send (e.g. on submit) must catch it themselves.
+  /*
+   * Phone verification used to live here, keyed off the KYC row. It now lives
+   * on the account (UsersModule → PhoneVerificationService), because it has to
+   * happen *before* a submission rather than alongside one: submitKyc refuses
+   * an account whose number is unverified. Nothing about a person's phone is
+   * specific to one KYC application.
    */
-  private async issueAndSendOtp(kyc: KycVerification): Promise<void> {
-    if (!kyc.primaryPhone) {
-      throw new BadRequestException(
-        'No phone number on file for this KYC submission',
-      );
-    }
-
-    const code = crypto.randomInt(100000, 1000000).toString();
-    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
-
-    await this.smsService.sendSms(
-      kyc.primaryPhone,
-      `Your BidsBazar phone verification code is ${code}. It expires in 5 minutes.`,
-    );
-
-    kyc.phoneOtpHash = codeHash;
-    kyc.phoneOtpExpiresAt = new Date(Date.now() + PHONE_OTP_TTL_MS);
-    kyc.phoneOtpAttempts = 0;
-    await this.kycRepository.saveKyc(kyc);
-  }
-
-  /**
-   * Requests a fresh OTP for the caller's own KYC submission. Callable at any
-   * time before verification — there is no deadline tied to submission.
-   */
-  async sendPhoneOtp(userId: string): Promise<{ message: string }> {
-    const kyc = await this.kycRepository.findKycByUserId(userId);
-    if (!kyc) {
-      throw new NotFoundException('Submit KYC before verifying your phone');
-    }
-    if (kyc.phoneVerifiedAt) {
-      throw new BadRequestException('Phone number is already verified');
-    }
-
-    await this.issueAndSendOtp(kyc);
-    return { message: 'Verification code sent' };
-  }
-
-  /**
-   * Verifies the caller's own KYC phone OTP. Admin approval is blocked on
-   * `phoneVerifiedAt` (see reviewKyc) but this endpoint itself is independent
-   * of KYC status — a rejected submission can still get its phone verified
-   * ahead of a resubmission with the same number.
-   */
-  async verifyPhoneOtp(
-    userId: string,
-    dto: VerifyPhoneOtpDto,
-  ): Promise<{ message: string }> {
-    const kyc = await this.kycRepository.findKycByUserId(userId);
-    if (!kyc) {
-      throw new NotFoundException('KYC record not found');
-    }
-    if (kyc.phoneVerifiedAt) {
-      return { message: 'Phone number already verified' };
-    }
-
-    if (!kyc.phoneOtpHash || !kyc.phoneOtpExpiresAt) {
-      throw new BadRequestException(
-        'No verification code requested. Please request one first.',
-      );
-    }
-    if (kyc.phoneOtpExpiresAt < new Date()) {
-      throw new BadRequestException(
-        'Verification code has expired. Please request a new one.',
-      );
-    }
-    if (kyc.phoneOtpAttempts >= PHONE_OTP_MAX_ATTEMPTS) {
-      throw new BadRequestException(
-        'Too many incorrect attempts. Please request a new code.',
-      );
-    }
-
-    const codeHash = crypto.createHash('sha256').update(dto.code).digest('hex');
-
-    if (codeHash !== kyc.phoneOtpHash) {
-      kyc.phoneOtpAttempts += 1;
-      await this.kycRepository.saveKyc(kyc);
-      throw new BadRequestException('Incorrect verification code');
-    }
-
-    kyc.phoneVerifiedAt = new Date();
-    kyc.phoneOtpHash = null;
-    kyc.phoneOtpExpiresAt = null;
-    kyc.phoneOtpAttempts = 0;
-    await this.kycRepository.saveKyc(kyc);
-
-    return { message: 'Phone number verified' };
-  }
 
   async getDecryptedBankDetails(kycId: string) {
     const kyc = await this.kycRepository.findKycById(kycId);
@@ -585,12 +616,21 @@ export class KycService {
     };
   }
 
+  /**
+   * Streams one document off a submission.
+   *
+   * `ownerUserId`, when given, scopes the lookup to that applicant — the
+   * self-service route passes it so a caller can only ever reach their own
+   * files. Admin callers omit it. A mismatch is a 404 rather than a 403: it
+   * does not confirm whose record the id belongs to.
+   */
   async getDocumentFile(
     id: string,
     fileKey: string,
+    ownerUserId?: string,
   ): Promise<{ absolutePath: string; mimetype: string }> {
     const kyc = await this.kycRepository.findKycById(id);
-    if (!kyc) {
+    if (!kyc || (ownerUserId !== undefined && kyc.userId !== ownerUserId)) {
       throw new NotFoundException('KYC record not found');
     }
 

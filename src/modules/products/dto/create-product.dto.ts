@@ -11,7 +11,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional } from 'class-validator';
 import { ItemCondition } from '@common/enums/item-condition.enum';
@@ -140,6 +140,22 @@ export class CreateProductDto {
     description:
       'Self-declared rarity badge. Subject to admin override on review.',
     default: false,
+  })
+  /*
+   * `POST /products` and `PATCH /products/:id` are multipart endpoints (they
+   * carry the image files), and in a multipart body *every* value arrives as a
+   * string. `@IsBoolean()` on its own therefore rejected the string `"true"`
+   * and took the whole listing submission down with it, which is why the
+   * seller-facing rarity control could not be built at all. See OPEN-ITEMS A16.
+   *
+   * Only the two canonical spellings are accepted; anything else is left
+   * untouched so `@IsBoolean()` still reports it rather than silently reading
+   * as false. A real boolean (a JSON body) passes straight through.
+   */
+  @Transform(({ value }): unknown => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value as unknown;
   })
   @IsBoolean()
   @IsOptional()

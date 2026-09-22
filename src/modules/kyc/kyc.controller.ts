@@ -2,8 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  HttpCode,
-  HttpStatus,
   NotFoundException,
   Param,
   Patch,
@@ -16,7 +14,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -37,7 +34,6 @@ import { BankDetailDto } from './dto/bank-detail.dto';
 import { FindKycDto } from './dto/find-kyc.dto';
 import { ReviewKycDto } from './dto/review-kyc.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
-import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 
 @ApiTags('kyc')
 @ApiBearerAuth()
@@ -85,30 +81,49 @@ export class KycController {
     return this.kycService.getMyKyc(req.user.sub);
   }
 
-  @Post('phone/send-otp')
-  @ApiOperation({
-    summary:
-      'Request (or resend) an SMS OTP to verify the phone on own KYC submission',
-  })
-  @RequirePermissions(Permission.KYC_SUBMIT)
-  @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
-  @HttpCode(HttpStatus.OK)
-  async sendPhoneOtp(@Request() req: RequestWithUser) {
-    return this.kycService.sendPhoneOtp(req.user.sub);
-  }
+  /*
+   * The phone OTP endpoints moved to POST /users/me/phone/send-otp and
+   * /verify-otp. They were never about KYC: a phone belongs to the account, and
+   * verifying it now has to happen BEFORE a submission (submitKyc refuses an
+   * unverified account) rather than on a record that does not exist yet.
+   */
 
-  @Post('phone/verify-otp')
+  @Get('me/documents/:fileKey')
   @ApiOperation({
-    summary: 'Verify the phone on own KYC submission with an OTP',
+    summary: 'Stream one of your own KYC documents',
+    description:
+      'Scoped to the caller by JWT — there is no id in the path to point at someone else. Lets an applicant see what is already on file before deciding which documents to replace on a resubmission.',
   })
   @RequirePermissions(Permission.KYC_SUBMIT)
-  @Throttle({ default: { limit: 10, ttl: 3600000 } }) // 10/hour per IP
-  @HttpCode(HttpStatus.OK)
-  async verifyPhoneOtp(
+  async getOwnDocument(
     @Request() req: RequestWithUser,
-    @Body() dto: VerifyPhoneOtpDto,
-  ) {
-    return this.kycService.verifyPhoneOtp(req.user.sub, dto);
+    @Param('fileKey') fileKey: string,
+    @NestResponse({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const own = await this.kycService.getMyKyc(req.user.sub);
+    if (!own) throw new NotFoundException('No KYC submission found');
+
+    const { absolutePath, mimetype } = await this.kycService.getDocumentFile(
+      own.id,
+      fileKey,
+      req.user.sub,
+    );
+
+    if (!existsSync(absolutePath)) {
+      throw new NotFoundException('Document file not found on server');
+    }
+
+    res.set({
+      'Content-Type': mimetype,
+      'Content-Disposition': `inline; filename="${fileKey}"`,
+      // An identity document is the most private thing this API serves: never
+      // in a shared cache, and never an active document if it is an SVG.
+      'Cache-Control': 'private, no-store',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'X-Content-Type-Options': 'nosniff',
+    });
+
+    return new StreamableFile(createReadStream(absolutePath));
   }
 
   @Patch('me/bank')

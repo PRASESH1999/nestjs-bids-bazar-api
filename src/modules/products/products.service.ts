@@ -13,7 +13,10 @@ import { KycService } from '@modules/kyc/kyc.service';
 import { MailService } from '@modules/mail/mail.service';
 import { UsersService } from '@modules/users/users.service';
 import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
-import { BiddingService } from '@modules/bidding/services/bidding.service';
+import {
+  BiddingService,
+  type PublicBidRange,
+} from '@modules/bidding/services/bidding.service';
 import { FavoritesService } from '@modules/favorites/favorites.service';
 import {
   BadRequestException,
@@ -25,6 +28,7 @@ import {
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { ListMyProductsQueryDto } from './dto/list-my-products-query.dto';
 import { RejectProductDto } from './dto/reject-product.dto';
 import { ApproveProductDto } from './dto/approve-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -32,6 +36,7 @@ import { Product } from './entities/product.entity';
 import { ProductStorageService } from './product-storage.service';
 import { ProductsRepository } from './products.repository';
 import {
+  computeMissingSubmissionFields,
   mapProduct,
   ProductResponse,
   ProductSellerSummary,
@@ -63,6 +68,9 @@ export type ProductDetailResponse = Omit<ProductResponse, 'winningBidId'> & {
   viewCount: number;
   winningBidder: WinningBidder | null;
   similarProducts: ProductResponse[];
+  // What a bid on this lot may be, right now. Published so clients stop
+  // re-implementing the server's increment and rounding rules. See A14.
+  bidRange: PublicBidRange;
 };
 
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
@@ -250,6 +258,28 @@ export class ProductsService {
       product.biddingEndPrice = this.computeBiddingEndPrice(dto.basePrice);
     }
 
+    /*
+     * Explicit clears, applied last so that naming a field in both `clearFields`
+     * and the body resolves to cleared — "remove this" is the more deliberate
+     * of the two instructions.
+     *
+     * The DTO's @IsIn already restricts the names to CLEARABLE_PRODUCT_FIELDS,
+     * every one of which is a nullable column. See OPEN-ITEMS A21.
+     */
+    if (dto.clearFields?.length) {
+      for (const field of dto.clearFields) {
+        product[field] = null;
+        // basePrice is the input the other three prices are derived from, so
+        // clearing it has to clear them too or the draft keeps a bidding
+        // ceiling computed from a price that is no longer there.
+        if (field === 'basePrice') {
+          product.biddingStartPrice = null;
+          product.instantBuyPrice = null;
+          product.biddingEndPrice = null;
+        }
+      }
+    }
+
     if (newImageFiles && newImageFiles.length > 0) {
       if (newImageFiles.length > 8) {
         throw new BadRequestException('A product can have at most 8 images');
@@ -326,7 +356,7 @@ export class ProductsService {
       // Non-null: assertReadyForSubmission above guarantees title is set.
       await this.mailService.sendProductSubmitted(
         user.email,
-        user.name,
+        user.username,
         saved.title!,
       );
     }
@@ -387,7 +417,7 @@ export class ProductsService {
 
   async listMyProducts(
     userId: string,
-    query: ListProductsQueryDto,
+    query: ListMyProductsQueryDto,
   ): Promise<{
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
@@ -517,6 +547,7 @@ export class ProductsService {
       viewCount: product.viewCount,
       winningBidder,
       similarProducts,
+      bidRange: this.biddingService.getPublicBidRange(product),
     };
   }
 
@@ -876,7 +907,7 @@ export class ProductsService {
       // Non-null: only SUBMITTED products (already past assertReadyForSubmission) reach here.
       await this.mailService.sendProductApproved(
         owner.email,
-        owner.name,
+        owner.username,
         saved.title!,
       );
     }
@@ -920,7 +951,7 @@ export class ProductsService {
       // Non-null: only SUBMITTED products (already past assertReadyForSubmission) reach here.
       await this.mailService.sendProductRejected(
         owner.email,
-        owner.name,
+        owner.username,
         saved.title!,
         dto.rejectionReason,
       );
@@ -963,29 +994,21 @@ export class ProductsService {
     product: Product,
     imageCount: number,
   ): Promise<void> {
-    const missingFields: string[] = [];
-
-    if (!product.title || product.title.trim().length < 5)
-      missingFields.push('title');
-    if (!product.description || product.description.trim().length < 20)
-      missingFields.push('description');
-    if (!product.categoryId) missingFields.push('categoryId');
-    if (!product.subcategoryId) missingFields.push('subcategoryId');
-    if (!product.condition) missingFields.push('condition');
-    if (product.basePrice == null || Number(product.basePrice) <= 0)
-      missingFields.push('basePrice');
-    if (!product.province) missingFields.push('province');
-    if (!product.district) missingFields.push('district');
-    if (!product.city) missingFields.push('city');
-    if (!product.street) missingFields.push('street');
-    if (!product.wardNumber) missingFields.push('wardNumber');
-    if (imageCount === 0) missingFields.push('images');
-    if (imageCount > 8) missingFields.push('images (max 8)');
+    // The rule itself lives in the mapper so the same list can be *published*
+    // on the owner's listings, not only thrown. See OPEN-ITEMS A20.
+    const missingFields = computeMissingSubmissionFields(product, imageCount);
 
     if (missingFields.length > 0) {
       throw new BadRequestException({
         message: 'Product is missing required fields for submission',
         missingFields,
+        // Mirrored into the filter's own `fields` shape so the list actually
+        // reaches the client — `missingFields` alone used to be dropped by
+        // GlobalExceptionFilter.
+        fields: missingFields.map((field) => ({
+          field,
+          message: 'is required before this listing can be submitted',
+        })),
       });
     }
 
