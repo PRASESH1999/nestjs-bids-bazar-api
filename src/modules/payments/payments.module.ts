@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ShippingModule } from '@modules/shipping/shipping.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BiddingModule } from '@modules/bidding/bidding.module';
 import { FonepayModule } from '@modules/fonepay/fonepay.module';
@@ -14,6 +15,8 @@ import { PaymentsController } from './payments.controller';
 @Module({
   imports: [
     TypeOrmModule.forFeature([ProductPayment, Bid, Product, ProductSettlement]),
+    // Resolves and snapshots the buyer's chosen delivery address at checkout.
+    ShippingModule,
     // BiddingModule exports AuctionLifecycleService + AuctionBroadcastService
     BiddingModule,
     // FonepayModule exports FonepayClientService

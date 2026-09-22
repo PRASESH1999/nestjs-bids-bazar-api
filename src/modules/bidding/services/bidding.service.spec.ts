@@ -8,6 +8,7 @@ import { MailService } from '@modules/mail/mail.service';
 import { Bid } from '../entities/bid.entity';
 import { PlaceBidDto } from '../dto/place-bid.dto';
 import { BiddingService } from './bidding.service';
+import { RatingsService } from '@modules/ratings/ratings.service';
 
 // Minimal fluent stub for TypeORM's SelectQueryBuilder — every chain method
 // (where/andWhere/innerJoin/select/setLock/...) returns `this`; only the
@@ -130,11 +131,18 @@ function buildService(
     })),
   } as unknown as DataSource;
 
+  // Only getRatedPaymentIds is reachable from this suite's code paths, and
+  // none of them exercise it — an empty set keeps the stub honest.
+  const ratingsService = {
+    getRatedPaymentIds: jest.fn().mockResolvedValue(new Set<string>()),
+  } as unknown as RatingsService;
+
   const service = new BiddingService(
     dataSource,
     configService,
     mailService,
     eventEmitter,
+    ratingsService,
   );
 
   return { service, qr };

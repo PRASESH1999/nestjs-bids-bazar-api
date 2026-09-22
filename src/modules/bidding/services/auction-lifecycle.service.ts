@@ -184,7 +184,7 @@ export class AuctionLifecycleService {
 
       if (winner) {
         await this.mailService.sendAuctionWon(winner.email, {
-          bidderName: winner.name,
+          bidderName: winner.username,
           productTitle: capturedProductTitle,
           productId: capturedProductId,
           winningAmount: winningAmount,
@@ -194,10 +194,10 @@ export class AuctionLifecycleService {
 
       if (seller) {
         await this.mailService.sendAuctionClosedSeller(seller.email, {
-          sellerName: seller.name,
+          sellerName: seller.username,
           productTitle: capturedProductTitle,
           winningAmount: winningAmount,
-          winnerName: winner?.name ?? 'Unknown',
+          winnerName: winner?.username ?? 'Unknown',
         });
       }
     } catch (err: unknown) {
@@ -392,7 +392,7 @@ export class AuctionLifecycleService {
 
       if (winner) {
         await this.mailService.sendAuctionWon(winner.email, {
-          bidderName: winner.name,
+          bidderName: winner.username,
           productTitle: capturedProductTitle,
           productId: capturedProductId,
           winningAmount: winningAmount,
@@ -402,10 +402,10 @@ export class AuctionLifecycleService {
 
       if (seller) {
         await this.mailService.sendAuctionClosedSeller(seller.email, {
-          sellerName: seller.name,
+          sellerName: seller.username,
           productTitle: capturedProductTitle,
           winningAmount: winningAmount,
-          winnerName: winner?.name ?? 'Unknown',
+          winnerName: winner?.username ?? 'Unknown',
         });
       }
     } catch (err: unknown) {
@@ -569,6 +569,19 @@ export class AuctionLifecycleService {
 
         await qr.manager.getRepository(Bid).save(nextBid);
 
+        /*
+         * Repoint the product at the bid that now holds the win.
+         *
+         * Without this, `winningBidId` keeps naming the bidder who just failed
+         * to pay, for the rest of the product's life. Everything that reads it
+         * as "the winner" is then wrong: `getWinningBidder` on the detail page
+         * names the wrong person and the wrong amount, and the public
+         * "sold for" price on a cascaded lot is the amount nobody paid.
+         * See OPEN-ITEMS A26.
+         */
+        product.winningBidId = nextBid.id;
+        await qr.manager.getRepository(Product).save(product);
+
         const nextSettlement = qr.manager
           .getRepository(ProductSettlement)
           .create({
@@ -639,7 +652,7 @@ export class AuctionLifecycleService {
 
         if (newWinner) {
           await this.mailService.sendPaymentFailedFallback(newWinner.email, {
-            bidderName: newWinner.name,
+            bidderName: newWinner.username,
             productTitle: capturedProductTitle,
             productId: capturedProductId,
             winningAmount: newWinnerAmount!,
@@ -650,10 +663,10 @@ export class AuctionLifecycleService {
 
         if (seller) {
           await this.mailService.sendPaymentFailedSeller(seller.email, {
-            sellerName: seller.name,
+            sellerName: seller.username,
             productTitle: capturedProductTitle,
             failedBidderRank: failedBidderRank,
-            newWinnerName: newWinner?.name ?? 'Unknown',
+            newWinnerName: newWinner?.username ?? 'Unknown',
             newWinnerBidAmount: newWinnerAmount!,
           });
         }
@@ -665,7 +678,7 @@ export class AuctionLifecycleService {
 
         if (seller) {
           await this.mailService.sendAuctionAbandoned(seller.email, {
-            sellerName: seller.name,
+            sellerName: seller.username,
             productTitle: capturedProductTitle,
             totalBidders: totalBiddersCount ?? 0,
           });
@@ -810,6 +823,10 @@ export class AuctionLifecycleService {
 
       product.status = ProductStatus.SETTLED;
       product.settledAt = now;
+      // See the gateway path and OPEN-ITEMS A26 — the bid that paid is the
+      // winning bid, not whichever one won the auction originally.
+      product.winningBidId = responsibleBid.id;
+      product.settledAmount = responsibleBid.amount;
 
       await qr.manager.getRepository(Bid).save(responsibleBid);
 
@@ -892,16 +909,16 @@ export class AuctionLifecycleService {
 
       if (seller) {
         await this.mailService.sendPaymentConfirmedSeller(seller.email, {
-          sellerName: seller.name,
+          sellerName: seller.username,
           productTitle: capturedProductTitle,
           amount: confirmedAmount,
-          buyerName: buyer?.name ?? 'Unknown',
+          buyerName: buyer?.username ?? 'Unknown',
         });
       }
 
       if (buyer) {
         await this.mailService.sendPaymentConfirmedBuyer(buyer.email, {
-          buyerName: buyer.name,
+          buyerName: buyer.username,
           productTitle: capturedProductTitle,
           amount: confirmedAmount,
         });
@@ -1024,6 +1041,11 @@ export class AuctionLifecycleService {
 
       product.status = ProductStatus.SETTLED;
       product.settledAt = now;
+      // The bid that actually paid is the winning bid, whatever the cascade did
+      // on the way here. Set at promotion time too; repeated at settlement so a
+      // row written before that fix still ends up correct. See OPEN-ITEMS A26.
+      product.winningBidId = responsibleBid.id;
+      product.settledAmount = responsibleBid.amount;
 
       await qr.manager.getRepository(Bid).save(responsibleBid);
 
@@ -1071,16 +1093,16 @@ export class AuctionLifecycleService {
 
       if (seller) {
         await this.mailService.sendPaymentConfirmedSeller(seller.email, {
-          sellerName: seller.name,
+          sellerName: seller.username,
           productTitle: capturedProductTitle,
           amount: confirmedAmount,
-          buyerName: buyer?.name ?? 'Unknown',
+          buyerName: buyer?.username ?? 'Unknown',
         });
       }
 
       if (buyer) {
         await this.mailService.sendPaymentConfirmedBuyer(buyer.email, {
-          buyerName: buyer.name,
+          buyerName: buyer.username,
           productTitle: capturedProductTitle,
           amount: confirmedAmount,
         });
@@ -1242,7 +1264,7 @@ export class AuctionLifecycleService {
       const wasSent = await this.mailService.sendPaymentWindowExpiring(
         bid.bidder.email,
         {
-          bidderName: bid.bidder.name,
+          bidderName: bid.bidder.username,
           // Non-null: only products past submission (title required) reach the bidding stage.
           productTitle: bid.product.title!,
           amount: Number(bid.amount),

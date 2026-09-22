@@ -55,7 +55,11 @@ export class CategoriesController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'List all active categories (public)' })
+  @ApiOperation({
+    summary: 'List all active categories (public)',
+    description:
+      'Active categories only, always. There is deliberately no `includeInactive` here — an inactive category is one an admin has taken off the storefront, so exposing it publicly would defeat the control. Admins use GET /admin/categories?includeInactive=true (which also accepts ?withCounts=true). Passing unknown query parameters to this route is rejected rather than ignored. See OPEN-ITEMS A4.',
+  })
   @ApiResponse({
     status: 200,
     description:

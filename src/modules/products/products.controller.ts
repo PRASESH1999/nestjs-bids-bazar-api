@@ -46,6 +46,7 @@ import { ApproveProductDto } from './dto/approve-product.dto';
 import { SetPreviewImageDto } from './dto/set-preview-image.dto';
 import { ReorderImagesDto } from './dto/reorder-images.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { ListMyProductsQueryDto } from './dto/list-my-products-query.dto';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
 import { productImageHeaders } from '@common/utils/media-headers.util';
 
@@ -190,7 +191,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'List own products (all statuses)' })
   async listMyProducts(
     @Request() req: RequestWithUser,
-    @Query() query: ListProductsQueryDto,
+    @Query() query: ListMyProductsQueryDto,
   ) {
     return this.productsService.listMyProducts(req.user.sub, query);
   }

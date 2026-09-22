@@ -1,4 +1,54 @@
+import { ProductStatus } from '@common/enums/product-status.enum';
 import { Product } from './entities/product.entity';
+
+/**
+ * The exact set of fields `POST /products/:id/submit` requires, as a list
+ * rather than an exception.
+ *
+ * This is the single definition of "ready to submit". `assertReadyForSubmission`
+ * throws off it, and it is also published on the owner's own listings as
+ * `missingSubmissionFields` so a client can disable a Submit button and name
+ * what is still needed **without** re-implementing the rule. Before this,
+ * the frontend kept a hand-maintained copy that had to be edited in lockstep
+ * with this function. See OPEN-ITEMS A20.
+ */
+export function computeMissingSubmissionFields(
+  product: Product,
+  // `null` means "the images relation was not loaded", which is not the same as
+  // "this product has no images". Passing 0 for an unloaded relation would
+  // report `images` as missing on a listing that has eight of them.
+  imageCount: number | null,
+): string[] {
+  const missing: string[] = [];
+
+  if (!product.title || product.title.trim().length < 5) missing.push('title');
+  if (!product.description || product.description.trim().length < 20)
+    missing.push('description');
+  if (!product.categoryId) missing.push('categoryId');
+  if (!product.subcategoryId) missing.push('subcategoryId');
+  if (!product.condition) missing.push('condition');
+  if (product.basePrice == null || Number(product.basePrice) <= 0)
+    missing.push('basePrice');
+  if (!product.province) missing.push('province');
+  if (!product.district) missing.push('district');
+  if (!product.city) missing.push('city');
+  if (!product.street) missing.push('street');
+  if (!product.wardNumber) missing.push('wardNumber');
+  if (imageCount !== null) {
+    if (imageCount === 0) missing.push('images');
+    if (imageCount > 8) missing.push('images (max 8)');
+  }
+
+  return missing;
+}
+
+// Only these statuses can be submitted, so only these carry a meaningful
+// readiness list. Everything else reports null rather than an empty array, so
+// "nothing missing" and "not applicable" stay distinguishable.
+const SUBMITTABLE_STATUSES: ProductStatus[] = [
+  ProductStatus.DRAFT,
+  ProductStatus.REJECTED,
+];
 
 export type ProductImageResponse = {
   id: string;
@@ -34,6 +84,10 @@ export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
   isFavorited: boolean;
   // Null only if the owning account no longer resolves (e.g. soft-deleted).
   seller: ProductSellerSummary | null;
+  // What still has to be filled in before this listing can be submitted for
+  // review. Empty array = ready. Null on any status where submission is not
+  // the next step. See computeMissingSubmissionFields.
+  missingSubmissionFields: string[] | null;
 };
 
 // Plain, dependency-free mapping shared by ProductsService and FavoritesService.
@@ -83,9 +137,18 @@ export function mapProduct(
     winningBidId: product.winningBidId,
     closedAt: product.closedAt,
     settledAt: product.settledAt,
+    settledAmount: product.settledAmount,
     abandonedAt: product.abandonedAt,
     withdrawnAt: product.withdrawnAt,
     isRare: product.isRare,
+    missingSubmissionFields: SUBMITTABLE_STATUSES.includes(product.status)
+      ? computeMissingSubmissionFields(
+          product,
+          // Array.isArray, not `?.length ?? 0` — an unloaded relation is
+          // undefined and must stay distinguishable from an empty one.
+          Array.isArray(product.images) ? product.images.length : null,
+        )
+      : null,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
     deletedAt: product.deletedAt,

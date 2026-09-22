@@ -18,6 +18,9 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -36,15 +39,19 @@ import { AssignRoleDto } from './dto/assign-role.dto';
 import { ChangeEmailDto } from './dto/change-email.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
-import { UpdateSelfDto } from './dto/update-self.dto';
 import { UsersService } from './users.service';
+import { PhoneVerificationService } from './services/phone-verification.service';
+import { SendPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
 @Controller('users')
 @UseGuards(PermissionsGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly phoneVerificationService: PhoneVerificationService,
+  ) {}
 
   @Post('admin')
   @ApiOperation({
@@ -82,31 +89,64 @@ export class UsersController {
     return this.usersService.getOwnProfile(req.user.sub);
   }
 
-  @Patch('me')
-  @ApiOperation({ summary: 'Change display name (one-time only)' })
-  @ApiResponse({
-    status: 200,
-    description: 'Name updated. This can only be done once.',
-    schema: {
-      type: 'object',
-      properties: {
-        message: {
-          type: 'string',
-          example: 'Display name updated successfully.',
-        },
-      },
-    },
+  /*
+   * PATCH /users/me (display-name change) is gone, along with its one-change
+   * quota. A person's name now comes from their approved KYC document, so it is
+   * corrected by resubmitting KYC rather than edited on a profile; `username`
+   * is the public identity and does not change. See the User entity's note.
+   */
+
+  // ─── Phone verification ───────────────────────────────────────────────────
+  //
+  // Moved here from KYC. Verifying a number is a property of the account, and
+  // it now has to happen *before* KYC — submitKyc refuses an account whose
+  // phone is unverified, so these cannot hang off a submission that does not
+  // exist yet.
+
+  @Get('me/phone')
+  @ApiOperation({ summary: 'Your phone number and its verification state' })
+  @ApiResponse(R401)
+  @RequirePermissions(Permission.PROFILE_EDIT)
+  async getPhoneStatus(@Request() req: RequestWithUser) {
+    return this.phoneVerificationService.getStatus(req.user.sub);
+  }
+
+  @Post('me/phone/send-otp')
+  // Same budget the KYC version had. Sparrow costs money per message and an
+  // unthrottled endpoint is an SMS-bombing tool pointed at any number.
+  @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5/hour per IP
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Send (or resend) an SMS code to verify a phone number',
+    description:
+      'The number is held as pending until the code is confirmed, so requesting a code for a new number never costs you the one you already verified.',
   })
   @ApiResponse(R400)
   @ApiResponse(R401)
-  @ApiResponse(R403)
+  @ApiResponse({
+    status: 409,
+    description: 'That number is already registered to another account.',
+  })
   @RequirePermissions(Permission.PROFILE_EDIT)
-  async updateProfile(
+  async sendPhoneOtp(
     @Request() req: RequestWithUser,
-    @Body() dto: UpdateSelfDto,
+    @Body() dto: SendPhoneOtpDto,
   ) {
-    await this.usersService.updateSelfName(req.user.sub, dto.name);
-    return { message: 'Display name updated successfully.' };
+    return this.phoneVerificationService.sendOtp(req.user.sub, dto);
+  }
+
+  @Post('me/phone/verify-otp')
+  @Throttle({ default: { limit: 10, ttl: 3600000 } }) // 10/hour per IP
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirm the SMS code and verify the number' })
+  @ApiResponse(R400)
+  @ApiResponse(R401)
+  @RequirePermissions(Permission.PROFILE_EDIT)
+  async verifyPhoneOtp(
+    @Request() req: RequestWithUser,
+    @Body() dto: VerifyPhoneOtpDto,
+  ) {
+    return this.phoneVerificationService.verifyOtp(req.user.sub, dto);
   }
 
   @Patch('me/email')
@@ -228,6 +268,26 @@ export class UsersController {
         total,
       },
     };
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Get a single user by ID (Admin/SuperAdmin only)',
+    description:
+      'Without this, an admin user-detail screen had to page GET /users and find the row client-side — capped at the maximum page size, so any account past the first page could not be opened at all. See OPEN-ITEMS A9.',
+  })
+  @ApiResponse({ status: 200, description: 'User object.', schema: UserSchema })
+  @ApiResponse(R401)
+  @ApiResponse(R403)
+  @ApiResponse(R404)
+  @RequirePermissions(Permission.USER_VIEW)
+  async findOne(@Param('id') id: string) {
+    const user = await this.usersService.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+    // Redundant since User marks both @Exclude(), but kept in line with the
+    // other handlers here so one pattern governs the whole controller.
+    const { password: _, hashedRefreshToken: __, ...result } = user;
+    return result;
   }
 
   @Patch(':id/suspend')

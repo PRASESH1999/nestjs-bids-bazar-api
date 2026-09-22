@@ -58,6 +58,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     winningBidId: 'bid-1',
     closedAt: new Date(),
     settledAt: new Date(),
+    settledAmount: 1000,
     abandonedAt: null,
     withdrawnAt: null,
     createdAt: new Date(),

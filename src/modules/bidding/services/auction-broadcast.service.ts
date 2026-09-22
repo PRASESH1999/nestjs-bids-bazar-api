@@ -4,7 +4,7 @@ import { Observable, Subject, filter, map } from 'rxjs';
 import type { MessageEvent } from '@nestjs/common';
 import { Product } from '@modules/products/entities/product.entity';
 import { Bid } from '../entities/bid.entity';
-import { BiddingService } from './bidding.service';
+import { BiddingService, type PublicBidRange } from './bidding.service';
 
 export interface RecentBidItem {
   username: string;
@@ -24,6 +24,22 @@ export interface AuctionUpdatePayload {
   biddingEndPrice: number;
   topBidders: Array<{ username: string; highestBid: number }>;
   recentBids: RecentBidItem[];
+  /*
+   * Counters. `recentBids` is hard-capped at 5 by fetchRecentBids, so it can
+   * never stand in for a total — it silently stops counting. Without these the
+   * detail page had to refetch the whole product after every bid just to keep
+   * three integers honest. See OPEN-ITEMS A13.
+   */
+  totalBids: number;
+  newBidsToday: number;
+  viewCount: number;
+  /*
+   * The valid range for the next bid, recomputed per frame. It changes on every
+   * bid, which is exactly when this frame is sent — so the client's quick-bid
+   * buttons and amount input can follow the server rather than re-deriving
+   * them. See OPEN-ITEMS A14.
+   */
+  bidRange: PublicBidRange;
 }
 
 // Payment-specific SSE event shapes (discriminated by `type`).
@@ -105,11 +121,12 @@ export class AuctionBroadcastService {
       throw new NotFoundException('Product not found');
     }
 
-    // Reuse the existing query — single source of truth for top bidders.
-    const topBidders =
-      await this.biddingService.getTopBiddersForProduct(productId);
-
-    const recentBids = await this.fetchRecentBids(productId);
+    // Reuse the existing queries — single source of truth for each.
+    const [topBidders, recentBids, bidCounts] = await Promise.all([
+      this.biddingService.getTopBiddersForProduct(productId),
+      this.fetchRecentBids(productId),
+      this.biddingService.getBidCountsForProduct(productId),
+    ]);
 
     const currentBid = Number(
       product.currentHighestBid ?? product.biddingStartPrice,
@@ -132,6 +149,10 @@ export class AuctionBroadcastService {
       biddingEndPrice: Number(product.biddingEndPrice),
       topBidders,
       recentBids,
+      totalBids: bidCounts.totalBids,
+      newBidsToday: bidCounts.newBidsToday,
+      viewCount: product.viewCount,
+      bidRange: this.biddingService.getPublicBidRange(product),
     };
   }
 

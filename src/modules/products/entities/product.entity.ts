@@ -147,6 +147,24 @@ export class Product extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   settledAt: Date | null;
 
+  /*
+   * What the lot actually sold for — the amount of the bid that paid, not the
+   * highest amount ever bid on it.
+   *
+   * These differ whenever the payment cascaded: the original winner's bid is
+   * the highest, but if they never paid, the sale closed at a lower bidder's
+   * amount. `currentHighestBid` keeps meaning "highest bid ever" (it is what
+   * the live bidding UI reads), so the settled figure needs its own column
+   * rather than overwriting that one.
+   *
+   * Denormalised on purpose, in the same style as `currentHighestBid`: the
+   * home feeds render "SOLD FOR" on a list response, and joining the winning
+   * bid row on every card to recover one number is not worth it.
+   * Null until the lot settles. See OPEN-ITEMS A26.
+   */
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  settledAmount: number | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   abandonedAt: Date | null;
 

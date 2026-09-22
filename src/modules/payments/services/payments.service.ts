@@ -30,6 +30,7 @@ import { DataSource, Repository } from 'typeorm';
 import { WebSocket } from 'ws';
 import { PaginatedResult } from '@common/types/paginated-result.type';
 import type {
+  InitiatePaymentDto,
   InitiatePaymentResponseDto,
   PaymentStatusResponseDto,
 } from '../dto/payment.dto';
@@ -37,7 +38,11 @@ import {
   ListPaymentsAdminQueryDto,
   SortOrder,
 } from '../dto/list-payments-admin.query.dto';
-import { ProductPayment } from '../entities/product-payment.entity';
+import {
+  ProductPayment,
+  type ShippingAddressSnapshot,
+} from '../entities/product-payment.entity';
+import { ShippingService } from '@modules/shipping/shipping.service';
 
 @Injectable()
 export class PaymentsService implements OnModuleInit {
@@ -62,6 +67,7 @@ export class PaymentsService implements OnModuleInit {
     private readonly dataSource: DataSource,
     private readonly fonepayClientService: FonepayClientService,
     private readonly auctionLifecycleService: AuctionLifecycleService,
+    private readonly shippingService: ShippingService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
   ) {}
@@ -109,8 +115,12 @@ export class PaymentsService implements OnModuleInit {
   async initiatePayment(
     productId: string,
     requestingUserId: string,
-    deliveryZone: DeliveryZone,
+    // The whole DTO rather than a loose `deliveryZone`: checkout now carries a
+    // destination as well as a zone, and two positional parameters of the same
+    // shape are easy to transpose.
+    dto: InitiatePaymentDto,
   ): Promise<InitiatePaymentResponseDto> {
+    const { deliveryZone } = dto;
     // Load product and verify it's in the right state
     const product = await this.productRepo.findOne({
       where: { id: productId },
@@ -199,11 +209,43 @@ export class PaymentsService implements OnModuleInit {
       referenceLabel,
     });
 
+    /*
+     * Resolve the destination, if one was chosen.
+     *
+     * Both the id and a snapshot are stored: the id answers "which saved
+     * address was this", the snapshot is what the parcel was actually
+     * addressed to. A buyer editing or deleting the address later must not
+     * rewrite where a past order went. `getOwned` scopes the lookup to the
+     * caller, so another person's address id is a 404.
+     */
+    let shippingAddressId: string | null = null;
+    let shippingAddressSnapshot: ShippingAddressSnapshot | null = null;
+    if (dto.shippingAddressId) {
+      const address = await this.shippingService.getOwned(
+        requestingUserId,
+        dto.shippingAddressId,
+      );
+      shippingAddressId = address.id;
+      shippingAddressSnapshot = {
+        label: address.label,
+        recipientName: address.recipientName,
+        recipientPhone: address.recipientPhone,
+        province: address.province,
+        district: address.district,
+        city: address.city,
+        street: address.street,
+        wardNumber: address.wardNumber,
+        landmark: address.landmark,
+      };
+    }
+
     // Persist the ProductPayment row
     const payment = this.paymentRepo.create({
       productId,
       productSettlementId: activeSettlement.id,
       sellerId: product.ownerId,
+      shippingAddressId,
+      shippingAddressSnapshot,
       winnerUserId: requestingUserId,
       amount: Number(responsibleBid.amount),
       referenceLabel,
@@ -539,6 +581,10 @@ export class PaymentsService implements OnModuleInit {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
       amount: Number(p.amount),
+      itemAmount: Number(p.amount),
+      deliveryCharge: Number(p.deliveryCharge),
+      deliveryZone: p.deliveryZone,
+      shippingAddress: p.shippingAddressSnapshot,
       qrString: p.qrString ?? '',
       qrMessage: p.qrMessage ?? '',
       status: p.status,
@@ -551,6 +597,10 @@ export class PaymentsService implements OnModuleInit {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
       amount: Number(p.amount),
+      itemAmount: Number(p.amount),
+      deliveryCharge: Number(p.deliveryCharge),
+      deliveryZone: p.deliveryZone,
+      shippingAddress: p.shippingAddressSnapshot,
       status: p.status,
       paymentDeadline: p.paymentDeadline.toISOString(),
       fonepayTraceId: p.fonepayTraceId,

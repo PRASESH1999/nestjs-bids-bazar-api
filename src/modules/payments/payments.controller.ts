@@ -58,11 +58,7 @@ export class PaymentsController {
     @Body() dto: InitiatePaymentDto,
     @Request() req: RequestWithUser,
   ) {
-    return this.paymentsService.initiatePayment(
-      productId,
-      req.user.sub,
-      dto.deliveryZone,
-    );
+    return this.paymentsService.initiatePayment(productId, req.user.sub, dto);
   }
 
   /**
