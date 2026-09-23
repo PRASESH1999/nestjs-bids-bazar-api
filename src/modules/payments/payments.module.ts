@@ -3,6 +3,7 @@ import { ShippingModule } from '@modules/shipping/shipping.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BiddingModule } from '@modules/bidding/bidding.module';
 import { FonepayModule } from '@modules/fonepay/fonepay.module';
+import { PathaoModule } from '@modules/pathao/pathao.module';
 import { Bid } from '@modules/bidding/entities/bid.entity';
 import { ProductSettlement } from '@modules/bidding/entities/product-settlement.entity';
 import { Product } from '@modules/products/entities/product.entity';
@@ -21,6 +22,8 @@ import { PaymentsController } from './payments.controller';
     BiddingModule,
     // FonepayModule exports FonepayClientService
     FonepayModule,
+    // Exports PathaoClientService (inside-valley check) + ProductDeliveriesService
+    PathaoModule,
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaymentEventsHandler, PaymentsCron],

@@ -45,8 +45,11 @@ export class AuctionSettledNotificationHandler {
         type: NotificationType.PAYMENT_CONFIRMED_BUYER,
         relatedId: payload.winningBidId,
         title: 'Payment confirmed',
-        message: `Your payment of ${payload.amount} for "${payload.productTitle}" is confirmed. Your purchase is complete.`,
-        data: { productId: payload.productId, amount: payload.amount },
+        message: `Your payment of ${payload.buyerTotalAmount} for "${payload.productTitle}" is confirmed. Your purchase is complete.`,
+        data: {
+          productId: payload.productId,
+          amount: payload.buyerTotalAmount,
+        },
       });
 
       this.logger.log('auction.settled notification handled', {

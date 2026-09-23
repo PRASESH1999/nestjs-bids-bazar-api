@@ -179,7 +179,11 @@ reproduced), `A12` (email alerts — a feature, not a defect), and `A29`
 (`/payments/admin/all` and `/admin/bids` embed whole nested product entities to
 render a title).
 
-`A28` is **resolved as designed**: `deliveryCharge` is stored but deliberately
-not added to the Fonepay QR amount — delivery is cash on arrival, which the
-checkout UI states. Do not let a client sum `amount` and `deliveryCharge` into a
-single "you owe" figure.
+`A28` is **superseded** (Pathao courier integration): delivery is no longer
+cash on arrival. `amount` in `InitiatePaymentResponseDto`/
+`PaymentStatusResponseDto` now **is** `itemAmount + deliveryCharge` — it's
+exactly what the Fonepay QR was generated for, bundled into one prepaid
+charge. A client that previously avoided summing `amount` and
+`deliveryCharge` per the old guidance should stop doing that; `amount` is
+now the correct "you owe" figure on its own, and `itemAmount`/
+`deliveryCharge` remain available separately only for a breakdown display.

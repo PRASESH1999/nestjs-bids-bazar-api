@@ -43,6 +43,7 @@ export const RolePermissionsMap: Record<Role, Permission[]> = {
     Permission.POINTS_ADJUST,
     Permission.REPORT_MANAGE,
     Permission.BOOST_VIEW_ALL,
+    Permission.SHIPMENT_MANAGE,
   ],
   [Role.SUPERADMIN]: Object.values(Permission), // SUPERADMIN bypasses checks, but this explicitly maps all for completeness
 };

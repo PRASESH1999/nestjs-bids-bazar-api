@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from '@modules/users/users.module';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
 import { RatingsModule } from '@modules/ratings/ratings.module';
+import { ShippingModule } from '@modules/shipping/shipping.module';
+import { PathaoModule } from '@modules/pathao/pathao.module';
 import { Product } from '@modules/products/entities/product.entity';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Bid } from './entities/bid.entity';
@@ -24,6 +26,10 @@ import { AuctionSettledHandler } from './handlers/auction-settled.handler';
     // For the hasRated/canRate context on GET /bids/me (OPEN-ITEMS A15).
     // RatingsModule takes no dependency on this one, so there is no cycle.
     RatingsModule,
+    // For confirmPaymentManual's address resolution + inside-valley check.
+    // Neither module depends back on this one, so there is no cycle.
+    ShippingModule,
+    PathaoModule,
   ],
   controllers: [BiddingController],
   providers: [

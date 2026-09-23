@@ -3,7 +3,7 @@
 > This file is auto-maintained. It must be updated alongside every entity or schema change.
 > See [Rule 12: Database Schema Maintenance](.agents/rules/rule-12-database-schema-maintenance.md).
 
-_Last updated: 2026-09-03 by agent (Added `NOTIFICATION` table — a per-user, permanent in-app notification log delivered live via SSE, populated by handlers reacting to the existing bidding/payment domain events)_
+_Last updated: 2026-09-23 by agent (Pathao courier integration: documented previously-missing `SHIPPINGADDRESS`, added `PRODUCTDELIVERY`; `PAYMENT` loses `deliveryZone`, gains `shippingAddressId`, and `deliveryCharge` is now bundled into the Fonepay QR amount instead of collected as cash on delivery)_
 
 ---
 
@@ -26,6 +26,9 @@ erDiagram
     PRODUCT ||--o| BID : "winning bid"
     PRODUCT ||--o{ PAYMENT : "payment attempts"
     USER ||--o{ PAYMENT : "owes"
+    USER ||--o{ SHIPPINGADDRESS : "saved addresses"
+    PAYMENT ||--o| SHIPPINGADDRESS : "ships to"
+    PAYMENT ||--o| PRODUCTDELIVERY : "fulfilled by (Pathao)"
     USER ||--o| USERREWARDS : "has rewards"
     USER ||--o{ POINTSTRANSACTION : "point history"
     USER ||--o{ NOTIFICATION : "receives"
@@ -243,6 +246,8 @@ erDiagram
         uuid productId FK
         uuid winnerUserId FK
         decimal amount
+        decimal deliveryCharge
+        uuid shippingAddressId FK
         string referenceLabel UK
         string terminalId
         text qrString
@@ -252,12 +257,74 @@ erDiagram
         string fonepayTraceId
         string paymentMessage
         timestamp paymentDeadline
-        enum deliveryZone
-        decimal deliveryCharge
         timestamp sellerPaidAt
         uuid sellerPaidById
         decimal sellerPayoutAmount
         decimal sellerCommissionPercent
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp deletedAt
+    }
+
+    USER ||--o{ SHIPPINGADDRESS : "saved addresses"
+    PAYMENT ||--o| SHIPPINGADDRESS : "ships to"
+    PAYMENT ||--o| PRODUCTDELIVERY : "fulfilled by"
+
+    SHIPPINGADDRESS {
+        uuid id PK
+        uuid userId FK
+        string label
+        string recipientName
+        string recipientPhone
+        string province
+        string district
+        string city
+        string street
+        string wardNumber
+        string landmark
+        int pathaoCityId
+        string pathaoCityName
+        int pathaoZoneId
+        string pathaoZoneName
+        int pathaoAreaId
+        string pathaoAreaName
+        boolean isDefault
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp deletedAt
+    }
+
+    PRODUCTDELIVERY {
+        uuid id PK
+        uuid productPaymentId FK, UK
+        string recipientName
+        string recipientPhone
+        string province
+        string district
+        string city
+        string street
+        string wardNumber
+        string landmark
+        int pathaoCityId
+        string pathaoCityName
+        int pathaoZoneId
+        string pathaoZoneName
+        int pathaoAreaId
+        string pathaoAreaName
+        decimal deliveryCharge
+        timestamp receivedAtWarehouseAt
+        uuid receivedAtWarehouseById
+        int storeId
+        string consignmentId UK
+        decimal itemWeightKg
+        string itemDescription
+        decimal amountToCollect
+        decimal pathaoDeliveryFee
+        uuid dispatchedById
+        timestamp dispatchedAt
+        string orderStatus
+        timestamp lastStatusCheckAt
+        timestamp deliveredAt
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -447,9 +514,27 @@ erDiagram
 - `fonepayTraceId` and `paymentMessage` — populated after a successful `getPaymentStatus` call to Fonepay; `null` while PENDING.
 - `paymentDeadline` — copied from `Bid.paymentDeadline` at initiation time so the deadline is stable even if `PAYMENT_WINDOW_HOURS` changes between config reloads.
 - At-most-one active attempt: a **partial unique index** on `(productId) WHERE status = 'PENDING'` prevents two in-flight QR attempts for the same product. Service layer additionally guards against creating a new attempt when a SUCCESS row already exists.
-- `deliveryZone` (`INSIDE_VALLEY`/`OUTSIDE_VALLEY`) — chosen by the buyer at checkout, never derived from an address/location field. `deliveryCharge` is snapshotted from `DELIVERY_CHARGE_INSIDE_VALLEY`/`DELIVERY_CHARGE_OUTSIDE_VALLEY` at initiation time (same immutable-snapshot reasoning as `paymentDeadline`). Collected as cash on delivery — never through the gateway, never counted toward points. See Rule 14/16.
+- `amount` is the **item price only** — `RewardsService` reads this column directly for commission/points math (Rule 16), so its meaning must never change to include delivery. `deliveryCharge` is a separate column, snapshotted from `DELIVERY_CHARGE_FLAT` at initiation time (same immutable-snapshot reasoning as `paymentDeadline`) — together they're what the Fonepay QR was actually generated for (Pathao integration bundles delivery into the gateway charge; there is no cash-on-delivery collection). Never counted toward points. See Rule 14/16.
+- `shippingAddressId` (nullable FK → `SHIPPINGADDRESS`, `ON DELETE SET NULL`) — which saved address this attempt was for. Just the id, not a snapshot: needed because `confirmSuccess`/`confirmPaymentManual` run later (sometimes much later, in a separate request) and have to know which address to hand to `ProductDeliveriesService`. The frozen recipient/address detail itself lives on `PRODUCTDELIVERY`, created only for the attempt that actually succeeds.
 - `sellerPaidAt`/`sellerPaidById`/`sellerPayoutAmount`/`sellerCommissionPercent` — populated only by `RewardsService.markSellerPaid`, a separate and later admin action from the buyer-payment fields above. `sellerPaidAt IS NULL` on a `SUCCESS` row means the sale is pending seller settlement. See Rule 16.
-- The admin-manual confirmation path (`confirmPaymentManual`) also creates a Payment row (`status = SUCCESS`, `terminalId = 'ADMIN-MANUAL'`) so every settled sale — gateway or manual — flows through the same seller-settlement pipeline.
+- The admin-manual confirmation path (`confirmPaymentManual`) also creates a Payment row (`status = SUCCESS`, `terminalId = 'ADMIN-MANUAL'`) so every settled sale — gateway or manual — flows through the same seller-settlement pipeline. Both paths emit `PAYMENT_SUCCEEDED` so a single listener (`ProductDeliveriesService`) creates the `PRODUCTDELIVERY` row regardless of confirmation method.
+- `deletedAt` soft-delete inherited from `BaseEntity`.
+
+### SHIPPINGADDRESS
+- A buyer's saved delivery address book, capped at 5 per user (`MAX_SHIPPING_ADDRESSES`, service-enforced, not a DB constraint) — see `shipping.controller.ts`/`shipping.service.ts`.
+- Exactly one `isDefault = true` per user while any address exists (service-enforced: the first address saved becomes the default, setting a new default clears the old one in the same transaction, deleting the default promotes the oldest survivor).
+- `pathaoCityId`/`pathaoZoneId`/`pathaoAreaId` (+ denormalized `pathaoCityName`/`pathaoZoneName`/`pathaoAreaName`) — Pathao's own location taxonomy, picked via a cascading picker backed by `PathaoModule`'s proxy endpoints (`GET /pathao/cities` → `/cities/:id/zones` → `/zones/:id/areas`). Nullable at this level (existing rows predate this, and an address can be saved before it's ever used at checkout) but required by the time it's used to initiate a payment (`PaymentsService.initiatePayment` enforces this, and also that the city is inside `PATHAO_VALLEY_CITY_IDS` — Kathmandu Valley only, for now).
+- Deliberately **not** linked to KYC addresses (a seller's identity-document address) — these are wherever a buyer wants a parcel delivered, unrelated to identity verification.
+- `deletedAt` soft-delete inherited from `BaseEntity`.
+
+### PRODUCTDELIVERY
+- Everything about actually getting a **paid-for** sale to the buyer: the frozen recipient/address snapshot (from `SHIPPINGADDRESS`, at the moment payment succeeded), what the buyer was charged for delivery, warehouse receipt, the Pathao courier order, and its live status. One row per successful sale (`productPaymentId` unique FK, `ON DELETE RESTRICT`) — created by `ProductDeliveriesService.onPaymentSucceeded` (`@OnEvent(PAYMENT_SUCCEEDED)`), never before a payment actually succeeds (payment *attempts* that fail/expire never get one).
+- Recipient/address fields mirror `SHIPPINGADDRESS` at the time of freezing — a buyer editing or deleting the saved address afterward must never rewrite where an already-paid parcel is going.
+- `deliveryCharge` — what the buyer was actually charged, copied from `ProductPayment.deliveryCharge` (not re-read from config), so it can never drift from what the Fonepay QR was really generated for.
+- Lifecycle is expressed as nullable timestamp/field checkpoints, not a status enum (mirrors `ProductPayment.sellerPaidAt`'s idiom): `receivedAtWarehouseAt`/`receivedAtWarehouseById` (admin confirms the item physically arrived — gates dispatch; seller→warehouse itself is out of scope, sellers get their own item there) → `consignmentId`/`storeId`/`dispatchedAt`/`dispatchedById` (admin creates the real Pathao order, warehouse→buyer; `storeId` is the warehouse's single pre-registered Pathao Store, snapshotted from `PATHAO_STORE_ID`) → `deliveredAt` (set once Pathao reports delivery).
+- `pathaoDeliveryFee` — Pathao's own quoted/actual delivery cost, separate from `deliveryCharge` (what the buyer paid) — comparing the two gives cost-vs-charge tracking per delivery for free.
+- `orderStatus` — raw status string from Pathao, refreshed by `ProductDeliveriesCron` every 15 minutes for any dispatched-but-not-delivered row (or on-demand via the admin `sync` endpoint). Kept untyped (not an enum) since Pathao's full status vocabulary isn't confirmed; only the latest status is kept, not a history of every change.
+- `amountToCollect` is always `0` — everything is prepaid via the bundled Fonepay charge (see `PAYMENT` above), nothing left for the rider to collect.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
 ### USERREWARDS

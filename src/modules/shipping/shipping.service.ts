@@ -83,6 +83,12 @@ export class ShippingService {
         street: dto.street,
         wardNumber: dto.wardNumber ?? null,
         landmark: dto.landmark ?? null,
+        pathaoCityId: dto.pathaoCityId ?? null,
+        pathaoCityName: dto.pathaoCityName ?? null,
+        pathaoZoneId: dto.pathaoZoneId ?? null,
+        pathaoZoneName: dto.pathaoZoneName ?? null,
+        pathaoAreaId: dto.pathaoAreaId ?? null,
+        pathaoAreaName: dto.pathaoAreaName ?? null,
         isDefault,
       });
       return manager.getRepository(ShippingAddress).save(address);
@@ -121,6 +127,18 @@ export class ShippingService {
       if (dto.wardNumber !== undefined)
         address.wardNumber = dto.wardNumber || null;
       if (dto.landmark !== undefined) address.landmark = dto.landmark || null;
+      if (dto.pathaoCityId !== undefined)
+        address.pathaoCityId = dto.pathaoCityId;
+      if (dto.pathaoCityName !== undefined)
+        address.pathaoCityName = dto.pathaoCityName;
+      if (dto.pathaoZoneId !== undefined)
+        address.pathaoZoneId = dto.pathaoZoneId;
+      if (dto.pathaoZoneName !== undefined)
+        address.pathaoZoneName = dto.pathaoZoneName;
+      if (dto.pathaoAreaId !== undefined)
+        address.pathaoAreaId = dto.pathaoAreaId;
+      if (dto.pathaoAreaName !== undefined)
+        address.pathaoAreaName = dto.pathaoAreaName;
 
       return manager.getRepository(ShippingAddress).save(address);
     });

@@ -61,6 +61,31 @@ export class ShippingAddress extends BaseEntity {
   landmark: string | null;
 
   /*
+   * Pathao's own location taxonomy (city → zone → area), picked via a
+   * cascading dropdown backed by PathaoModule's proxy endpoints. Nullable —
+   * existing rows predate this, and it's only required once a buyer actually
+   * checks out (see PaymentsService.initiatePayment). Names are denormalized
+   * alongside the ids purely for display; the ids are what's sent to Pathao.
+   */
+  @Column({ type: 'int', nullable: true })
+  pathaoCityId: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  pathaoCityName: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  pathaoZoneId: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  pathaoZoneName: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  pathaoAreaId: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  pathaoAreaName: string | null;
+
+  /*
    * Which address the checkout form preselects. At most one per user, kept true
    * by the service clearing the others inside the same transaction — a partial
    * unique index was rejected because "no default at all" is a legitimate state

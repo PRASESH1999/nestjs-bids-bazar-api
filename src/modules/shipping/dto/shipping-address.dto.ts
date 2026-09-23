@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -65,6 +66,46 @@ export class CreateShippingAddressDto {
   @IsString()
   @MaxLength(500)
   landmark?: string;
+
+  /*
+   * Pathao's own location taxonomy, picked via the cascading city/zone/area
+   * picker (GET /pathao/cities, /pathao/cities/:id/zones,
+   * /pathao/zones/:id/areas). Optional at the DTO level — an address can be
+   * saved without them — but required by the time it's used at checkout
+   * (PaymentsService.initiatePayment enforces this, not this DTO).
+   */
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsInt()
+  pathaoCityId?: number;
+
+  @ApiPropertyOptional({ example: 'Kathmandu' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  pathaoCityName?: string;
+
+  @ApiPropertyOptional({ example: 1389 })
+  @IsOptional()
+  @IsInt()
+  pathaoZoneId?: number;
+
+  @ApiPropertyOptional({ example: 'Airport Area' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  pathaoZoneName?: string;
+
+  @ApiPropertyOptional({ example: 23983 })
+  @IsOptional()
+  @IsInt()
+  pathaoAreaId?: number;
+
+  @ApiPropertyOptional({ example: 'Bhrikutimandap' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  pathaoAreaName?: string;
 
   @ApiPropertyOptional({
     description:

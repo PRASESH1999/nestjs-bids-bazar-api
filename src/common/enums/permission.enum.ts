@@ -46,6 +46,9 @@ export enum Permission {
   BOOST_MANAGE_OWN = 'boost:manage_own',
   BOOST_VIEW_ALL = 'boost:view_all',
 
+  // Shipment/courier permissions (Pathao integration)
+  SHIPMENT_MANAGE = 'shipment:manage',
+
   // Notification permissions
   NOTIFICATION_VIEW_OWN = 'notification:view_own',
 
