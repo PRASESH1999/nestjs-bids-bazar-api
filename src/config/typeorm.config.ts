@@ -21,6 +21,8 @@ import { Notification } from '../modules/notifications/entities/notification.ent
 import { Favorite } from '../modules/favorites/entities/favorite.entity';
 import { ProductReport } from '../modules/reports/entities/product-report.entity';
 import { SellerRating } from '../modules/ratings/entities/seller-rating.entity';
+import { BoostItem } from '../modules/boosts/entities/boost-item.entity';
+import { BoostPayment } from '../modules/boosts/entities/boost-payment.entity';
 
 config({ path: '.env.development' });
 
@@ -54,6 +56,8 @@ export const dataSourceOptions: DataSourceOptions = {
     Favorite,
     ProductReport,
     SellerRating,
+    BoostItem,
+    BoostPayment,
   ],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

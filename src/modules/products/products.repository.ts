@@ -220,6 +220,42 @@ export class ProductsRepository {
     return this.hydrateRanked(rows);
   }
 
+  // Product ids come pre-ranked (latest-boost-first) from BoostsService —
+  // this just attaches bid counts + images while preserving that order,
+  // mirroring hydrateRanked but keyed off the caller's order instead of a
+  // ranking computed here.
+  async findFeaturedRanked(ids: string[]): Promise<RankedProduct[]> {
+    if (ids.length === 0) return [];
+
+    const countRows = await this.productRepo
+      .createQueryBuilder('product')
+      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .select('product.id', 'id')
+      .addSelect('COUNT(bid.id)', 'totalBids')
+      .where('product.id IN (:...ids)', { ids })
+      .groupBy('product.id')
+      .getRawMany<{ id: string; totalBids: string }>();
+    const totalBidsById = new Map(
+      countRows.map((row) => [row.id, Number(row.totalBids)]),
+    );
+
+    const products = await this.productRepo.find({
+      where: { id: In(ids) },
+      relations: ['images'],
+      order: { images: { displayOrder: 'ASC' } },
+    });
+    const productsById = new Map(products.map((p) => [p.id, p]));
+
+    return ids
+      .map((id) => {
+        const product = productsById.get(id);
+        return product
+          ? { product, totalBids: totalBidsById.get(id) ?? 0 }
+          : null;
+      })
+      .filter((entry): entry is RankedProduct => entry !== null);
+  }
+
   async findPaginated(
     page: number,
     limit: number,

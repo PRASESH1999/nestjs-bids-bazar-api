@@ -4,6 +4,7 @@ import { KycModule } from '@modules/kyc/kyc.module';
 import { UsersModule } from '@modules/users/users.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
 import { BiddingModule } from '@modules/bidding/bidding.module';
+import { BoostsModule } from '@modules/boosts/boosts.module';
 import { FavoritesModule } from '@modules/favorites/favorites.module';
 import { Product } from './entities/product.entity';
 import { ProductImage } from './entities/product-image.entity';
@@ -20,6 +21,7 @@ import { ProductStorageService } from './product-storage.service';
     CategoriesModule,
     BiddingModule,
     FavoritesModule,
+    BoostsModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService, ProductsRepository, ProductStorageService],

@@ -33,6 +33,7 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
 import { Public } from '@common/decorators/public.decorator';
+import { PaginationDto } from '@common/dto/pagination.dto';
 import { OptionalJwtGuard } from '@common/guards/optional-jwt.guard';
 import { Permission } from '@common/enums/permission.enum';
 import { Role } from '@common/enums/role.enum';
@@ -184,6 +185,25 @@ export class ProductsController {
         this.getRequesterId(req),
       ),
     };
+  }
+
+  @Get('products/home/featured')
+  @Public()
+  @UseGuards(OptionalJwtGuard)
+  @ApiOperation({
+    summary:
+      'Home page: boosted products, latest boost first (paginated). A ' +
+      'product drops out the moment either its boost or its auction ends.',
+  })
+  async getFeaturedProducts(
+    @Query() query: PaginationDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productsService.getFeaturedProducts(
+      query.page ?? 1,
+      query.limit ?? 20,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/me')

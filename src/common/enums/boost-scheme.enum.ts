@@ -1,0 +1,7 @@
+export enum BoostScheme {
+  PER_DAY = 'PER_DAY',
+  THREE_DAYS = 'THREE_DAYS',
+  SEVEN_DAYS = 'SEVEN_DAYS',
+  FIFTEEN_DAYS = 'FIFTEEN_DAYS',
+  THIRTY_DAYS = 'THIRTY_DAYS',
+}

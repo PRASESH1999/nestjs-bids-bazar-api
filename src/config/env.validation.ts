@@ -59,4 +59,7 @@ export const envValidationSchema = Joi.object({
   FONEPAY_PRIVATE_KEY: Joi.string().required(),
   // How long to trust a cached Fonepay access token before proactive re-login (minutes).
   FONEPAY_TOKEN_TTL_MINUTES: Joi.number().integer().min(1).default(10),
+
+  // Boost payments (fixed-price Fonepay QR purchase window, in minutes).
+  BOOST_PAYMENT_WINDOW_MINUTES: Joi.number().integer().min(1).default(15),
 });

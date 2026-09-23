@@ -19,6 +19,7 @@ import {
   type PublicBidRange,
 } from '@modules/bidding/services/bidding.service';
 import { FavoritesService } from '@modules/favorites/favorites.service';
+import { BoostsService } from '@modules/boosts/services/boosts.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -117,6 +118,7 @@ export class ProductsService {
     private readonly auctionLifecycleService: AuctionLifecycleService,
     private readonly biddingService: BiddingService,
     private readonly favoritesService: FavoritesService,
+    private readonly boostsService: BoostsService,
   ) {}
 
   // ─── Create ───────────────────────────────────────────────────────────────
@@ -735,6 +737,39 @@ export class ProductsService {
       ),
       totalBids: r.totalBids,
     }));
+  }
+
+  // Paginated boosted products, latest boost first — a product drops out the
+  // moment either its boost window or its auction ends, whichever is first
+  // (see BoostsService.getFeaturedProductIds).
+  async getFeaturedProducts(
+    page: number,
+    limit: number,
+    requesterId: string | null = null,
+  ): Promise<{
+    data: HomeProductResponse[];
+    meta: { page: number; limit: number; total: number };
+  }> {
+    const { ids, total } = await this.boostsService.getFeaturedProductIds(
+      page,
+      limit,
+    );
+    const results = await this.productsRepository.findFeaturedRanked(ids);
+    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
+      requesterId,
+      results.map((r) => r.product),
+    );
+    return {
+      data: results.map((r) => ({
+        ...mapProduct(
+          r.product,
+          favoritedSet.has(r.product.id),
+          sellerSummaries.get(r.product.ownerId) ?? null,
+        ),
+        totalBids: r.totalBids,
+      })),
+      meta: { page, limit, total },
+    };
   }
 
   // ─── View tracking ────────────────────────────────────────────────────────
