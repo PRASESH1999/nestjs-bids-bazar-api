@@ -1,4 +1,5 @@
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional } from 'class-validator';
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { KycStatus } from '@common/enums/kyc-status.enum';
 import { PaginationDto } from '@common/dto/pagination.dto';
@@ -22,7 +23,9 @@ export class FindKycDto extends PaginationDto {
     description: 'Filter by the owning user id',
     format: 'uuid',
   })
-  @IsUUID()
+  // Shape-checked, not `@IsUUID()`: the admin user page looks KYC up by the
+  // account's id, and six seeded accounts have non-v4 ids. See IsUuidShape.
+  @IsUuidShape()
   @IsOptional()
   userId?: string;
 }

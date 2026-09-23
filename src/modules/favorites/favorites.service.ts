@@ -1,3 +1,4 @@
+import { BoostsService } from '@modules/boosts/services/boosts.service';
 import {
   ConflictException,
   Injectable,
@@ -21,6 +22,7 @@ export class FavoritesService {
   constructor(
     private readonly favoritesRepository: FavoritesRepository,
     private readonly usersService: UsersService,
+    private readonly boostsService: BoostsService,
   ) {}
 
   async addFavorite(
@@ -78,9 +80,14 @@ export class FavoritesService {
 
     // Single batch query for every distinct seller across this page — never
     // one lookup per favorited product.
-    const sellerSummaries = await this.usersService.getPublicSellerSummaries(
-      favorites.map((favorite) => favorite.product.ownerId),
-    );
+    const [sellerSummaries, boostedUntil] = await Promise.all([
+      this.usersService.getPublicSellerSummaries(
+        favorites.map((favorite) => favorite.product.ownerId),
+      ),
+      this.boostsService.boostedUntilFor(
+        favorites.map((favorite) => favorite.product.id),
+      ),
+    ]);
 
     // Every product here belongs to this user's own favorites by definition —
     // isFavorited is always true, no extra lookup needed.
@@ -89,6 +96,7 @@ export class FavoritesService {
         favorite.product,
         true,
         sellerSummaries.get(favorite.product.ownerId) ?? null,
+        boostedUntil.get(favorite.product.id) ?? null,
       ),
     );
 

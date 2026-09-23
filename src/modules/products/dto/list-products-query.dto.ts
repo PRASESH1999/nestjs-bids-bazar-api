@@ -4,13 +4,13 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Matches,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 import { ProductScope } from '@common/enums/product-scope.enum';
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
 import { PaginationDto } from '@common/dto/pagination.dto';
 
 export enum ProductSortBy {
@@ -37,24 +37,8 @@ export class ListProductsQueryDto extends PaginationDto {
   @ApiPropertyOptional({
     description: "Only this seller's listings. Public statuses only.",
   })
-  /*
-   * Shape-checked rather than `@IsUUID()`, to agree with `GET /sellers/:id`.
-   *
-   * Nest's ParseUUIDPipe accepts any hex UUID shape; class-validator's
-   * `@IsUUID()` additionally demands a version nibble of 1–5 and an RFC variant.
-   * Six of the twelve seeded accounts are hand-written fixtures
-   * (`00000000-0000-0000-0000-00000000000N`) that satisfy the first and fail
-   * the second — so with `@IsUUID()` a seeded seller's profile page loads and
-   * then its lots tabs answer 400, which is a worse failure than either rule on
-   * its own. Real accounts are v4 and pass both.
-   *
-   * Looking an id up is this endpoint's job; policing its version nibble is
-   * not, and an id that matches nothing is a 404 either way. The seed fixtures
-   * are the actual defect — see OPEN-ITEMS A36.
-   */
-  @Matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, {
-    message: 'sellerId must be a UUID',
-  })
+  // Shape-checked, not `@IsUUID()` — see IsUuidShape and OPEN-ITEMS A36.
+  @IsUuidShape()
   @IsOptional()
   sellerId?: string;
 

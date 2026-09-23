@@ -14,6 +14,41 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-09-23 (boosts, visible) — `boostedUntil`, `GET /boosts/me`, one UUID rule
+
+After the boost module landed, a boost was invisible everywhere except the
+per-product status call. Nothing here is breaking; all of it is additive.
+
+### New — `boostedUntil` on every product response
+
+`string | null` (ISO). The end of the lot's **currently running** boost —
+`boost_items.status = ACTIVE` and `endDateTime > now()` — or `null`. Present on
+list rows, the detail response, `/products/me`, the home feeds and the
+wishlist. Computed per page with one batched query
+(`BoostsService.boostedUntilFor(productIds)`), riding on the same
+`responseContextFor` that already batches favourites and sellers, so it adds
+one query per page, not one per row. Clients use it for a "Featured" badge and
+"Boosted until…" without calling `GET /boosts/:productId/status` per row.
+
+### New — `GET /boosts/me`
+
+The caller's own boost purchases, same filters and envelope as
+`GET /admin/boosts`, with `BOOST_MANAGE_OWN`. `sellerId` is always overwritten
+with the caller's id, so passing someone else's returns your own rows, not
+theirs. Declared before `boosts/:productId/status` so `me` is never parsed as a
+product id.
+
+### Changed — `@IsUuidShape()` for `sellerId` (`GET /products`) and `userId` (`GET /kyc`)
+
+`src/common/validators/is-uuid-shape.decorator.ts`. Accepts any hex UUID
+shape, exactly what `ParseUUIDPipe` accepts, instead of `@IsUUID()`'s
+version/variant check — the seeded fixture ids
+(`00000000-0000-0000-0000-00000000000N`) are valid on `/sellers/:id` and were
+400ing on these two filters. A stopgap for **A36**: once the seeds are real v4
+UUIDs, go back to `@IsUUID()` and delete the decorator.
+
+---
+
 ## 2026-09-23 (later) — seller profiles, seller-scoped listings, and a serialisation leak
 
 Driven by the frontend's seller-profile page and its tabbed My Listings. Nothing

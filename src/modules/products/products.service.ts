@@ -222,14 +222,13 @@ export class ProductsService {
     const createdProduct = (await this.productsRepository.findById(
       savedProduct.id,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [createdProduct],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [createdProduct]);
     return mapProduct(
       createdProduct,
       favoritedSet.has(createdProduct.id),
       sellerSummaries.get(createdProduct.ownerId) ?? null,
+      boostedUntil.get(createdProduct.id) ?? null,
     );
   }
 
@@ -340,14 +339,13 @@ export class ProductsService {
     const updatedProduct = (await this.productsRepository.findById(
       productId,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [updatedProduct],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [updatedProduct]);
     return mapProduct(
       updatedProduct,
       favoritedSet.has(updatedProduct.id),
       sellerSummaries.get(updatedProduct.ownerId) ?? null,
+      boostedUntil.get(updatedProduct.id) ?? null,
     );
   }
 
@@ -386,14 +384,13 @@ export class ProductsService {
       );
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [saved],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [saved]);
     return mapProduct(
       saved,
       favoritedSet.has(saved.id),
       sellerSummaries.get(saved.ownerId) ?? null,
+      boostedUntil.get(saved.id) ?? null,
     );
   }
 
@@ -476,16 +473,15 @@ export class ProductsService {
           : {}),
       },
     );
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      data,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, data);
     return {
       data: data.map((p) =>
         mapProduct(
           p,
           favoritedSet.has(p.id),
           sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
         ),
       ),
       meta: { page, limit, total },
@@ -555,16 +551,15 @@ export class ProductsService {
         statuses: statusesForScope(scope),
       },
     );
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      data,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, data);
     return {
       data: data.map((p) =>
         mapProduct(
           p,
           favoritedSet.has(p.id),
           sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
         ),
       ),
       meta: { page, limit, total },
@@ -613,7 +608,7 @@ export class ProductsService {
       bidCounts,
       winningBidder,
       similarProducts,
-      { favoritedSet, sellerSummaries },
+      { favoritedSet, sellerSummaries, boostedUntil },
     ] = await Promise.all([
       this.biddingService.getTopBiddersForProduct(id),
       this.biddingService.getBidCountsForProduct(id),
@@ -627,6 +622,7 @@ export class ProductsService {
       product,
       favoritedSet.has(product.id),
       sellerSummaries.get(product.ownerId) ?? null,
+      boostedUntil.get(product.id) ?? null,
     );
 
     return {
@@ -649,15 +645,14 @@ export class ProductsService {
   ): Promise<HomeProductResponse | null> {
     const result = await this.productsRepository.findHotProduct();
     if (!result) return null;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      [result.product],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, [result.product]);
     return {
       ...mapProduct(
         result.product,
         favoritedSet.has(result.product.id),
         sellerSummaries.get(result.product.ownerId) ?? null,
+        boostedUntil.get(result.product.id) ?? null,
       ),
       totalBids: result.totalBids,
     };
@@ -668,15 +663,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findTrendingProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -687,15 +684,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findNewestProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -706,15 +705,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findRareProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -725,15 +726,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findRecentlySoldProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -755,16 +758,18 @@ export class ProductsService {
       limit,
     );
     const results = await this.productsRepository.findFeaturedRanked(ids);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return {
       data: results.map((r) => ({
         ...mapProduct(
           r.product,
           favoritedSet.has(r.product.id),
           sellerSummaries.get(r.product.ownerId) ?? null,
+          boostedUntil.get(r.product.id) ?? null,
         ),
         totalBids: r.totalBids,
       })),
@@ -836,15 +841,14 @@ export class ProductsService {
       excludeIds.push(...found.map((p) => p.id));
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      collected,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, collected);
     return collected.map((p) =>
       mapProduct(
         p,
         favoritedSet.has(p.id),
         sellerSummaries.get(p.ownerId) ?? null,
+        boostedUntil.get(p.id) ?? null,
       ),
     );
   }
@@ -902,14 +906,13 @@ export class ProductsService {
     const reordered = (await this.productsRepository.findById(
       productId,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      [reordered],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, [reordered]);
     return mapProduct(
       reordered,
       favoritedSet.has(reordered.id),
       sellerSummaries.get(reordered.ownerId) ?? null,
+      boostedUntil.get(reordered.id) ?? null,
     );
   }
 
@@ -936,14 +939,13 @@ export class ProductsService {
     const updated = (await this.productsRepository.findById(
       productId,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      [updated],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, [updated]);
     return mapProduct(
       updated,
       favoritedSet.has(updated.id),
       sellerSummaries.get(updated.ownerId) ?? null,
+      boostedUntil.get(updated.id) ?? null,
     );
   }
 
@@ -961,14 +963,13 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [product],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [product]);
     return mapProduct(
       product,
       favoritedSet.has(product.id),
       sellerSummaries.get(product.ownerId) ?? null,
+      boostedUntil.get(product.id) ?? null,
     );
   }
 
@@ -987,16 +988,15 @@ export class ProductsService {
       limit,
       { ...filters, status, ownerId },
     );
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      data,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, data);
     return {
       data: data.map((p) =>
         mapProduct(
           p,
           favoritedSet.has(p.id),
           sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
         ),
       ),
       meta: { page, limit, total },
@@ -1035,14 +1035,13 @@ export class ProductsService {
       );
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      adminId,
-      [saved],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(adminId, [saved]);
     return mapProduct(
       saved,
       favoritedSet.has(saved.id),
       sellerSummaries.get(saved.ownerId) ?? null,
+      boostedUntil.get(saved.id) ?? null,
     );
   }
 
@@ -1080,14 +1079,13 @@ export class ProductsService {
       );
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      adminId,
-      [saved],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(adminId, [saved]);
     return mapProduct(
       saved,
       favoritedSet.has(saved.id),
       sellerSummaries.get(saved.ownerId) ?? null,
+      boostedUntil.get(saved.id) ?? null,
     );
   }
 
@@ -1247,11 +1245,13 @@ export class ProductsService {
   ): Promise<{
     favoritedSet: Set<string>;
     sellerSummaries: Map<string, ProductSellerSummary>;
+    boostedUntil: Map<string, Date>;
   }> {
-    const [favoritedSet, sellerSummaries] = await Promise.all([
+    const [favoritedSet, sellerSummaries, boostedUntil] = await Promise.all([
       this.favoritedSetFor(requesterId, products),
       this.sellerSummaryFor(products),
+      this.boostsService.boostedUntilFor(products.map((p) => p.id)),
     ]);
-    return { favoritedSet, sellerSummaries };
+    return { favoritedSet, sellerSummaries, boostedUntil };
   }
 }

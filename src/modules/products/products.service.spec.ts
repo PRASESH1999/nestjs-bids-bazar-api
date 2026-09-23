@@ -30,7 +30,7 @@ describe('ProductsService — Instant Buy pricing', () => {
     {} as never,
     {} as never,
     mockFavoritesService as never,
-    {} as never, // boostsService
+    { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
   );
 
   describe('computeInstantBuyPrice', () => {
@@ -166,7 +166,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       {} as never,
       {} as never,
       mockFavoritesService as never,
-      {} as never, // boostsService
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
     );
 
     const dto: UpdateProductDto = {
@@ -216,7 +216,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       {} as never,
       {} as never,
       mockFavoritesService as never,
-      {} as never, // boostsService
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
     );
 
     const dto: UpdateProductDto = { title: 'Updated title' };
@@ -303,7 +303,7 @@ describe('ProductsService — isFavorited flag', () => {
       {} as never,
       {} as never,
       favoritesService as never,
-      {} as never, // boostsService
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
     );
 
     const result = await service.listPublicProducts({}, 'user-1');
@@ -319,6 +319,52 @@ describe('ProductsService — isFavorited flag', () => {
     expect(result.data.find((p) => p.id === 'product-b')?.isFavorited).toBe(
       false,
     );
+  });
+
+  it('marks boostedUntil per product from a single batch lookup, and null for the rest', async () => {
+    const productA = buildProduct('product-a');
+    const productB = buildProduct('product-b');
+    const endsAt = new Date('2026-10-01T00:00:00Z');
+
+    const productsRepository = {
+      findPaginated: jest.fn().mockResolvedValue([[productA, productB], 2]),
+    } as unknown as ProductsRepository;
+
+    // Only product-a has a running boost.
+    const boostsService = {
+      boostedUntilFor: jest
+        .fn()
+        .mockResolvedValue(new Map([['product-a', endsAt]])),
+    };
+
+    const service = new ProductsService(
+      productsRepository,
+      {} as never,
+      {} as never,
+      mockUsersService as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        getFavoritedProductIds: jest.fn().mockResolvedValue(new Set()),
+      } as never,
+      boostsService as never,
+    );
+
+    const result = await service.listPublicProducts({}, null);
+
+    expect(boostsService.boostedUntilFor).toHaveBeenCalledTimes(1);
+    expect(boostsService.boostedUntilFor).toHaveBeenCalledWith([
+      'product-a',
+      'product-b',
+    ]);
+    expect(result.data.find((p) => p.id === 'product-a')?.boostedUntil).toBe(
+      endsAt,
+    );
+    expect(
+      result.data.find((p) => p.id === 'product-b')?.boostedUntil,
+    ).toBeNull();
   });
 
   it('is false for every product on an unauthenticated (anonymous) request', async () => {
@@ -342,7 +388,7 @@ describe('ProductsService — isFavorited flag', () => {
       {} as never,
       {} as never,
       favoritesService as never,
-      {} as never, // boostsService
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
     );
 
     const result = await service.listPublicProducts({}, null);
@@ -433,7 +479,7 @@ describe('ProductsService — seller rating summary', () => {
       {} as never,
       {} as never,
       mockFavoritesService as never,
-      {} as never, // boostsService
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
     );
 
     const result = await service.listPublicProducts({}, null);
