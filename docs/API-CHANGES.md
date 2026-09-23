@@ -14,6 +14,125 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-09-23 (later) — seller profiles, seller-scoped listings, and a serialisation leak
+
+Driven by the frontend's seller-profile page and its tabbed My Listings. Nothing
+here is breaking; everything is additive except the leak fix, which only
+*removes* fields that should never have been on the wire.
+
+### 🔒 Security — `GET /users/:id` and four siblings shipped the phone OTP hash (**A35**)
+
+`phoneOtpHash`, `phoneOtpExpiresAt` and `phoneOtpAttempts` are marked
+`@Exclude()` on the `User` entity, and were being sent anyway. The cause was in
+the controller, not the entity:
+
+```ts
+const { password: _, hashedRefreshToken: __, ...result } = user;
+return result;   // ← a plain object
+```
+
+`ClassSerializerInterceptor` only transforms **class instances**. Spreading the
+entity threw away its prototype, so every `@Exclude()` stopped applying and the
+hand-written pick became the *entire* allowlist. The comment on one of these
+even called the destructuring "redundant since User marks both @Exclude()" — it
+was the opposite of redundant, it was what disabled them.
+
+`phoneOtpHash` is the verifier for the SMS code that gates KYC submission. It is
+null between requests, so it was exposed exactly in the window where it is worth
+something. Admin-only is not a mitigation: **A1** and **A25** were both
+admin-only too, and this is the third time this module has leaked a credential
+through a hand-written field list.
+
+Fixed by returning the entity from all five handlers (`createAdmin`, `findAll`,
+`findOne`, `suspendUser`, `assignRole`) and letting the interceptor do its job.
+The entity is now the single place that decides what is public — including for
+the next column somebody adds.
+
+**For clients:** these responses lose `password`, `hashedRefreshToken` and the
+three `phoneOtp*` fields. Nothing should have been reading them.
+
+### New — `GET /sellers/:id`, a public seller profile (**A32**)
+
+`@Public()`. Returns `username`, the rating aggregate, `totalListings` /
+`totalSold`, `createdAt`, `isIdentityVerified`, `sellerTier` and a
+`ratingBreakdown` (counts keyed `'1'`–`'5'`, every bucket present).
+
+All of it already existed; none of it was reachable without a product in hand,
+because the only way out was `product.seller`. A profile page has no product.
+
+Deliberately **not** on it: email, phone, legal name, `isActive`, `role`. It is
+a hand-built response rather than an entity precisely so that stays true — see
+`SellerProfileResponse`. `ratingBreakdown` is computed server-side because it
+cannot be computed client-side: `/sellers/:id/ratings` is paginated, so a client
+counting a page of ten would render a histogram of the last ten reviews as the
+seller's whole record.
+
+Lives in `SellersController`, separate from `UsersController`, so a route cannot
+be added to the private controller and quietly inherit a public decorator.
+
+### New — `sellerId` and `scope` on `GET /products` (**A33**)
+
+```
+GET /products?sellerId=<uuid>&scope=live    → ACTIVE + AWAITING_FIRST_BID
+GET /products?sellerId=<uuid>&scope=sold    → SETTLED
+GET /products?sellerId=<uuid>               → every publicly visible status
+```
+
+`scope`, not `status`. The public list still refuses a caller-named status, for
+the reason it always did — that would be a way to ask for other people's DRAFT
+and REJECTED rows. Each `ProductScope` maps to a fixed subset of
+`PUBLICLY_VISIBLE_STATUSES`, chosen server-side, so no combination of parameters
+can widen it. Verified: a seller with two DRAFTs returns none of them here.
+
+`sellerId` is shape-validated (`@Matches`) rather than `@IsUUID()`, to agree
+with `ParseUUIDPipe` on `/sellers/:id` — see **A36** below for why that
+difference exists at all.
+
+### Changed — `status` on `GET /products/me` accepts several (**A30**)
+
+```
+?status=DRAFT                          # unchanged
+?status=ACTIVE,AWAITING_FIRST_BID      # new
+?status=ABANDONED&status=WITHDRAWN     # new
+```
+
+Repeated or comma-separated, same `@Transform` + `@IsEnum({ each: true })`
+shape as `UpdateProductDto.clearFields`. A single value forced a client to
+either show one tab per status or merge two paginated responses in the browser,
+and merging makes the page numbers and the result count wrong.
+
+**For clients:** `status` is now `ProductStatus[]` in the DTO. A single value
+still works — it is transformed into a one-element array — so no existing call
+changes.
+
+### New — `GET /products/me/counts` (**A31**)
+
+`{ counts: { DRAFT: 2, ... }, total: 14 }`, every status present even at zero.
+Takes the same `keyword` / `category` / price filters as `GET /products/me`, so
+a tab badge cannot contradict the list under it; `status`, `scope` and the
+pagination parameters are ignored.
+
+Replaces ten `limit=1` requests whose only purpose was to read `meta.total` off
+the envelope, re-fired on every keystroke in the seller's search box.
+
+### Still open — reporting a seller (**A34**)
+
+Not done, because it is a schema decision rather than an implementation. The
+`product_reports` row already carries `reportedUserId` and its own comment says
+"a report is effectively against the seller, not the listing" — so the data
+model is most of the way there. What it needs is a decision:
+
+- make `productId` nullable, and rework the
+  `@Index(['reporterId', 'productId'], { unique: true })` constraint — one
+  report per reporter per *seller* is a different rule from one per listing, and
+  with a null `productId` the current index stops constraining anything; or
+- add a separate `user_reports` table and teach the admin queue to read both.
+
+Either way it is a migration plus a change to the moderation queue. Worth
+deciding rather than guessing.
+
+---
+
 ## 2026-09-23 — identity split, and a pass over the open API asks
 
 One branch, two bodies of work. They are interleaved across the same files, so

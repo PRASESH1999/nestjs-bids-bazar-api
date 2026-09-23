@@ -4,6 +4,7 @@ import {
   PUBLICLY_VISIBLE_STATUSES,
   ProductStatus,
 } from '@common/enums/product-status.enum';
+import { ProductScope } from '@common/enums/product-scope.enum';
 import {
   roundDownToMultipleOf5,
   roundUpToMultipleOf5,
@@ -79,6 +80,28 @@ const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
   ProductStatus.SETTLED,
   ProductStatus.ABANDONED,
 ];
+
+/**
+ * The statuses a public `scope` stands for.
+ *
+ * Kept as a function beside the service rather than on the enum so the mapping
+ * is checked against `ProductStatus` by the compiler, and so adding a scope
+ * forces a decision here rather than defaulting to "everything public".
+ *
+ * Each arm is a subset of PUBLICLY_VISIBLE_STATUSES. That invariant is the
+ * whole safety argument for exposing `scope` on an unauthenticated endpoint,
+ * so a new arm must keep it.
+ */
+function statusesForScope(scope?: ProductScope): ProductStatus[] {
+  switch (scope) {
+    case ProductScope.LIVE:
+      return [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE];
+    case ProductScope.SOLD:
+      return [ProductStatus.SETTLED];
+    default:
+      return PUBLICLY_VISIBLE_STATUSES;
+  }
+}
 
 @Injectable()
 export class ProductsService {
@@ -422,13 +445,33 @@ export class ProductsService {
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
-    const { page = 1, limit = 20, ...filters } = query;
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      sellerId: _,
+      scope,
+      ...filters
+    } = query;
     const [data, total] = await this.productsRepository.findPaginated(
       page,
       limit,
       {
         ...filters,
         ownerId: userId,
+        /*
+         * `status` is a list here, unlike on the public endpoint — the scope is
+         * already this caller's own rows, so every status is theirs to ask for.
+         * `sellerId` is dropped rather than honoured: it is inherited from the
+         * public DTO and would otherwise let a seller aim this at somebody
+         * else's listings, which `ownerId` below is what decides.
+         */
+        statuses: status,
+        // `scope` is the public shorthand and is redundant next to `status`,
+        // but honouring it keeps one query string working against both lists.
+        ...(status === undefined && scope !== undefined
+          ? { statuses: statusesForScope(scope) }
+          : {}),
       },
     );
     const { favoritedSet, sellerSummaries } = await this.responseContextFor(
@@ -447,6 +490,45 @@ export class ProductsService {
     };
   }
 
+  /**
+   * How many of the caller's listings sit in each status — `GET /products/me/counts`.
+   *
+   * Exists because a tabbed My Listings needs ten numbers to label ten tabs,
+   * and the only way to get them was ten `limit=1` requests reading `meta.total`
+   * off each. One query, and the same filters as the list itself so a badge can
+   * never contradict the table under it. See OPEN-ITEMS A31.
+   */
+  async countMyProductsByStatus(
+    userId: string,
+    query: ListMyProductsQueryDto,
+  ): Promise<{ counts: Record<string, number>; total: number }> {
+    const {
+      page: _p,
+      limit: _l,
+      status: _s,
+      sellerId: _sid,
+      scope: _sc,
+      ...filters
+    } = query;
+
+    const found = await this.productsRepository.countByStatusForOwner({
+      ...filters,
+      ownerId: userId,
+    });
+
+    // Every status present, including the empty ones: a client rendering a tab
+    // per status should not have to treat "absent" and "zero" as the same.
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const status of Object.values(ProductStatus)) {
+      const count = found.get(status) ?? 0;
+      counts[status] = count;
+      total += count;
+    }
+
+    return { counts, total };
+  }
+
   // ─── Public views ─────────────────────────────────────────────────────────
 
   async listPublicProducts(
@@ -456,13 +538,19 @@ export class ProductsService {
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
-    const { page = 1, limit = 20, ...filters } = query;
+    const { page = 1, limit = 20, sellerId, scope, ...filters } = query;
     const [data, total] = await this.productsRepository.findPaginated(
       page,
       limit,
       {
         ...filters,
-        statuses: PUBLICLY_VISIBLE_STATUSES,
+        ownerId: sellerId,
+        /*
+         * The scope narrows the public set; it never widens it. Every value it
+         * can take is a subset of PUBLICLY_VISIBLE_STATUSES, which is what
+         * makes it safe to expose on an endpoint anyone may call.
+         */
+        statuses: statusesForScope(scope),
       },
     );
     const { favoritedSet, sellerSummaries } = await this.responseContextFor(

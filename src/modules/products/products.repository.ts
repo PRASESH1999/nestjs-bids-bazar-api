@@ -171,7 +171,9 @@ export class ProductsRepository {
       .leftJoin(Bid, 'bid', 'bid.productId = product.id')
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.status = :status', { status: ProductStatus.AWAITING_FIRST_BID })
+      .where('product.status = :status', {
+        status: ProductStatus.AWAITING_FIRST_BID,
+      })
       .groupBy('product.id')
       .orderBy('product.createdAt', 'DESC')
       .limit(limit)
@@ -392,6 +394,34 @@ export class ProductsRepository {
         return product ? { product, totalBids: Number(row.totalBids) } : null;
       })
       .filter((entry): entry is RankedProduct => entry !== null);
+  }
+
+  /**
+   * How many of this owner's listings sit in each status, in one query.
+   *
+   * Reuses `buildFilterQuery` so a count can never disagree with the list it
+   * labels — the same keyword, category and price filters apply to both. The
+   * caller's `statuses` is ignored on purpose: the point is to count *every*
+   * status, including the ones the current view is filtered away from.
+   *
+   * Statuses with no rows are absent from the result; the service fills them in
+   * at zero, so a client never has to decide what a missing key means.
+   * See OPEN-ITEMS A31.
+   */
+  async countByStatusForOwner(
+    filters: ProductFilters,
+  ): Promise<Map<ProductStatus, number>> {
+    const rows = await this.buildFilterQuery({
+      ...filters,
+      status: undefined,
+      statuses: undefined,
+    })
+      .select('product.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('product.status')
+      .getRawMany<{ status: ProductStatus; count: string }>();
+
+    return new Map(rows.map((row) => [row.status, Number(row.count)]));
   }
 
   private buildFilterQuery(

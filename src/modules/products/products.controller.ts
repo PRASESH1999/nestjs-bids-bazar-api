@@ -196,6 +196,24 @@ export class ProductsController {
     return this.productsService.listMyProducts(req.user.sub, query);
   }
 
+  /*
+   * Declared before `products/:id` — Nest matches in declaration order, so
+   * registering it after would make `:id` swallow "me/counts".
+   */
+  @Get('products/me/counts')
+  @RequirePermissions(Permission.PRODUCT_VIEW_OWN)
+  @ApiOperation({
+    summary: 'How many of your listings sit in each status',
+    description:
+      'One number per ProductStatus, every status present even at zero, plus the total. Takes the same filters as GET /products/me (keyword, category, price) so a tab badge cannot contradict the list under it; `status`, `scope` and the pagination parameters are ignored. See OPEN-ITEMS A31.',
+  })
+  async countMyProducts(
+    @Request() req: RequestWithUser,
+    @Query() query: ListMyProductsQueryDto,
+  ) {
+    return this.productsService.countMyProductsByStatus(req.user.sub, query);
+  }
+
   @Get('products/:id')
   @Public()
   @UseGuards(OptionalJwtGuard)
