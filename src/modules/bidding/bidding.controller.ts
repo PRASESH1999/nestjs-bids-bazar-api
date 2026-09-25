@@ -212,7 +212,7 @@ export class BiddingController {
     return this.auctionLifecycleService.confirmPaymentManual(
       req.user.sub,
       productId,
-      dto.deliveryZone,
+      dto.shippingAddressId,
     );
   }
 

@@ -16,6 +16,7 @@ import { FonepayModule } from '@modules/fonepay/fonepay.module';
 import { KycModule } from '@modules/kyc/kyc.module';
 import { MailModule } from '@modules/mail/mail.module';
 import { NotificationsModule } from '@modules/notifications/notifications.module';
+import { PathaoModule } from '@modules/pathao/pathao.module';
 import { PaymentsModule } from '@modules/payments/payments.module';
 import { ShippingModule } from '@modules/shipping/shipping.module';
 import { ProductsModule } from '@modules/products/products.module';
@@ -83,6 +84,7 @@ import { envValidationSchema } from './config/env.validation';
     NotificationsModule,
     BiddingModule,
     FavoritesModule,
+    PathaoModule,
     PaymentsModule,
     ShippingModule,
     FonepayModule,

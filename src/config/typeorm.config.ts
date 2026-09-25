@@ -23,6 +23,7 @@ import { ProductReport } from '../modules/reports/entities/product-report.entity
 import { SellerRating } from '../modules/ratings/entities/seller-rating.entity';
 import { BoostItem } from '../modules/boosts/entities/boost-item.entity';
 import { BoostPayment } from '../modules/boosts/entities/boost-payment.entity';
+import { ProductDelivery } from '../modules/pathao/entities/product-delivery.entity';
 
 config({ path: '.env.development' });
 
@@ -58,6 +59,7 @@ export const dataSourceOptions: DataSourceOptions = {
     SellerRating,
     BoostItem,
     BoostPayment,
+    ProductDelivery,
   ],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

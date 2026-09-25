@@ -176,8 +176,9 @@ Two paths trigger payment-window expiry — same dual pattern as closing (Phase 
 - This endpoint is kept long-term as a backup mechanism even after bank API integration,
   for cases where the API fails or admin intervention is needed. Since this
   path bypasses the buyer-facing checkout that would normally capture the
-  delivery zone, the admin supplies it in the request body on the buyer's
-  behalf.
+  delivery address, the admin supplies `shippingAddressId` in the request
+  body on the buyer's behalf (must belong to the winning bidder and already
+  have a Pathao city/zone resolved).
 - On confirmation (either path):
     - Responsible bid: `paymentStatus = CONFIRMED`, `paymentConfirmedAt`, `paymentConfirmedById`,
       `paymentConfirmationMethod = ADMIN_MANUAL` or `BANK_API`.
@@ -187,25 +188,54 @@ Two paths trigger payment-window expiry — same dual pattern as closing (Phase 
     - **Manual path only**: since it has no Fonepay-originated `Payment`
       row, `confirmPaymentManual` creates one directly (`status = SUCCESS`,
       `terminalId = 'ADMIN-MANUAL'`, a locally-generated `referenceLabel`,
-      `deliveryZone`/`deliveryCharge` from the admin's input) so this sale
-      flows through the same seller-settlement + points/commission
-      pipeline as a gateway-paid sale (see Rule 16). `sellerPaidAt` stays
-      null — settlement-to-seller is a separate, later admin action.
+      `shippingAddressId` + resolved `deliveryCharge` from
+      `DELIVERY_CHARGE_FLAT`) so this sale flows through the same
+      seller-settlement + points/commission pipeline as a gateway-paid sale
+      (see Rule 16), and — via the same `PAYMENT_SUCCEEDED` emission as the
+      gateway path — gets a `ProductDelivery` row so it can be fulfilled
+      through Pathao like any other sale. `sellerPaidAt` stays null —
+      settlement-to-seller is a separate, later admin action.
 
-## Delivery Fee (all sales, cash on delivery)
+## Delivery Fee & Fulfilment (Pathao integration)
 
-- Fixed, two-zone fee — never calculated dynamically, never charged
-  through the gateway: `DELIVERY_CHARGE_INSIDE_VALLEY` /
-  `DELIVERY_CHARGE_OUTSIDE_VALLEY` (env-configured, see below).
-- The buyer **selects** the zone (`DeliveryZone.INSIDE_VALLEY |
-  OUTSIDE_VALLEY`) at checkout — a plain choice on the
-  `POST /payments/:productId/initiate` request body, not derived from any
-  address or the product's (currently out-of-scope) location fields.
-- The resolved amount is snapshotted onto `Payment.deliveryCharge` at
-  initiation time (same reasoning as `Payment.paymentDeadline` — immune to
-  a later env change), collected in cash at the point of delivery.
+- Fixed, flat fee — `DELIVERY_CHARGE_FLAT` (env-configured, see below),
+  never calculated dynamically. Replaces the old two-zone COD model
+  (`DeliveryZone`, `DELIVERY_CHARGE_INSIDE_VALLEY`/`OUTSIDE_VALLEY` — both
+  removed).
+- **Bundled into the Fonepay QR amount at checkout** — the gateway is asked
+  for `itemAmount + deliveryCharge` as a single charge
+  (`PaymentsService.initiatePayment`). There is no cash-on-delivery
+  collection anymore; the Pathao order created at dispatch always has
+  `amount_to_collect = 0`.
+- `ProductPayment.amount` stays **item price only** — it is what
+  `RewardsService` reads for commission/points math (Rule 16), so its
+  meaning must never change. `ProductPayment.deliveryCharge` is a separate
+  column, snapshotted at initiation time (same reasoning as
+  `paymentDeadline` — immune to a later env change): together they're what
+  the QR was actually generated for.
+- `InitiatePaymentDto.shippingAddressId` is **required** — there is no way
+  to fulfil a sale without a Pathao-resolvable delivery address. The chosen
+  `ShippingAddress` must already have a Pathao city/zone (picked via
+  `GET /pathao/cities` → `/cities/:id/zones` → `/zones/:id/areas`) and must
+  resolve to a city inside `PATHAO_VALLEY_CITY_IDS` — **we can currently
+  only fulfil inside Kathmandu Valley** — or `initiatePayment` rejects with
+  `400`. The same address + serviceability check applies to
+  `confirmPaymentManual` (the admin supplies `shippingAddressId` instead of
+  a zone, since that path bypasses buyer-facing checkout).
 - **Never counted toward points** — the 1% buyer/seller points calculation
-  (Rule 16) is computed on the item price only.
+  (Rule 16) is computed on `ProductPayment.amount` (item price) only.
+- **Fulfilment is tracked separately**, on `ProductDelivery`
+  (`product_deliveries`, one row per successful sale, `PathaoModule`) — not
+  on `ProductPayment`/`Product`, which stay exactly as terminal at
+  `SUCCESS`/`SETTLED` as before. A `PAYMENT_SUCCEEDED` listener creates the
+  row (frozen recipient/address snapshot + the charged `deliveryCharge`)
+  the moment a payment succeeds, via either path (gateway or admin-manual —
+  `confirmPaymentManual` emits `PAYMENT_SUCCEEDED` too, specifically so both
+  paths converge on this one listener). Admin then: marks it received at
+  the warehouse (seller→warehouse is out of scope — sellers get their own
+  item there), dispatches it (creates the real Pathao order, warehouse→
+  buyer), and status is polled automatically until delivered. See
+  `PathaoModule` for the full lifecycle.
 
 ## Concurrency Rules
 - All bid placement, closure, and fallback operations must run inside a database transaction.
@@ -275,8 +305,10 @@ Role → Permission additions in `auth/role-permissions.map.ts`:
 | `PAYMENT_WINDOW_HOURS`  | `18`    | Hours the winner has to complete payment       |
 | `BID_INCREMENT_MIN_FLAT`| `5`     | Minimum flat increment in NPR                  |
 | `BID_INCREMENT_PERCENT` | `0.10`  | Minimum increment as a fraction of current bid |
-| `DELIVERY_CHARGE_INSIDE_VALLEY`  | `100` | Fixed COD delivery fee, Inside Valley zone |
-| `DELIVERY_CHARGE_OUTSIDE_VALLEY` | `250` | Fixed COD delivery fee, Outside Valley zone |
+| `DELIVERY_CHARGE_FLAT` | `120` | Flat delivery fee, bundled into the Fonepay QR amount |
+| `PATHAO_BASE_URL` / `PATHAO_CLIENT_ID` / `PATHAO_CLIENT_SECRET` / `PATHAO_USERNAME` / `PATHAO_PASSWORD` | — | Pathao Courier Merchant API credentials (sandbox now, swap to live values only) |
+| `PATHAO_STORE_ID` | — | The warehouse's single pre-registered Pathao Store id |
+| `PATHAO_VALLEY_CITY_IDS` | — | Comma-separated Pathao `city_id`s we can currently fulfil to (Kathmandu Valley) |
 
 Until Phase 2 adds env validation, `ConfigService` must use the defaults above as runtime fallbacks.
 

@@ -37,7 +37,13 @@ export interface AuctionSettledPayload {
   productId: string;
   winningBidId: string;
   buyerId: string;
+  // Item price only — what the seller-facing notification/email quotes.
   amount: number;
+  // Item price + delivery charge — what the BUYER actually paid via the
+  // bundled Fonepay QR (Rule 14). Kept separate from `amount` because the
+  // seller never sees the delivery portion; conflating the two would quote
+  // sellers an inflated "sale amount" that includes a logistics fee.
+  buyerTotalAmount: number;
   // Added for NotificationsModule handlers.
   sellerId: string;
   productTitle: string;
@@ -58,7 +64,16 @@ export interface PaymentSucceededPayload {
   referenceLabel: string;
   winnerUserId: string;
   fonepayTraceId: string | null;
+  // Item price only (mirrors ProductPayment.amount).
   amount: number;
+  // Bundled Rs. 120 delivery charge, snapshotted at initiation time — what
+  // ProductDeliveriesService's PAYMENT_SUCCEEDED listener uses to populate
+  // ProductDelivery.deliveryCharge without re-reading (possibly-changed)
+  // config.
+  deliveryCharge: number;
+  // Which saved address to freeze onto ProductDelivery. Null is defensive
+  // only — checkout requires this by the time a payment can succeed.
+  shippingAddressId: string | null;
 }
 
 export interface PaymentFailedPayload {

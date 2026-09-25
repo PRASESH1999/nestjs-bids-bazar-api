@@ -1,6 +1,5 @@
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
-import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { EventNames } from '@common/events/event-names';
 import type {
   PaymentFailedPayload,
@@ -12,6 +11,8 @@ import { ProductSettlement } from '@modules/bidding/entities/product-settlement.
 import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
 import type { FonepayPaymentStatusResponse } from '@modules/fonepay/dto/fonepay.dto';
 import { FonepayClientService } from '@modules/fonepay/services/fonepay-client.service';
+import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
+import { ProductDeliveriesService } from '@modules/pathao/services/product-deliveries.service';
 import { Product } from '@modules/products/entities/product.entity';
 import {
   BadRequestException,
@@ -32,16 +33,14 @@ import { PaginatedResult } from '@common/types/paginated-result.type';
 import type {
   InitiatePaymentDto,
   InitiatePaymentResponseDto,
+  PaymentShippingAddressView,
   PaymentStatusResponseDto,
 } from '../dto/payment.dto';
 import {
   ListPaymentsAdminQueryDto,
   SortOrder,
 } from '../dto/list-payments-admin.query.dto';
-import {
-  ProductPayment,
-  type ShippingAddressSnapshot,
-} from '../entities/product-payment.entity';
+import { ProductPayment } from '../entities/product-payment.entity';
 import { ShippingService } from '@modules/shipping/shipping.service';
 
 @Injectable()
@@ -68,16 +67,14 @@ export class PaymentsService implements OnModuleInit {
     private readonly fonepayClientService: FonepayClientService,
     private readonly auctionLifecycleService: AuctionLifecycleService,
     private readonly shippingService: ShippingService,
+    private readonly pathaoClientService: PathaoClientService,
+    private readonly productDeliveriesService: ProductDeliveriesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
   ) {}
 
-  private resolveDeliveryCharge(zone: DeliveryZone): number {
-    const key =
-      zone === DeliveryZone.INSIDE_VALLEY
-        ? 'DELIVERY_CHARGE_INSIDE_VALLEY'
-        : 'DELIVERY_CHARGE_OUTSIDE_VALLEY';
-    return this.configService.getOrThrow<number>(key);
+  private resolveDeliveryCharge(): number {
+    return this.configService.getOrThrow<number>('DELIVERY_CHARGE_FLAT');
   }
 
   // On startup, reconnect any PENDING payments whose sockets were lost on restart.
@@ -115,12 +112,8 @@ export class PaymentsService implements OnModuleInit {
   async initiatePayment(
     productId: string,
     requestingUserId: string,
-    // The whole DTO rather than a loose `deliveryZone`: checkout now carries a
-    // destination as well as a zone, and two positional parameters of the same
-    // shape are easy to transpose.
     dto: InitiatePaymentDto,
   ): Promise<InitiatePaymentResponseDto> {
-    const { deliveryZone } = dto;
     // Load product and verify it's in the right state
     const product = await this.productRepo.findOne({
       where: { id: productId },
@@ -199,55 +192,55 @@ export class PaymentsService implements OnModuleInit {
       throw new ConflictException('This product has already been paid for');
     }
 
+    /*
+     * Resolve the destination — required (Rule 14): there is no way to
+     * fulfil a sale without a Pathao-resolvable address. `getOwned` scopes
+     * the lookup to the caller, so another person's address id is a 404.
+     */
+    const address = await this.shippingService.getOwned(
+      requestingUserId,
+      dto.shippingAddressId,
+    );
+    if (!address.pathaoCityId || !address.pathaoZoneId) {
+      throw new BadRequestException(
+        'This address has no delivery location set — pick a city/zone before checking out',
+      );
+    }
+    if (!this.pathaoClientService.isServiceable(address.pathaoCityId)) {
+      throw new BadRequestException(
+        'This delivery address is outside the area we can currently fulfil (Kathmandu Valley only)',
+      );
+    }
+
     // Generate a unique referenceLabel with collision retry
     const referenceLabel = await this.generateUniqueReferenceLabel();
 
-    // Call Fonepay to generate the QR
+    const itemAmount = Number(
+      product.currentHighestBid ?? responsibleBid.amount,
+    );
+    const deliveryCharge = this.resolveDeliveryCharge();
+
+    // Call Fonepay to generate the QR — item + delivery, bundled into one
+    // charge (Rule 14). See OPEN-ITEMS A28: this used to be item-only, with
+    // delivery collected separately as cash on delivery.
     const qrResult = await this.fonepayClientService.generateIntentQr({
-      amount: Number(product.currentHighestBid ?? responsibleBid.amount),
+      amount: itemAmount + deliveryCharge,
       billId: product.id,
       referenceLabel,
     });
 
-    /*
-     * Resolve the destination, if one was chosen.
-     *
-     * Both the id and a snapshot are stored: the id answers "which saved
-     * address was this", the snapshot is what the parcel was actually
-     * addressed to. A buyer editing or deleting the address later must not
-     * rewrite where a past order went. `getOwned` scopes the lookup to the
-     * caller, so another person's address id is a 404.
-     */
-    let shippingAddressId: string | null = null;
-    let shippingAddressSnapshot: ShippingAddressSnapshot | null = null;
-    if (dto.shippingAddressId) {
-      const address = await this.shippingService.getOwned(
-        requestingUserId,
-        dto.shippingAddressId,
-      );
-      shippingAddressId = address.id;
-      shippingAddressSnapshot = {
-        label: address.label,
-        recipientName: address.recipientName,
-        recipientPhone: address.recipientPhone,
-        province: address.province,
-        district: address.district,
-        city: address.city,
-        street: address.street,
-        wardNumber: address.wardNumber,
-        landmark: address.landmark,
-      };
-    }
-
-    // Persist the ProductPayment row
+    // Persist the ProductPayment row. Only the address id + delivery charge
+    // are stored here (what the QR was actually generated for, needed later
+    // by confirmSuccess) — the frozen recipient/address snapshot lives on
+    // ProductDelivery, created only for the attempt that actually succeeds.
     const payment = this.paymentRepo.create({
       productId,
       productSettlementId: activeSettlement.id,
       sellerId: product.ownerId,
-      shippingAddressId,
-      shippingAddressSnapshot,
+      shippingAddressId: address.id,
       winnerUserId: requestingUserId,
       amount: Number(responsibleBid.amount),
+      deliveryCharge,
       referenceLabel,
       terminalId: qrResult.terminalId,
       qrString: qrResult.qrString,
@@ -255,8 +248,6 @@ export class PaymentsService implements OnModuleInit {
       websocketUrl: qrResult.websocketUrl,
       status: PaymentStatus.PENDING,
       paymentDeadline: responsibleBid.paymentDeadline,
-      deliveryZone,
-      deliveryCharge: this.resolveDeliveryCharge(deliveryZone),
     });
 
     const saved = await this.paymentRepo.save(payment);
@@ -297,6 +288,7 @@ export class PaymentsService implements OnModuleInit {
       await this.auctionLifecycleService.confirmPaymentGateway(
         payment.productId,
         payment.productSettlementId,
+        Number(payment.deliveryCharge),
       );
     } catch (err: unknown) {
       // If product is already SETTLED (parallel admin confirmation or duplicate WS message)
@@ -331,6 +323,8 @@ export class PaymentsService implements OnModuleInit {
       winnerUserId: payment.winnerUserId,
       fonepayTraceId: statusResult?.fonepayTraceId ?? null,
       amount: Number(payment.amount),
+      deliveryCharge: Number(payment.deliveryCharge),
+      shippingAddressId: payment.shippingAddressId,
     };
     this.eventEmitter.emit(EventNames.PAYMENT_SUCCEEDED, succeededPayload);
   }
@@ -576,15 +570,67 @@ export class PaymentsService implements OnModuleInit {
     );
   }
 
-  private toInitiateResponse(p: ProductPayment): InitiatePaymentResponseDto {
+  /**
+   * Post-success, the recipient/address view comes from the frozen
+   * ProductDelivery snapshot (immune to later edits of the saved address).
+   * Before success, there's no ProductDelivery row yet, so it falls back to
+   * the live saved address the payment points at — the same one it was
+   * resolved from at initiation, so this is safe.
+   */
+  private async buildShippingAddressView(
+    p: ProductPayment,
+  ): Promise<PaymentShippingAddressView | null> {
+    if (p.status === PaymentStatus.SUCCESS) {
+      const delivery = await this.productDeliveriesService.findByPaymentId(
+        p.id,
+      );
+      if (!delivery) return null;
+      return {
+        recipientName: delivery.recipientName,
+        recipientPhone: delivery.recipientPhone,
+        province: delivery.province,
+        district: delivery.district,
+        city: delivery.city,
+        street: delivery.street,
+        wardNumber: delivery.wardNumber,
+        landmark: delivery.landmark,
+      };
+    }
+
+    if (!p.shippingAddressId) return null;
+    try {
+      const address = await this.shippingService.getOwned(
+        p.winnerUserId,
+        p.shippingAddressId,
+      );
+      return {
+        recipientName: address.recipientName,
+        recipientPhone: address.recipientPhone,
+        province: address.province,
+        district: address.district,
+        city: address.city,
+        street: address.street,
+        wardNumber: address.wardNumber,
+        landmark: address.landmark,
+      };
+    } catch {
+      // Address was deleted (SET NULL already handles the FK; this covers a
+      // race where the lookup runs between deletion and the FK update).
+      return null;
+    }
+  }
+
+  private async toInitiateResponse(
+    p: ProductPayment,
+  ): Promise<InitiatePaymentResponseDto> {
+    const shippingAddress = await this.buildShippingAddressView(p);
     return {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
-      amount: Number(p.amount),
+      amount: Number(p.amount) + Number(p.deliveryCharge),
       itemAmount: Number(p.amount),
       deliveryCharge: Number(p.deliveryCharge),
-      deliveryZone: p.deliveryZone,
-      shippingAddress: p.shippingAddressSnapshot,
+      shippingAddress,
       qrString: p.qrString ?? '',
       qrMessage: p.qrMessage ?? '',
       status: p.status,
@@ -592,15 +638,17 @@ export class PaymentsService implements OnModuleInit {
     };
   }
 
-  private toStatusResponse(p: ProductPayment): PaymentStatusResponseDto {
+  private async toStatusResponse(
+    p: ProductPayment,
+  ): Promise<PaymentStatusResponseDto> {
+    const shippingAddress = await this.buildShippingAddressView(p);
     return {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
-      amount: Number(p.amount),
+      amount: Number(p.amount) + Number(p.deliveryCharge),
       itemAmount: Number(p.amount),
       deliveryCharge: Number(p.deliveryCharge),
-      deliveryZone: p.deliveryZone,
-      shippingAddress: p.shippingAddressSnapshot,
+      shippingAddress,
       status: p.status,
       paymentDeadline: p.paymentDeadline.toISOString(),
       fonepayTraceId: p.fonepayTraceId,

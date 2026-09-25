@@ -38,9 +38,8 @@ export const envValidationSchema = Joi.object({
   BID_INCREMENT_MIN_FLAT: Joi.number().min(0.01).required(),
   BID_INCREMENT_PERCENT: Joi.number().min(0.001).max(1).required(),
 
-  // Delivery (fixed, two-zone, cash on delivery)
-  DELIVERY_CHARGE_INSIDE_VALLEY: Joi.number().min(0).required(),
-  DELIVERY_CHARGE_OUTSIDE_VALLEY: Joi.number().min(0).required(),
+  // Delivery (flat, prepaid via Fonepay — see Pathao block below)
+  DELIVERY_CHARGE_FLAT: Joi.number().min(0).required(),
 
   // Sparrow SMS (KYC phone OTP verification)
   SPARROW_SMS_TOKEN: Joi.string().required(),
@@ -62,4 +61,17 @@ export const envValidationSchema = Joi.object({
 
   // Boost payments (fixed-price Fonepay QR purchase window, in minutes).
   BOOST_PAYMENT_WINDOW_MINUTES: Joi.number().integer().min(1).default(15),
+
+  // Pathao Courier Merchant API (warehouse → buyer leg only — see Rule 14)
+  PATHAO_BASE_URL: Joi.string().uri().required(),
+  PATHAO_CLIENT_ID: Joi.string().required(),
+  PATHAO_CLIENT_SECRET: Joi.string().required(),
+  PATHAO_USERNAME: Joi.string().required(),
+  PATHAO_PASSWORD: Joi.string().required(),
+  // The warehouse's single, pre-registered Pathao Store id (created once,
+  // manually, via Pathao's own onboarding — never created in code).
+  PATHAO_STORE_ID: Joi.number().integer().required(),
+  // Comma-separated Pathao city_ids we can currently fulfil to (Kathmandu
+  // Valley only, for now). Pull real values from GET /pathao/cities.
+  PATHAO_VALLEY_CITY_IDS: Joi.string().required(),
 });

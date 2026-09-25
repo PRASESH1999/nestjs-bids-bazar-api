@@ -12,11 +12,11 @@ import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { PaymentConfirmationMethod } from '@common/enums/payment-confirmation-method.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
-import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { EventNames } from '@common/events/event-names';
 import type {
   AuctionClosedPayload,
   AuctionSettledPayload,
+  PaymentSucceededPayload,
   WinTransferredPayload,
 } from '@common/events/event-payloads.type';
 import { NotificationType } from '@common/enums/notification-type.enum';
@@ -26,6 +26,8 @@ import { User } from '@modules/users/entities/user.entity';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { NotificationsService } from '@modules/notifications/notifications.service';
+import { ShippingService } from '@modules/shipping/shipping.service';
+import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
 import { Bid } from '../entities/bid.entity';
 import { ProductSettlement } from '../entities/product-settlement.entity';
 
@@ -45,6 +47,8 @@ export class AuctionLifecycleService {
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
     private readonly notificationsService: NotificationsService,
+    private readonly shippingService: ShippingService,
+    private readonly pathaoClientService: PathaoClientService,
   ) {}
 
   // ─── Core transition: close an active auction whose timer has expired ─────
@@ -742,12 +746,8 @@ export class AuctionLifecycleService {
 
   // ─── Admin-initiated payment confirmation ─────────────────────────────────
 
-  private resolveDeliveryCharge(zone: DeliveryZone): number {
-    const key =
-      zone === DeliveryZone.INSIDE_VALLEY
-        ? 'DELIVERY_CHARGE_INSIDE_VALLEY'
-        : 'DELIVERY_CHARGE_OUTSIDE_VALLEY';
-    return this.configService.getOrThrow<number>(key);
+  private resolveDeliveryCharge(): number {
+    return this.configService.getOrThrow<number>('DELIVERY_CHARGE_FLAT');
   }
 
   // Mirrors PaymentsService.generateUniqueReferenceLabel — duplicated locally
@@ -774,7 +774,7 @@ export class AuctionLifecycleService {
   async confirmPaymentManual(
     adminId: string,
     productId: string,
-    deliveryZone: DeliveryZone,
+    shippingAddressId: string,
   ): Promise<Product> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -783,8 +783,11 @@ export class AuctionLifecycleService {
     let sellerId: string | null = null;
     let buyerId: string | null = null;
     let confirmedAmount: number | null = null;
+    let deliveryCharge: number | null = null;
     let capturedProductTitle: string | null = null;
     let capturedWinningBidId: string | null = null;
+    let capturedPaymentId: string | null = null;
+    let capturedReferenceLabel: string | null = null;
     let savedProduct: Product;
 
     try {
@@ -810,6 +813,25 @@ export class AuctionLifecycleService {
       if (!responsibleBid) {
         throw new InternalServerErrorException(
           'No responsible bid found — data inconsistency',
+        );
+      }
+
+      // Resolved here (not accepted as a snapshot) since this path bypasses
+      // the buyer-facing checkout that would normally validate it — the
+      // admin supplies the buyer's address id on their behalf. `getOwned`
+      // scopes the lookup to the buyer, so someone else's address id 404s.
+      const address = await this.shippingService.getOwned(
+        responsibleBid.bidderId,
+        shippingAddressId,
+      );
+      if (!address.pathaoCityId || !address.pathaoZoneId) {
+        throw new BadRequestException(
+          'This address has no Pathao city/zone set yet — resolve it before confirming payment',
+        );
+      }
+      if (!this.pathaoClientService.isServiceable(address.pathaoCityId)) {
+        throw new BadRequestException(
+          'This delivery address is outside the area we can currently fulfil (Kathmandu Valley only)',
         );
       }
 
@@ -853,9 +875,7 @@ export class AuctionLifecycleService {
       }
       currentSettlement.status = SettlementStatus.SETTLED;
       currentSettlement.resolvedAt = now;
-      await qr.manager
-        .getRepository(ProductSettlement)
-        .save(currentSettlement);
+      await qr.manager.getRepository(ProductSettlement).save(currentSettlement);
 
       // Create a matching ProductPayment record so this sale flows through
       // the same seller-settlement + points/commission pipeline as a
@@ -864,6 +884,7 @@ export class AuctionLifecycleService {
       // otherwise). sellerPaidAt stays null: settlement-to-seller is a
       // separate, later admin action (see RewardsService.markSellerPaid).
       const referenceLabel = await this.generateManualReferenceLabel(qr);
+      const resolvedDeliveryCharge = this.resolveDeliveryCharge();
       const manualPayment = qr.manager.getRepository(ProductPayment).create({
         productId,
         productSettlementId: currentSettlement.id,
@@ -877,8 +898,8 @@ export class AuctionLifecycleService {
         websocketUrl: null,
         status: PaymentStatus.SUCCESS,
         paymentDeadline: responsibleBid.paymentDeadline ?? now,
-        deliveryZone,
-        deliveryCharge: this.resolveDeliveryCharge(deliveryZone),
+        deliveryCharge: resolvedDeliveryCharge,
+        shippingAddressId: address.id,
       });
       await qr.manager.getRepository(ProductPayment).save(manualPayment);
 
@@ -888,15 +909,20 @@ export class AuctionLifecycleService {
       sellerId = product.ownerId;
       buyerId = responsibleBid.bidderId;
       confirmedAmount = Number(responsibleBid.amount);
+      deliveryCharge = resolvedDeliveryCharge;
       // Non-null: only products past submission (title required) reach the auction lifecycle.
       capturedProductTitle = product.title!;
       capturedWinningBidId = responsibleBid.id;
+      capturedPaymentId = manualPayment.id;
+      capturedReferenceLabel = referenceLabel;
     } catch (err: unknown) {
       await qr.rollbackTransaction();
       throw err;
     } finally {
       await qr.release();
     }
+
+    const buyerTotalAmount = confirmedAmount + deliveryCharge;
 
     // Post-commit email notifications — failures are non-fatal
     try {
@@ -920,7 +946,7 @@ export class AuctionLifecycleService {
         await this.mailService.sendPaymentConfirmedBuyer(buyer.email, {
           buyerName: buyer.username,
           productTitle: capturedProductTitle,
-          amount: confirmedAmount,
+          amount: buyerTotalAmount,
         });
       }
     } catch (err: unknown) {
@@ -938,6 +964,7 @@ export class AuctionLifecycleService {
         winningBidId: capturedWinningBidId,
         buyerId: buyerId,
         amount: confirmedAmount,
+        buyerTotalAmount,
         sellerId: sellerId,
         productTitle: capturedProductTitle,
       };
@@ -945,6 +972,30 @@ export class AuctionLifecycleService {
     } catch (err: unknown) {
       this.logger.error(
         `confirmPaymentManual: auction.settled emission failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    // This path has no separate "initiate then confirm" step (it's already
+    // SUCCESS the moment it's created), but it still needs to go through the
+    // same PAYMENT_SUCCEEDED listener as the gateway path so
+    // ProductDeliveriesService creates exactly one delivery record
+    // regardless of which confirmation method was used.
+    try {
+      const succeededPayload: PaymentSucceededPayload = {
+        productId,
+        paymentId: capturedPaymentId,
+        referenceLabel: capturedReferenceLabel,
+        winnerUserId: buyerId,
+        fonepayTraceId: null,
+        amount: confirmedAmount,
+        deliveryCharge,
+        shippingAddressId,
+      };
+      this.eventEmitter.emit(EventNames.PAYMENT_SUCCEEDED, succeededPayload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `confirmPaymentManual: payment.succeeded emission failed for product ${productId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -973,6 +1024,12 @@ export class AuctionLifecycleService {
   async confirmPaymentGateway(
     productId: string,
     expectedProductSettlementId?: string,
+    // What the buyer actually paid Fonepay for delivery, snapshotted at
+    // initiation time (ProductPayment.deliveryCharge) — the sole real caller
+    // (PaymentsService.confirmSuccess) always has this in scope. Falls back
+    // to the current config value only as a defensive default, never hit in
+    // practice.
+    deliveryCharge?: number,
   ): Promise<Product> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -1061,9 +1118,7 @@ export class AuctionLifecycleService {
 
       currentSettlement.status = SettlementStatus.SETTLED;
       currentSettlement.resolvedAt = now;
-      await qr.manager
-        .getRepository(ProductSettlement)
-        .save(currentSettlement);
+      await qr.manager.getRepository(ProductSettlement).save(currentSettlement);
 
       savedProduct = await qr.manager.getRepository(Product).save(product);
 
@@ -1081,6 +1136,9 @@ export class AuctionLifecycleService {
     } finally {
       await qr.release();
     }
+
+    const buyerTotalAmount =
+      confirmedAmount + (deliveryCharge ?? this.resolveDeliveryCharge());
 
     // Post-commit emails — reuse the same templates as manual confirmation
     try {
@@ -1104,7 +1162,7 @@ export class AuctionLifecycleService {
         await this.mailService.sendPaymentConfirmedBuyer(buyer.email, {
           buyerName: buyer.username,
           productTitle: capturedProductTitle,
-          amount: confirmedAmount,
+          amount: buyerTotalAmount,
         });
       }
     } catch (err: unknown) {
@@ -1121,6 +1179,7 @@ export class AuctionLifecycleService {
         winningBidId: capturedWinningBidId,
         buyerId,
         amount: confirmedAmount,
+        buyerTotalAmount,
         sellerId: sellerId,
         productTitle: capturedProductTitle,
       };

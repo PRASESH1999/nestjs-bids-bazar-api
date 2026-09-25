@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
-import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
 import { ItemCondition } from '@common/enums/item-condition.enum';
@@ -85,8 +84,9 @@ function makePayment(overrides: Partial<ProductPayment> = {}): ProductPayment {
     fonepayTraceId: null,
     paymentMessage: null,
     paymentDeadline: new Date(),
-    deliveryZone: DeliveryZone.INSIDE_VALLEY,
-    deliveryCharge: 100,
+    deliveryCharge: 120,
+    shippingAddressId: null,
+    shippingAddress: null,
     sellerPaidAt: null,
     sellerPaidById: null,
     sellerPayoutAmount: null,

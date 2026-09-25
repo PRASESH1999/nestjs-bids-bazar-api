@@ -1,24 +1,10 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '@common/entities/base.entity';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
-import { DeliveryZone } from '@common/enums/delivery-zone.enum';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
 import { ProductSettlement } from '@modules/bidding/entities/product-settlement.entity';
 import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
-
-/** What the parcel was addressed to, frozen at payment time. */
-export interface ShippingAddressSnapshot {
-  label: string;
-  recipientName: string;
-  recipientPhone: string;
-  province: string;
-  district: string;
-  city: string;
-  street: string;
-  wardNumber: string | null;
-  landmark: string | null;
-}
 
 @Entity('product_payments')
 @Index(['productId', 'status'])
@@ -81,23 +67,34 @@ export class ProductPayment extends BaseEntity {
 
   // ─── Amount ───────────────────────────────────────────────────────────────
 
+  // Item price only — never the delivery charge. RewardsService reads this
+  // column directly for commission/points math (Rule 14: delivery never
+  // counts toward points), so its meaning must never change.
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
 
-  // ─── Delivery destination ─────────────────────────────────────────────────
+  /*
+   * Snapshotted from DELIVERY_CHARGE_FLAT at initiation time — immune to a
+   * later config change, same reasoning as paymentDeadline below. This is
+   * NOT delivery/fulfilment data (that lives on ProductDelivery); it's a
+   * record of what the Fonepay QR was actually generated for
+   * (itemAmount + deliveryCharge). Without it, a payment confirmed hours
+   * after initiation (Fonepay QRs stay valid for the whole payment window)
+   * could snapshot a *different* current config value onto ProductDelivery
+   * than what was truly charged.
+   */
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  deliveryCharge: number;
 
   /*
-   * The saved address the buyer picked at checkout, and a **snapshot** of it.
-   *
-   * Both, on purpose. The id answers "which of their addresses was this?" and
-   * keeps working while the row exists; the snapshot is what the parcel was
-   * actually addressed to. A buyer editing or deleting a saved address must not
-   * rewrite where a past order went, so the id is nullable with ON DELETE SET
-   * NULL and the snapshot is the record of truth for fulfilment.
-   *
-   * Nullable overall because payments made before saved addresses existed have
-   * neither, and because `deliveryZone` — not this — is what determines the fee
-   * (see InitiatePaymentDto, Rule 14).
+   * Which saved address this attempt was for — just the id, not a snapshot
+   * (the frozen recipient/address detail lives on ProductDelivery, created
+   * only for the attempt that actually succeeds). Needed here because
+   * `confirmSuccess`/`confirmPaymentManual` run later — sometimes much later,
+   * in a separate request — and have to know which address to hand to
+   * ProductDeliveriesService without re-deriving it. Nullable + SET NULL:
+   * a buyer deleting the address afterward must not block confirming a
+   * payment that already happened.
    */
   @Column({ type: 'uuid', nullable: true })
   shippingAddressId: string | null;
@@ -109,9 +106,6 @@ export class ProductPayment extends BaseEntity {
   })
   @JoinColumn({ name: 'shippingAddressId' })
   shippingAddress: ShippingAddress | null;
-
-  @Column({ type: 'jsonb', nullable: true })
-  shippingAddressSnapshot: ShippingAddressSnapshot | null;
 
   // ─── Fonepay identifiers ──────────────────────────────────────────────────
 
@@ -160,17 +154,6 @@ export class ProductPayment extends BaseEntity {
   // is immutable even if PAYMENT_WINDOW_HOURS changes between config reloads.
   @Column({ type: 'timestamptz' })
   paymentDeadline: Date;
-
-  // ─── Delivery (buyer-selected zone, cash on delivery — never through the
-  // gateway, never counted toward points) ────────────────────────────────────
-
-  @Column({ type: 'enum', enum: DeliveryZone })
-  deliveryZone: DeliveryZone;
-
-  // Snapshotted from DELIVERY_CHARGE_INSIDE_VALLEY / DELIVERY_CHARGE_OUTSIDE_VALLEY
-  // at initiation time — immune to later env changes, same reasoning as paymentDeadline.
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  deliveryCharge: number;
 
   // ─── Seller settlement (admin-driven, separate from buyer payment above) ──
   // Populated only by RewardsService.markSellerPaid — the sole points/commission
