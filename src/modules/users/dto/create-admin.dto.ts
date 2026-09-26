@@ -1,19 +1,19 @@
 import {
   IsEmail,
+  IsIn,
   IsNotEmpty,
   IsString,
   MinLength,
-  IsEnum,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@common/enums/role.enum';
 
+/*
+ * No `name`: User has no name column (a person's name is KYC data, and staff
+ * are identified by their generated username). It was still required here and
+ * then silently dropped on save.
+ */
 export class CreateAdminDto {
-  @ApiProperty({ example: 'Admin User', description: 'The name of the admin' })
-  @IsNotEmpty()
-  @IsString()
-  name: string;
-
   @ApiProperty({
     example: 'admin@test.com',
     description: 'The email of the admin',
@@ -36,7 +36,8 @@ export class CreateAdminDto {
     example: Role.ADMIN,
     description: 'The role to assign',
   })
+  // Staff roles only — `@IsEnum(Role)` also let USER through this endpoint.
   @IsNotEmpty()
-  @IsEnum(Role)
-  role: Role;
+  @IsIn([Role.ADMIN, Role.SUPERADMIN])
+  role: Role.ADMIN | Role.SUPERADMIN;
 }

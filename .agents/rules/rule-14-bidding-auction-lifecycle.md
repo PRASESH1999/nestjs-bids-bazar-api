@@ -305,7 +305,7 @@ Role → Permission additions in `auth/role-permissions.map.ts`:
 | `PAYMENT_WINDOW_HOURS`  | `18`    | Hours the winner has to complete payment       |
 | `BID_INCREMENT_MIN_FLAT`| `5`     | Minimum flat increment in NPR                  |
 | `BID_INCREMENT_PERCENT` | `0.10`  | Minimum increment as a fraction of current bid |
-| `DELIVERY_CHARGE_FLAT` | `120` | Flat delivery fee, bundled into the Fonepay QR amount |
+| `DELIVERY_CHARGE_FLAT` | `130` | Flat delivery fee, bundled into the Fonepay QR amount |
 | `PATHAO_BASE_URL` / `PATHAO_CLIENT_ID` / `PATHAO_CLIENT_SECRET` / `PATHAO_USERNAME` / `PATHAO_PASSWORD` | — | Pathao Courier Merchant API credentials (sandbox now, swap to live values only) |
 | `PATHAO_STORE_ID` | — | The warehouse's single pre-registered Pathao Store id |
 | `PATHAO_VALLEY_CITY_IDS` | — | Comma-separated Pathao `city_id`s we can currently fulfil to (Kathmandu Valley) |

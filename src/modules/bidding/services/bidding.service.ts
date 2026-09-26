@@ -374,7 +374,7 @@ export class BiddingService {
           amount: Number(bid.amount),
           placedAt: bid.placedAt.toISOString(),
           bidderId: bid.bidderId,
-          bidderName: bid.bidder?.username ?? '',
+          bidderUsername: bid.bidder?.username ?? '',
           bidderEmail: bid.bidder?.email ?? '',
           paymentStatus: bid.paymentStatus,
           paymentDeadline: bid.paymentDeadline

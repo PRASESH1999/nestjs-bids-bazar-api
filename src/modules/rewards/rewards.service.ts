@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, IsNull, QueryRunner } from 'typeorm';
+import { DataSource, In, IsNull, QueryRunner } from 'typeorm';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { SellerTier } from '@common/enums/seller-tier.enum';
 import { PointsTransactionType } from '@common/enums/points-transaction-type.enum';
@@ -14,6 +14,7 @@ import { EventNames } from '@common/events/event-names';
 import type { SellerMarkedPaidPayload } from '@common/events/event-payloads.type';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
+import { ProductDelivery } from '@modules/pathao/entities/product-delivery.entity';
 import { UserRewards } from './entities/user-rewards.entity';
 import { PointsTransaction } from './entities/points-transaction.entity';
 
@@ -93,7 +94,10 @@ export class RewardsService {
    * paid the seller offline (per the reference sellerPayoutAmount computed
    * here) — NOT automatically on gateway payment success.
    */
-  async markSellerPaid(paymentId: string, adminId: string): Promise<ProductPayment> {
+  async markSellerPaid(
+    paymentId: string,
+    adminId: string,
+  ): Promise<ProductPayment> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -186,7 +190,9 @@ export class RewardsService {
       payment.sellerPayoutAmount = commission.sellerPayoutAmount;
       payment.sellerCommissionPercent = commission.commissionPercent;
 
-      savedPayment = await qr.manager.getRepository(ProductPayment).save(payment);
+      savedPayment = await qr.manager
+        .getRepository(ProductPayment)
+        .save(payment);
 
       await qr.commitTransaction();
 
@@ -267,10 +273,95 @@ export class RewardsService {
       .findOne({ where: { userId } });
   }
 
-  async listPendingSettlements(): Promise<ProductPayment[]> {
-    return this.dataSource.getRepository(ProductPayment).find({
+  /**
+   * Paid sales whose seller has not been paid out yet, oldest first.
+   *
+   * Returned as a view rather than raw ProductPayment rows, for three reasons:
+   *  - `sellerPayoutAmount`/`sellerCommissionPercent` are only *stored* by
+   *    markSellerPaid, so on a raw pending row they were always null — the
+   *    admin was asked to transfer money without being told how much. Here
+   *    they are computed with the same `calculateCommission` markSellerPaid
+   *    will use, off the seller's current tier (a read-only preview; the
+   *    stored figure can differ only if another of this seller's sales is
+   *    marked paid first and moves their tier).
+   *  - The rows carried no product title or seller, so the list could only
+   *    print ids.
+   *  - The raw row also carried gateway internals (QR payloads, websocket URL).
+   *
+   * `deliveryStage` is included so a payout can wait until the item has
+   * actually reached the warehouse.
+   */
+  async listPendingSettlements(): Promise<PendingSettlementView[]> {
+    const payments = await this.dataSource.getRepository(ProductPayment).find({
       where: { status: PaymentStatus.SUCCESS, sellerPaidAt: IsNull() },
+      relations: { product: true, seller: true, winner: true },
       order: { createdAt: 'ASC' },
+    });
+    if (payments.length === 0) return [];
+
+    const sellerIds = [...new Set(payments.map((p) => p.sellerId))];
+    const [rewards, deliveries] = await Promise.all([
+      this.dataSource
+        .getRepository(UserRewards)
+        .find({ where: { userId: In(sellerIds) } }),
+      this.dataSource
+        .getRepository(ProductDelivery)
+        .find({ where: { productPaymentId: In(payments.map((p) => p.id)) } }),
+    ]);
+    const pointsBySeller = new Map(
+      rewards.map((r) => [r.userId, r.sellerPoints]),
+    );
+    const deliveryByPayment = new Map(
+      deliveries.map((d) => [d.productPaymentId, d]),
+    );
+
+    return payments.map((p) => {
+      const commission = this.calculateCommission(
+        p.product,
+        p,
+        pointsBySeller.get(p.sellerId) ?? 0,
+      );
+      const delivery = deliveryByPayment.get(p.id);
+      return {
+        id: p.id,
+        productId: p.productId,
+        product: { id: p.product.id, title: p.product.title },
+        sellerId: p.sellerId,
+        seller: p.seller
+          ? {
+              id: p.seller.id,
+              username: p.seller.username,
+              email: p.seller.email,
+            }
+          : null,
+        winnerUserId: p.winnerUserId,
+        buyer: p.winner
+          ? {
+              id: p.winner.id,
+              username: p.winner.username,
+              email: p.winner.email,
+            }
+          : null,
+        referenceLabel: p.referenceLabel,
+        status: p.status,
+        amount: Number(p.amount),
+        deliveryCharge: Number(p.deliveryCharge),
+        basePrice: Number(p.product.basePrice),
+        sellerTier: commission.tier,
+        sellerCommissionPercent: commission.commissionPercent,
+        sellerPayoutAmount: commission.sellerPayoutAmount,
+        sellerPaidAt: null,
+        deliveryStage: delivery
+          ? delivery.deliveredAt
+            ? 'DELIVERED'
+            : delivery.consignmentId
+              ? 'IN_TRANSIT'
+              : delivery.receivedAtWarehouseAt
+                ? 'AT_WAREHOUSE'
+                : 'AWAITING_WAREHOUSE'
+          : null,
+        createdAt: p.createdAt.toISOString(),
+      };
     });
   }
 
@@ -296,4 +387,34 @@ export class RewardsService {
     });
     return qr.manager.getRepository(UserRewards).save(created);
   }
+}
+
+type UserRef = { id: string; username: string; email: string };
+
+export interface PendingSettlementView {
+  id: string;
+  productId: string;
+  product: { id: string; title: string | null };
+  sellerId: string;
+  seller: UserRef | null;
+  winnerUserId: string;
+  buyer: UserRef | null;
+  referenceLabel: string;
+  status: PaymentStatus;
+  /** Item price the buyer paid (delivery excluded — it never reaches the seller). */
+  amount: number;
+  deliveryCharge: number;
+  basePrice: number;
+  /** Preview, computed as markSellerPaid will — see listPendingSettlements. */
+  sellerTier: SellerTier;
+  sellerCommissionPercent: number;
+  sellerPayoutAmount: number;
+  sellerPaidAt: null;
+  deliveryStage:
+    | 'AWAITING_WAREHOUSE'
+    | 'AT_WAREHOUSE'
+    | 'IN_TRANSIT'
+    | 'DELIVERED'
+    | null;
+  createdAt: string;
 }

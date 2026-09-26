@@ -64,7 +64,9 @@ export function paymentConfirmedSellerTemplate(
         <span class="value">${formatCurrency(amount)}</span>
       </div>
       <div class="info-box">
-        Our team will be in touch shortly regarding the payout process and next steps for item handover.
+        <strong>Next step:</strong> please bring the item to the Bids Bazar warehouse.
+        We ship it to the buyer from there with Pathao, and your payout follows
+        once the item has been handed in.
       </div>
     </div>
     <div class="footer">&copy; ${new Date().getFullYear()} BidsBazar. All rights reserved.</div>

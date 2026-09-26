@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   Request,
@@ -16,6 +18,7 @@ import type { RequestWithUser } from '@common/interfaces/request-with-user.inter
 import { PathaoClientService } from './services/pathao-client.service';
 import { ProductDeliveriesService } from './services/product-deliveries.service';
 import { DispatchDeliveryDto } from './dto/pathao.dto';
+import { ListDeliveriesQueryDto } from './dto/delivery-view.dto';
 
 @ApiTags('pathao')
 @ApiBearerAuth()
@@ -31,6 +34,15 @@ export class PathaoController {
   // No special permission: same trust level as reaching checkout/address
   // screens (just the default JWT auth every route already requires).
 
+  @Get('deliveries/quote')
+  @ApiOperation({
+    summary:
+      'Delivery fee and the Pathao city ids we deliver to — shown at checkout before an address is chosen',
+  })
+  quote() {
+    return this.productDeliveriesService.quote();
+  }
+
   @Get('pathao/cities')
   @ApiOperation({ summary: 'List Pathao cities (for the address picker)' })
   async getCities() {
@@ -39,39 +51,41 @@ export class PathaoController {
 
   @Get('pathao/cities/:cityId/zones')
   @ApiOperation({ summary: 'List Pathao zones within a city' })
-  async getZones(@Param('cityId') cityId: string) {
-    return this.pathaoClientService.getZones(Number(cityId));
+  async getZones(@Param('cityId', ParseIntPipe) cityId: number) {
+    return this.pathaoClientService.getZones(cityId);
   }
 
   @Get('pathao/zones/:zoneId/areas')
   @ApiOperation({ summary: 'List Pathao areas within a zone' })
-  async getAreas(@Param('zoneId') zoneId: string) {
-    return this.pathaoClientService.getAreas(Number(zoneId));
+  async getAreas(@Param('zoneId', ParseIntPipe) zoneId: number) {
+    return this.pathaoClientService.getAreas(zoneId);
   }
 
   // ─── Admin: delivery lifecycle ─────────────────────────────────────────
 
   @Get('admin/deliveries')
   @RequirePermissions(Permission.SHIPMENT_MANAGE)
-  @ApiOperation({ summary: 'Admin: list deliveries, paginated' })
-  async listAll(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.productDeliveriesService.listAll(
-      page ? Number(page) : undefined,
-      limit ? Number(limit) : undefined,
-    );
+  @ApiOperation({
+    summary: 'Admin: list deliveries, newest first, optionally by stage',
+  })
+  async listAll(@Query() query: ListDeliveriesQueryDto) {
+    return this.productDeliveriesService.listAll(query);
   }
 
   @Get('admin/deliveries/:id')
   @RequirePermissions(Permission.SHIPMENT_MANAGE)
   @ApiOperation({ summary: 'Admin: get one delivery' })
-  async getOne(@Param('id') id: string) {
+  async getOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.productDeliveriesService.getOne(id);
   }
 
   @Post('admin/deliveries/:id/received')
   @RequirePermissions(Permission.SHIPMENT_MANAGE)
   @ApiOperation({ summary: 'Admin: mark an item received at the warehouse' })
-  async markReceived(@Param('id') id: string, @Request() req: RequestWithUser) {
+  async markReceived(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: RequestWithUser,
+  ) {
     return this.productDeliveriesService.markReceivedAtWarehouse(
       id,
       req.user.sub,
@@ -84,7 +98,7 @@ export class PathaoController {
     summary: 'Admin: create the Pathao order (warehouse -> buyer)',
   })
   async dispatch(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: DispatchDeliveryDto,
     @Request() req: RequestWithUser,
   ) {
@@ -94,7 +108,7 @@ export class PathaoController {
   @Post('admin/deliveries/:id/sync')
   @RequirePermissions(Permission.SHIPMENT_MANAGE)
   @ApiOperation({ summary: "Admin: refresh a delivery's status from Pathao" })
-  async sync(@Param('id') id: string) {
+  async sync(@Param('id', ParseUUIDPipe) id: string) {
     return this.productDeliveriesService.syncStatus(id);
   }
 }

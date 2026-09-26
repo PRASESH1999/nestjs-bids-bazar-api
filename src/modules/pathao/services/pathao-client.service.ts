@@ -109,6 +109,14 @@ export class PathaoClientService {
   private valleyCityIds: Set<number> | null = null;
 
   isServiceable(pathaoCityId: number): boolean {
+    return this.loadValleyCityIds().has(pathaoCityId);
+  }
+
+  serviceableCityIds(): number[] {
+    return [...this.loadValleyCityIds()];
+  }
+
+  private loadValleyCityIds(): Set<number> {
     if (!this.valleyCityIds) {
       const raw = this.configService.getOrThrow<string>(
         'PATHAO_VALLEY_CITY_IDS',
@@ -120,7 +128,7 @@ export class PathaoClientService {
           .filter((n) => !Number.isNaN(n)),
       );
     }
-    return this.valleyCityIds.has(pathaoCityId);
+    return this.valleyCityIds;
   }
 
   // ─── Orders ─────────────────────────────────────────────────────────────

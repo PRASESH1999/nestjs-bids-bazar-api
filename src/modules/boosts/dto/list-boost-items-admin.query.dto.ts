@@ -1,3 +1,4 @@
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
 import { PaginationDto } from '@common/dto/pagination.dto';
 import { BoostItemStatus } from '@common/enums/boost-item-status.enum';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -24,7 +25,8 @@ export class ListBoostItemsAdminQueryDto extends PaginationDto {
 
   @ApiPropertyOptional({ description: 'Filter by seller UUID' })
   @IsOptional()
-  @IsUUID()
+  // A user id — shape-checked; see IsUuidShape and OPEN-ITEMS A36.
+  @IsUuidShape()
   sellerId?: string;
 
   @ApiPropertyOptional({

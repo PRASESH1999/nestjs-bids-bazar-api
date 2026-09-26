@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -27,6 +28,7 @@ import { ProductPayment } from '@modules/payments/entities/product-payment.entit
 import { MailService } from '@modules/mail/mail.service';
 import { NotificationsService } from '@modules/notifications/notifications.service';
 import { ShippingService } from '@modules/shipping/shipping.service';
+import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
 import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
 import { Bid } from '../entities/bid.entity';
 import { ProductSettlement } from '../entities/product-settlement.entity';
@@ -771,6 +773,50 @@ export class AuctionLifecycleService {
     );
   }
 
+  /**
+   * The saved addresses of whoever currently owes payment on this product —
+   * what the admin picks from before confirming manually. Each is flagged
+   * `deliverable` using the same two checks `confirmPaymentManual` enforces,
+   * so the admin UI can disable the ones that would be refused.
+   *
+   * Without this the manual path is unreachable: the admin has no other way
+   * to learn a buyer's address ids (every shipping route is caller-scoped).
+   */
+  async getWinnerAddresses(productId: string): Promise<{
+    bidderId: string;
+    addresses: (ShippingAddress & { deliverable: boolean })[];
+  }> {
+    const product = await this.dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Product not found');
+    if (product.status !== ProductStatus.AWAITING_PAYMENT) {
+      throw new BadRequestException('Product is not awaiting payment');
+    }
+
+    const responsibleBid = await this.dataSource.getRepository(Bid).findOne({
+      where: { productId, isCurrentlyPaymentResponsible: true },
+    });
+    if (!responsibleBid) {
+      throw new InternalServerErrorException(
+        'No responsible bid found — data inconsistency',
+      );
+    }
+
+    const addresses = await this.shippingService.list(responsibleBid.bidderId);
+    return {
+      bidderId: responsibleBid.bidderId,
+      addresses: addresses.map((a) =>
+        Object.assign(a, {
+          deliverable:
+            a.pathaoCityId !== null &&
+            a.pathaoZoneId !== null &&
+            this.pathaoClientService.isServiceable(a.pathaoCityId),
+        }),
+      ),
+    };
+  }
+
   async confirmPaymentManual(
     adminId: string,
     productId: string,
@@ -902,6 +948,24 @@ export class AuctionLifecycleService {
         shippingAddressId: address.id,
       });
       await qr.manager.getRepository(ProductPayment).save(manualPayment);
+
+      // Retire any gateway attempt still in flight. Its QR stays scannable for
+      // the whole payment window, and a buyer paying it after this would be
+      // charged twice for one item. PaymentsService.confirmSuccess refuses a
+      // payment that is no longer PENDING, so expiring it here is what closes
+      // that door; its socket is left to time out on its own.
+      await qr.manager
+        .getRepository(ProductPayment)
+        .createQueryBuilder()
+        .update()
+        .set({
+          status: PaymentStatus.EXPIRED,
+          paymentMessage:
+            'Superseded — payment was confirmed manually by an admin',
+        })
+        .where('productId = :productId', { productId })
+        .andWhere('status = :pending', { pending: PaymentStatus.PENDING })
+        .execute();
 
       await qr.commitTransaction();
 

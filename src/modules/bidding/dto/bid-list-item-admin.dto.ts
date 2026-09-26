@@ -5,7 +5,8 @@ export class BidListItemAdminDto {
   amount: number;
   placedAt: string;
   bidderId: string;
-  bidderName: string;
+  // Same name as the public BidListItemDto field, so one client type reads both.
+  bidderUsername: string;
   bidderEmail: string;
   paymentStatus: BidPaymentStatus;
   paymentDeadline: string | null;

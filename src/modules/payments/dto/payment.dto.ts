@@ -1,6 +1,7 @@
 import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
+import type { BuyerDeliveryView } from '@modules/pathao/dto/delivery-view.dto';
 
 // ─── Controller request DTOs ───────────────────────────────────────────────
 
@@ -42,6 +43,10 @@ export interface PaymentShippingAddressView {
   street: string;
   wardNumber: string | null;
   landmark: string | null;
+  /** Pathao's names for the courier location, for display. */
+  pathaoCityName: string | null;
+  pathaoZoneName: string | null;
+  pathaoAreaName: string | null;
 }
 
 export interface InitiatePaymentResponseDto {
@@ -75,4 +80,10 @@ export interface PaymentStatusResponseDto {
   paymentDeadline: string;
   fonepayTraceId: string | null;
   paymentMessage: string | null;
+  /**
+   * Where the parcel is. Null until the payment succeeds (the delivery record
+   * is created by the PAYMENT_SUCCEEDED listener, so it can also lag a
+   * just-confirmed payment by a moment).
+   */
+  delivery: BuyerDeliveryView | null;
 }

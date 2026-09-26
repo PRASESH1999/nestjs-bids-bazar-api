@@ -123,8 +123,11 @@ export function mapProduct(
     biddingStartPrice: product.biddingStartPrice,
     instantBuyPrice: product.instantBuyPrice,
     biddingEndPrice: product.biddingEndPrice,
+    // Number() both sides: decimal columns arrive as strings, and comparing
+    // strings is lexicographic ("880.00" < "1120.00" is false).
     showInstantBuy:
-      product.instantBuyPrice != null && currentBid < product.instantBuyPrice,
+      product.instantBuyPrice != null &&
+      Number(currentBid) < Number(product.instantBuyPrice),
     currency: product.currency,
     biddingDurationHours: product.biddingDurationHours,
     currentHighestBid: product.currentHighestBid,

@@ -27,7 +27,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Not, Repository } from 'typeorm';
 import { WebSocket } from 'ws';
 import { PaginatedResult } from '@common/types/paginated-result.type';
 import type {
@@ -279,6 +279,18 @@ export class PaymentsService implements OnModuleInit {
     if (!payment) return;
     if (payment.status === PaymentStatus.SUCCESS) return; // idempotent
 
+    /*
+     * The gateway says this attempt was paid, but it is no longer the live one
+     * — expired by the window, or retired when an admin confirmed the sale
+     * manually. The buyer's money moved, so it must not be dropped silently,
+     * and it must not settle anything (a second SUCCESS would mean a second
+     * delivery and a second seller payout). Record it for a refund instead.
+     */
+    if (payment.status !== PaymentStatus.PENDING) {
+      await this.flagForRefund(payment, statusResult);
+      return;
+    }
+
     // Settle the product via the auction lifecycle (has its own transaction).
     // Passing productSettlementId lets confirmPaymentGateway reject this if
     // the win has since moved to a different bidder (stale/superseded QR
@@ -295,6 +307,14 @@ export class PaymentsService implements OnModuleInit {
       // we still want to mark this Payment as SUCCESS.
       const isAlreadySettled =
         err instanceof BadRequestException && err.message.includes('SETTLED');
+
+      // "Already settled" is only benign when *this* payment did the settling
+      // (a duplicate socket message racing the first). If a different payment
+      // settled the sale, this one is a second charge for the same item.
+      if (isAlreadySettled && (await this.isSettledByAnotherPayment(payment))) {
+        await this.flagForRefund(payment, statusResult);
+        return;
+      }
 
       if (!isAlreadySettled) {
         this.logger.error(
@@ -327,6 +347,41 @@ export class PaymentsService implements OnModuleInit {
       shippingAddressId: payment.shippingAddressId,
     };
     this.eventEmitter.emit(EventNames.PAYMENT_SUCCEEDED, succeededPayload);
+  }
+
+  private async isSettledByAnotherPayment(
+    payment: ProductPayment,
+  ): Promise<boolean> {
+    const other = await this.paymentRepo.findOne({
+      where: {
+        productId: payment.productId,
+        status: PaymentStatus.SUCCESS,
+        id: Not(payment.id),
+      },
+    });
+    return other !== null;
+  }
+
+  /**
+   * A gateway payment that arrived after the sale was already settled another
+   * way. Marked FAILED (it settled nothing) with a message that says why, so
+   * it shows on the admin payment records for a manual refund — and logged
+   * as an error, since money is owed back.
+   */
+  private async flagForRefund(
+    payment: ProductPayment,
+    statusResult?: FonepayPaymentStatusResponse,
+  ): Promise<void> {
+    await this.paymentRepo.update(payment.id, {
+      status: PaymentStatus.FAILED,
+      fonepayTraceId: statusResult?.fonepayTraceId ?? null,
+      paymentMessage:
+        'REFUND DUE — paid after this sale was already settled by another payment',
+    });
+    this.closeSocket(payment.id);
+    this.logger.error(
+      `confirmSuccess: payment ${payment.id} (${payment.referenceLabel}) was paid after product ${payment.productId} was already settled — refund required`,
+    );
   }
 
   async markFailed(paymentId: string, message: string): Promise<void> {
@@ -594,6 +649,9 @@ export class PaymentsService implements OnModuleInit {
         street: delivery.street,
         wardNumber: delivery.wardNumber,
         landmark: delivery.landmark,
+        pathaoCityName: delivery.pathaoCityName,
+        pathaoZoneName: delivery.pathaoZoneName,
+        pathaoAreaName: delivery.pathaoAreaName,
       };
     }
 
@@ -612,6 +670,9 @@ export class PaymentsService implements OnModuleInit {
         street: address.street,
         wardNumber: address.wardNumber,
         landmark: address.landmark,
+        pathaoCityName: address.pathaoCityName,
+        pathaoZoneName: address.pathaoZoneName,
+        pathaoAreaName: address.pathaoAreaName,
       };
     } catch {
       // Address was deleted (SET NULL already handles the FK; this covers a
@@ -641,7 +702,12 @@ export class PaymentsService implements OnModuleInit {
   private async toStatusResponse(
     p: ProductPayment,
   ): Promise<PaymentStatusResponseDto> {
-    const shippingAddress = await this.buildShippingAddressView(p);
+    const [shippingAddress, delivery] = await Promise.all([
+      this.buildShippingAddressView(p),
+      p.status === PaymentStatus.SUCCESS
+        ? this.productDeliveriesService.findBuyerViewByPaymentId(p.id)
+        : Promise.resolve(null),
+    ]);
     return {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
@@ -649,6 +715,7 @@ export class PaymentsService implements OnModuleInit {
       itemAmount: Number(p.amount),
       deliveryCharge: Number(p.deliveryCharge),
       shippingAddress,
+      delivery,
       status: p.status,
       paymentDeadline: p.paymentDeadline.toISOString(),
       fonepayTraceId: p.fonepayTraceId,

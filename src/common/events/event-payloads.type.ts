@@ -66,7 +66,7 @@ export interface PaymentSucceededPayload {
   fonepayTraceId: string | null;
   // Item price only (mirrors ProductPayment.amount).
   amount: number;
-  // Bundled Rs. 120 delivery charge, snapshotted at initiation time — what
+  // Bundled flat delivery charge (DELIVERY_CHARGE_FLAT), snapshotted at initiation time — what
   // ProductDeliveriesService's PAYMENT_SUCCEEDED listener uses to populate
   // ProductDelivery.deliveryCharge without re-reading (possibly-changed)
   // config.

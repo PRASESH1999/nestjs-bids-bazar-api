@@ -14,6 +14,73 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-09-25 — delivery endpoints the Pathao commit needed, and an audit pass
+
+Follow-up to `5b819f8`. Everything here was verified end to end against the
+Fonepay and Pathao sandboxes (sandbox consignment `DT250926J6TZJ2`).
+
+### New
+
+| Endpoint | Why |
+|---|---|
+| `GET /deliveries/quote` → `{ deliveryCharge, currency, serviceableCityIds }` | Checkout has to show the total before a QR exists, and the address form has to offer only cities we deliver to. Both values were server-only env. |
+| `GET /admin/products/:id/winner-addresses` → `{ bidderId, addresses: [...ShippingAddress, deliverable] }` (`PAYMENT_CONFIRM_MANUAL`) | `confirm-payment` now requires the winner's `shippingAddressId`, and every shipping route is caller-scoped — an admin had no way to learn one, so the manual path was unreachable. |
+
+### Changed — check your client
+
+- **`GET /payments/:productId/status`** gains `delivery` (null until the payment
+  succeeds): `{ id, stage, consignmentId, orderStatus, receivedAtWarehouseAt,
+  dispatchedAt, deliveredAt, lastStatusCheckAt }`. `stage` is derived from the
+  timestamps: `AWAITING_WAREHOUSE | AT_WAREHOUSE | IN_TRANSIT | DELIVERED`.
+  `shippingAddress` also gains `pathaoCityName`/`pathaoZoneName`/`pathaoAreaName`.
+- **`GET /admin/deliveries`** takes `?stage=` plus validated `page`/`limit`, and
+  returns `{ data, meta, counts }` where `counts` is per-stage. Rows (and the
+  bodies of `received`/`dispatch`/`sync`) are a view, not the entity: `stage`,
+  `product {id,title}`, `buyer {id,username,email}`, `referenceLabel`,
+  `itemAmount`, and every decimal as a number.
+- **`GET /admin/payments/pending-settlement`** returns a view instead of raw
+  `ProductPayment` rows: product/seller/buyer refs, `basePrice`, and
+  `sellerTier`/`sellerCommissionPercent`/`sellerPayoutAmount` **computed as
+  mark-seller-paid will record them** (they were always null before, so the
+  admin was never told what to transfer), plus `deliveryStage`. Gateway fields
+  (`qrString`, `websocketUrl`, …) are no longer included. (A41)
+- **`GET /products/:id/bids`** for admins: `bidderName` → `bidderUsername`, the
+  same field the public shape uses. (A38)
+- **`GET /kyc/:id`** `bank` gains decrypted `branch` and `swiftCode`; the
+  account number stays masked. (A39)
+- **`POST /users/admin`** no longer takes `name` (there is no such column) and
+  only accepts `role: ADMIN | SUPERADMIN`. (A40)
+- **User-id filters** (`ownerId`, `bidderId`, `winnerUserId`, `sellerId` on the
+  admin boost lists, `reportedUserId`) are shape-checked with `@IsUuidShape()`
+  like `sellerId`/`userId` already were. (A36)
+- **Pathao routes** validate their params: a non-integer city/zone id is a 400
+  here rather than a 502 from Pathao; delivery ids are UUID-checked; dispatch
+  weight is capped at 10 kg as documented.
+
+### Fixed
+
+- **`DELIVERY_CHARGE_FLAT` is now 130** (was 120, below Pathao's own quote — A45).
+- **Seller's "payment confirmed" notification and email** now tell them to bring
+  the item to the Bids Bazar warehouse (no address yet — A44); the buyer's
+  mentions delivery via Pathao.
+- **`showInstantBuy`** compared decimal strings lexicographically. (A37)
+- **A manually confirmed sale could be paid for twice** (A42). Manual
+  confirmation now expires any `PENDING` gateway attempt for the product in its
+  transaction, and `confirmSuccess` refuses a payment that is no longer
+  `PENDING`, or whose sale another payment already settled: it is marked
+  `FAILED` with `paymentMessage` `REFUND DUE — …` and logged as an error, and no
+  `PAYMENT_SUCCEEDED` is emitted (so no second delivery and no second payout).
+- `auction-lifecycle.service.spec.ts` constructed the service with 5 of its 7
+  dependencies and no longer compiled after `5b819f8`.
+
+### Still open from `5b819f8`
+
+A43 (Pathao's terminal status slug is a guess), A44 (no warehouse address yet —
+sellers are told "the warehouse"), A46 (sales paid before the migration have no delivery
+row), A47 (no refund record).
+
+---
+
 ## 2026-09-23 (boosts, visible) — `boostedUntil`, `GET /boosts/me`, one UUID rule
 
 After the boost module landed, a boost was invisible everywhere except the
