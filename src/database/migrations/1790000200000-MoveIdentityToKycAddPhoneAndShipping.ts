@@ -20,9 +20,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Every drop is preceded by its carry-over. Existing APPROVED submissions keep
  * working untouched: their phone lands on the user already verified.
  */
-export class MoveIdentityToKycAddPhoneAndShipping1790000200000
-  implements MigrationInterface
-{
+export class MoveIdentityToKycAddPhoneAndShipping1790000200000 implements MigrationInterface {
   name = 'MoveIdentityToKycAddPhoneAndShipping1790000200000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -184,7 +182,9 @@ export class MoveIdentityToKycAddPhoneAndShipping1790000200000
     );
     await queryRunner.query(`DROP TABLE "shipping_addresses"`);
 
-    await queryRunner.query(`DROP INDEX "public"."IDX_kyc_document_identity_unique"`);
+    await queryRunner.query(
+      `DROP INDEX "public"."IDX_kyc_document_identity_unique"`,
+    );
     await queryRunner.query(`DROP INDEX "public"."IDX_users_phone_unique"`);
 
     await queryRunner.query(
@@ -235,10 +235,16 @@ export class MoveIdentityToKycAddPhoneAndShipping1790000200000
       WHERE u."id" = k."userId" AND u."phone" IS NOT NULL
     `);
 
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "phoneOtpAttempts"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "phoneOtpExpiresAt"`);
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN "phoneOtpAttempts"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN "phoneOtpExpiresAt"`,
+    );
     await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "phoneOtpHash"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "phoneVerifiedAt"`);
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN "phoneVerifiedAt"`,
+    );
     await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "pendingPhone"`);
     await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "phone"`);
 

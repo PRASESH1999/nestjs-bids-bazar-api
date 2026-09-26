@@ -18,7 +18,8 @@
  */
 
 const SVG_SAFETY_HEADERS = {
-  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  'Content-Security-Policy':
+    "default-src 'none'; style-src 'unsafe-inline'; sandbox",
   'X-Content-Type-Options': 'nosniff',
 } as const;
 

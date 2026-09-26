@@ -40,7 +40,7 @@ function makeNotification(overrides: Partial<Notification> = {}): Notification {
     updatedAt: new Date(),
     deletedAt: null,
     ...overrides,
-  } as Notification;
+  };
 }
 
 describe('NotificationsService', () => {
@@ -105,7 +105,10 @@ describe('NotificationsService', () => {
 
   describe('findMyNotifications', () => {
     it('returns a PaginatedResult built from the repository result', async () => {
-      const notifications = [makeNotification(), makeNotification({ id: 'notif-2' })];
+      const notifications = [
+        makeNotification(),
+        makeNotification({ id: 'notif-2' }),
+      ];
       mockNotificationsRepository.findPaginatedForUser.mockResolvedValue([
         notifications,
         2,
@@ -116,11 +119,9 @@ describe('NotificationsService', () => {
         limit: 20,
       });
 
-      expect(mockNotificationsRepository.findPaginatedForUser).toHaveBeenCalledWith(
-        'user-1',
-        1,
-        20,
-      );
+      expect(
+        mockNotificationsRepository.findPaginatedForUser,
+      ).toHaveBeenCalledWith('user-1', 1, 20);
       expect(result).toEqual({
         data: notifications,
         meta: { page: 1, limit: 20, total: 2 },
@@ -128,15 +129,16 @@ describe('NotificationsService', () => {
     });
 
     it('defaults page/limit when not provided', async () => {
-      mockNotificationsRepository.findPaginatedForUser.mockResolvedValue([[], 0]);
+      mockNotificationsRepository.findPaginatedForUser.mockResolvedValue([
+        [],
+        0,
+      ]);
 
       await service.findMyNotifications('user-1', {});
 
-      expect(mockNotificationsRepository.findPaginatedForUser).toHaveBeenCalledWith(
-        'user-1',
-        1,
-        20,
-      );
+      expect(
+        mockNotificationsRepository.findPaginatedForUser,
+      ).toHaveBeenCalledWith('user-1', 1, 20);
     });
   });
 
@@ -166,9 +168,9 @@ describe('NotificationsService', () => {
     it('throws NotFoundException when not found or not owned', async () => {
       mockNotificationsRepository.markRead.mockResolvedValue(false);
 
-      await expect(
-        service.markAsRead('user-1', 'notif-1'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.markAsRead('user-1', 'notif-1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
