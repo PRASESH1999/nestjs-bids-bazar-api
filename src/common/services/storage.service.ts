@@ -2,6 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { extname, resolve } from 'path';
 import { mkdir, unlink, writeFile } from 'fs/promises';
+import {
+  KYC_IMAGE_PROFILE,
+  normalizeImage,
+} from '@common/utils/image-normalize.util';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'application/pdf']);
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -39,16 +43,26 @@ export class StorageService {
       );
     }
 
-    const ext =
-      extname(file.originalname).toLowerCase() ||
-      MIME_TO_EXT[file.mimetype] ||
-      '';
+    // Photos are re-encoded (2000 px JPEG, metadata stripped — see
+    // normalizeImage); a PDF is stored as uploaded.
+    const image =
+      file.mimetype === 'image/jpeg'
+        ? await normalizeImage(file.buffer, KYC_IMAGE_PROFILE)
+        : null;
+    const ext = image
+      ? image.ext
+      : extname(file.originalname).toLowerCase() ||
+        MIME_TO_EXT[file.mimetype] ||
+        '';
     const filename = `${label}-${Date.now()}${ext}`;
     // Normalise to forward slashes so paths stored in DB are OS-agnostic
     const relativePath = `kyc/${userId}/${filename}`;
 
     await mkdir(resolve(this.baseDir, 'kyc', userId), { recursive: true });
-    await writeFile(resolve(this.baseDir, relativePath), file.buffer);
+    await writeFile(
+      resolve(this.baseDir, relativePath),
+      image ? image.buffer : file.buffer,
+    );
 
     return relativePath;
   }

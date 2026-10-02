@@ -22,6 +22,7 @@ import { FavoritesService } from '@modules/favorites/favorites.service';
 import { BoostsService } from '@modules/boosts/services/boosts.service';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -421,6 +422,112 @@ export class ProductsService {
     product.status = ProductStatus.WITHDRAWN;
     product.withdrawnAt = new Date();
     await this.productsRepository.saveProduct(product);
+  }
+
+  // ─── Relist ───────────────────────────────────────────────────────────────
+
+  /**
+   * Puts an ABANDONED lot back up for auction.
+   *
+   * ABANDONED is the one dead end in the lifecycle: the winner and every
+   * fallback bidder failed to pay. Relisting creates a *new* listing with the
+   * same details, price and photos, straight into AWAITING_FIRST_BID — no
+   * second review, because the content was already approved once and has not
+   * changed.
+   *
+   * A new row rather than resetting this one: the abandoned lot's bids,
+   * settlements and expired payment rounds are all keyed on its id, and the
+   * fallback cascade and bid counts read them by product. Reset in place, the
+   * old auction's bids would count toward the new one. The abandoned row stays
+   * as the record and points at its replacement through `relistedProductId`.
+   */
+  async relistProduct(
+    userId: string,
+    productId: string,
+  ): Promise<ProductResponse> {
+    const original = await this.findOwnedProduct(userId, productId);
+
+    if (original.status !== ProductStatus.ABANDONED) {
+      throw new BadRequestException(
+        'Only an abandoned product can be relisted',
+      );
+    }
+    if (original.relistedProductId) {
+      throw new ConflictException('This product has already been relisted');
+    }
+
+    // Same gate as creating a listing: the seller must still be able to sell.
+    await this.assertKycApproved(userId);
+
+    const now = new Date();
+    const copy = this.productsRepository.createProduct({
+      ownerId: original.ownerId,
+      title: original.title,
+      description: original.description,
+      specifications: original.specifications,
+      categoryId: original.categoryId,
+      subcategoryId: original.subcategoryId,
+      condition: original.condition,
+      basePrice: original.basePrice,
+      biddingStartPrice: original.biddingStartPrice,
+      instantBuyPrice: original.instantBuyPrice,
+      biddingEndPrice: original.biddingEndPrice,
+      currency: original.currency,
+      biddingDurationHours: original.biddingDurationHours,
+      isRare: original.isRare,
+      province: original.province,
+      district: original.district,
+      city: original.city,
+      street: original.street,
+      wardNumber: original.wardNumber,
+      status: ProductStatus.AWAITING_FIRST_BID,
+      currentHighestBid: null,
+      currentHighestBidderId: null,
+      biddingStartedAt: null,
+      biddingEndsAt: null,
+      submittedAt: now,
+      // Carried over: this is the approval the relist rides on.
+      reviewedById: original.reviewedById,
+      reviewedAt: original.reviewedAt,
+      rejectionReason: null,
+      withdrawnAt: null,
+    });
+    const saved = await this.productsRepository.saveProduct(copy);
+
+    const claimed = await this.productsRepository.claimRelist(
+      original.id,
+      saved.id,
+    );
+    if (!claimed) {
+      await this.productsRepository.deleteProduct(saved);
+      throw new ConflictException('This product has already been relisted');
+    }
+
+    const originalImages = await this.productsRepository.findImagesByProductId(
+      original.id,
+    );
+    if (originalImages.length > 0) {
+      const imageMeta = await this.productStorage.copyProductImages(
+        saved.id,
+        originalImages,
+      );
+      await this.productsRepository.saveImages(
+        imageMeta.map((meta) =>
+          this.productsRepository.createImage({ productId: saved.id, ...meta }),
+        ),
+      );
+    }
+
+    const relisted = await this.productsRepository.findById(saved.id);
+    if (!relisted) throw new NotFoundException('Product not found');
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [relisted]);
+    return mapProduct(
+      relisted,
+      favoritedSet.has(relisted.id),
+      sellerSummaries.get(relisted.ownerId) ?? null,
+      boostedUntil.get(relisted.id) ?? null,
+    );
   }
 
   // ─── Delete ───────────────────────────────────────────────────────────────

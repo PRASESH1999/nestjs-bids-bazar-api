@@ -148,6 +148,7 @@ export function mapProduct(
     settledAt: product.settledAt,
     settledAmount: product.settledAmount,
     abandonedAt: product.abandonedAt,
+    relistedProductId: product.relistedProductId,
     withdrawnAt: product.withdrawnAt,
     isRare: product.isRare,
     missingSubmissionFields: SUBMITTABLE_STATUSES.includes(product.status)

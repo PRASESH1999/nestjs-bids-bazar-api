@@ -59,6 +59,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     settledAt: new Date(),
     settledAmount: 1000,
     abandonedAt: null,
+    relistedProductId: null,
     withdrawnAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),

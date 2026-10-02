@@ -307,6 +307,22 @@ export class ProductsRepository {
       .getManyAndCount();
   }
 
+  /**
+   * Records that `abandonedId` was relisted as `relistedId` — only if it has
+   * not been already. Returns false when another request won the race, so two
+   * quick clicks on "Relist" cannot leave two live copies of one lot.
+   */
+  async claimRelist(abandonedId: string, relistedId: string): Promise<boolean> {
+    const result = await this.productRepo
+      .createQueryBuilder()
+      .update(Product)
+      .set({ relistedProductId: relistedId })
+      .where('id = :abandonedId', { abandonedId })
+      .andWhere('"relistedProductId" IS NULL')
+      .execute();
+    return (result.affected ?? 0) > 0;
+  }
+
   // ─── Image helpers ────────────────────────────────────────────────────────
 
   createImage(data: Partial<ProductImage>): ProductImage {
