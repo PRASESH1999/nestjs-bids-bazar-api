@@ -46,6 +46,30 @@ export class AuctionLifecycleCron {
     }
   }
 
+  // Instant Buy holds are a few minutes, not 18+ hours — the once-a-minute
+  // cron above would leave them up to ~59s overdue, too much slack against a
+  // 3-minute window. Polled separately, far more often; cheap since there
+  // are realistically 0-1 matching rows at any moment.
+  @Cron('*/10 * * * * *')
+  async expireOverdueInstantBuyHolds(): Promise<void> {
+    const startedAt = Date.now();
+    try {
+      const result =
+        await this.auctionLifecycleService.expireAllOverdueInstantBuyHolds();
+      if (result.processed > 0 || result.errors > 0) {
+        this.logger.log(
+          `[Cron] expireOverdueInstantBuyHolds: processed=${result.processed}, ` +
+            `errors=${result.errors}, durationMs=${Date.now() - startedAt}`,
+        );
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `[Cron] expireOverdueInstantBuyHolds: uncaught error after ${Date.now() - startedAt}ms`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
   @Cron('0 * * * *')
   async sendPaymentWindowWarnings(): Promise<void> {
     const startedAt = Date.now();

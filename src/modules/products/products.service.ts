@@ -502,7 +502,10 @@ export class ProductsService {
             `${err instanceof Error ? err.message : String(err)}`,
         );
       }
-    } else if (product.status === ProductStatus.AWAITING_PAYMENT) {
+    } else if (
+      product.status === ProductStatus.AWAITING_PAYMENT ||
+      product.status === ProductStatus.AWAITING_INSTANT_BUY
+    ) {
       try {
         await this.auctionLifecycleService.handlePaymentExpiry(id);
         product = (await this.productsRepository.findById(id)) ?? product;

@@ -117,8 +117,14 @@ export function mapProduct(
     biddingStartPrice: product.biddingStartPrice,
     instantBuyPrice: product.instantBuyPrice,
     biddingEndPrice: product.biddingEndPrice,
+    // Also gated on status: once an Instant Buy hold is in flight
+    // (AWAITING_INSTANT_BUY), bidding is paused and this listing's own price
+    // comparison alone can no longer tell — see Rule 14 addendum.
     showInstantBuy:
-      product.instantBuyPrice != null && currentBid < product.instantBuyPrice,
+      (product.status === ProductStatus.AWAITING_FIRST_BID ||
+        product.status === ProductStatus.ACTIVE) &&
+      product.instantBuyPrice != null &&
+      currentBid < product.instantBuyPrice,
     currency: product.currency,
     biddingDurationHours: product.biddingDurationHours,
     currentHighestBid: product.currentHighestBid,

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, QueryRunner } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 import * as crypto from 'crypto';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { PaymentConfirmationMethod } from '@common/enums/payment-confirmation-method.enum';
@@ -15,6 +15,8 @@ import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { EventNames } from '@common/events/event-names';
 import type {
   AuctionClosedPayload,
+  AuctionPausedPayload,
+  AuctionResumedPayload,
   AuctionSettledPayload,
   PaymentSucceededPayload,
   WinTransferredPayload,
@@ -235,28 +237,31 @@ export class AuctionLifecycleService {
   // ─── Instant Buy: immediate purchase, no fallback chain ────────────────────
 
   /**
-   * Executes an Instant Buy: creates a synthetic winning bid at
-   * product.instantBuyPrice, closes the auction immediately, and makes the
-   * buyer the SOLE eligible party. Unlike a normal auction win, this never
-   * enters the fallback chain — handlePaymentExpiry checks isInstantBuy and
-   * goes straight to ABANDONED if this buyer doesn't pay in time.
+   * Starts an Instant Buy payment hold: creates a synthetic bid at
+   * product.instantBuyPrice and PAUSES bidding (status → AWAITING_INSTANT_BUY)
+   * while the buyer completes payment. Unlike the old one-shot Instant Buy,
+   * this does NOT close the auction or declare a winner — currentHighestBid,
+   * currentHighestBidderId, biddingEndsAt, closedAt, and winningBidId are all
+   * left untouched. Those are only written once payment actually confirms
+   * (see confirmPaymentGateway's isInstantBuy branch). If the hold's short
+   * payment window lapses instead, handlePaymentExpiry reopens bidding
+   * (never falls back to another bidder — see its isInstantBuy branch).
+   *
+   * Called from PaymentsService.initiateInstantBuyPayment, which generates
+   * the Fonepay QR for the returned bid/settlement immediately afterwards —
+   * the hold only exists alongside an actual in-flight payment attempt.
    */
-  async executeInstantBuy(
+  async startInstantBuyHold(
     productId: string,
     buyerId: string,
-  ): Promise<Product> {
+  ): Promise<{ product: Product; bid: Bid; settlement: ProductSettlement }> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
 
-    let winnerId: string | null = null;
-    let sellerId: string | null = null;
-    let winningAmount: number | null = null;
-    let paymentDeadline: Date | null = null;
-    let capturedProductTitle: string | null = null;
-    let capturedProductId: string | null = null;
-    let capturedWinningBidId: string | null = null;
     let savedProduct: Product;
+    let savedBid: Bid;
+    let savedSettlement: ProductSettlement;
 
     try {
       const product = await qr.manager
@@ -305,13 +310,30 @@ export class AuctionLifecycleService {
         );
       }
 
+      // One failed attempt per buyer per product. Unlike the old one-shot
+      // Instant Buy, a pause can be retried — without this cap, the same
+      // buyer could click, let the hold expire, and repeat indefinitely,
+      // freezing bidding for free each time (most damaging right before the
+      // real auction's own end).
+      const priorFailedAttempt = await qr.manager.getRepository(Bid).findOne({
+        where: {
+          productId,
+          bidderId: buyerId,
+          isInstantBuy: true,
+          paymentStatus: BidPaymentStatus.EXPIRED,
+        },
+      });
+      if (priorFailedAttempt) {
+        throw new BadRequestException(
+          'Your previous Instant Buy attempt on this product expired unpaid — Instant Buy is no longer available to you for this listing',
+        );
+      }
+
       const now = new Date();
-      const paymentWindowHours = this.configService.getOrThrow<number>(
-        'PAYMENT_WINDOW_HOURS',
+      const holdSeconds = this.configService.getOrThrow<number>(
+        'INSTANT_BUY_HOLD_SECONDS',
       );
-      const computedDeadline = new Date(
-        now.getTime() + paymentWindowHours * 60 * 60 * 1000,
-      );
+      const computedDeadline = new Date(now.getTime() + holdSeconds * 1000);
 
       const instantBid = qr.manager.getRepository(Bid).create({
         productId,
@@ -327,29 +349,14 @@ export class AuctionLifecycleService {
         paymentStatus: BidPaymentStatus.PENDING,
         paymentDeadline: computedDeadline,
       });
-      const savedBid = await qr.manager.getRepository(Bid).save(instantBid);
+      savedBid = await qr.manager.getRepository(Bid).save(instantBid);
 
-      // No fallback pool: every other bid on this product is permanently
-      // NOT_RESPONSIBLE. Instant Buy must never fall back to another bidder,
-      // even if this buyer never pays (see handlePaymentExpiry).
-      await qr.manager
-        .createQueryBuilder()
-        .update(Bid)
-        .set({ paymentStatus: BidPaymentStatus.NOT_RESPONSIBLE })
-        .where('productId = :productId AND id != :id', {
-          productId,
-          id: savedBid.id,
-        })
-        .execute();
-
-      product.status = ProductStatus.AWAITING_PAYMENT;
-      product.currentHighestBid = instantBuyPrice;
-      product.currentHighestBidderId = buyerId;
-      if (!product.biddingStartedAt) product.biddingStartedAt = now;
-      product.biddingEndsAt = now;
-      product.closedAt = now;
-      product.winningBidId = savedBid.id;
-
+      // Pause only — no winner declared. Deliberately nothing else on
+      // `product` changes here: currentHighestBid/currentHighestBidderId/
+      // biddingEndsAt/closedAt/winningBidId stay exactly as they were, so a
+      // failed payment has nothing to undo beyond flipping status back (see
+      // handlePaymentExpiry's isInstantBuy branch).
+      product.status = ProductStatus.AWAITING_INSTANT_BUY;
       savedProduct = await qr.manager.getRepository(Product).save(product);
 
       const settlement = qr.manager.getRepository(ProductSettlement).create({
@@ -362,18 +369,11 @@ export class AuctionLifecycleService {
         status: SettlementStatus.PENDING_PAYMENT,
         paymentDeadline: computedDeadline,
       });
-      await qr.manager.getRepository(ProductSettlement).save(settlement);
+      savedSettlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .save(settlement);
 
       await qr.commitTransaction();
-
-      winnerId = buyerId;
-      sellerId = product.ownerId;
-      winningAmount = instantBuyPrice;
-      paymentDeadline = computedDeadline;
-      // Non-null: only products past submission (title required) reach the auction lifecycle.
-      capturedProductTitle = product.title!;
-      capturedProductId = product.id;
-      capturedWinningBidId = savedBid.id;
     } catch (err: unknown) {
       await qr.rollbackTransaction();
       throw err;
@@ -381,66 +381,167 @@ export class AuctionLifecycleService {
       await qr.release();
     }
 
-    // Post-commit email notifications — failures are non-fatal. Reuses the
-    // same templates as a normal auction win (buyer/seller framing is
-    // identical from their point of view).
+    // Broadcast the pause so connected SSE clients hide the bidding UI
+    // immediately. Non-fatal — never blocks the caller from proceeding to
+    // generate the Fonepay QR.
     try {
-      const [winner, seller] = await Promise.all([
-        this.dataSource
-          .getRepository(User)
-          .findOne({ where: { id: winnerId } }),
-        this.dataSource
-          .getRepository(User)
-          .findOne({ where: { id: sellerId } }),
-      ]);
-
-      if (winner) {
-        await this.mailService.sendAuctionWon(winner.email, {
-          bidderName: winner.username,
-          productTitle: capturedProductTitle,
-          productId: capturedProductId,
-          winningAmount: winningAmount,
-          paymentDeadline: paymentDeadline,
-        });
-      }
-
-      if (seller) {
-        await this.mailService.sendAuctionClosedSeller(seller.email, {
-          sellerName: seller.username,
-          productTitle: capturedProductTitle,
-          winningAmount: winningAmount,
-          winnerName: winner?.username ?? 'Unknown',
-        });
-      }
-    } catch (err: unknown) {
-      this.logger.error(
-        `executeInstantBuy: post-commit email failed for product ${capturedProductId}`,
-        err instanceof Error ? err.stack : String(err),
-      );
-    }
-
-    // Reuse AUCTION_CLOSED — AuctionClosedHandler re-broadcasts current state,
-    // which is exactly what's needed to make showInstantBuy/status flip in
-    // real time for connected SSE clients.
-    try {
-      const payload: AuctionClosedPayload = {
-        productId: capturedProductId,
-        winningBidId: capturedWinningBidId,
-        winnerId: winnerId,
-        winningAmount: winningAmount,
-        sellerId: sellerId,
-        productTitle: capturedProductTitle,
-        paymentDeadline: paymentDeadline.toISOString(),
+      const payload: AuctionPausedPayload = {
+        productId,
+        bidId: savedBid.id,
+        bidderId: buyerId,
+        instantBuyPrice: Number(savedBid.amount),
+        paymentDeadline: savedBid.paymentDeadline!.toISOString(),
       };
-      this.eventEmitter.emit(EventNames.AUCTION_CLOSED, payload);
+      this.eventEmitter.emit(EventNames.AUCTION_PAUSED, payload);
     } catch (err: unknown) {
       this.logger.error(
-        `executeInstantBuy: auction.closed emission failed for product ${capturedProductId}`,
+        `startInstantBuyHold: auction.paused emission failed for product ${productId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
 
-    return savedProduct;
+    return {
+      product: savedProduct,
+      bid: savedBid,
+      settlement: savedSettlement,
+    };
+  }
+
+  /**
+   * Given a product row already locked (pessimistic_write) in the caller's
+   * own transaction, recomputes the real bidding state — excluding the
+   * now-failed instant-buy bid — and flips status back to it. Shared by
+   * handlePaymentExpiry (hold's payment deadline passed) and
+   * releaseInstantBuyHold (hold abandoned right after creation because QR
+   * generation failed). Does not touch the Bid/ProductSettlement rows —
+   * callers are responsible for marking those EXPIRED themselves, since each
+   * has already done so (or not) by the time this runs.
+   */
+  private async revertProductAfterFailedInstantBuyHold(
+    manager: EntityManager,
+    product: Product,
+    holdPlacedAt: Date,
+    now: Date,
+  ): Promise<'ACTIVE' | 'AWAITING_FIRST_BID'> {
+    const realHighestBid = await manager
+      .getRepository(Bid)
+      .createQueryBuilder('bid')
+      .where('bid.productId = :productId', { productId: product.id })
+      .andWhere('bid.isInstantBuy = false')
+      .orderBy('bid.amount', 'DESC')
+      .addOrderBy('bid.placedAt', 'ASC')
+      .getOne();
+
+    if (realHighestBid) {
+      product.status = ProductStatus.ACTIVE;
+      // Freeze-the-clock: give back exactly the time the hold consumed,
+      // rather than letting the pause eat into the real countdown.
+      if (product.biddingEndsAt) {
+        const heldMs = now.getTime() - holdPlacedAt.getTime();
+        product.biddingEndsAt = new Date(
+          product.biddingEndsAt.getTime() + heldMs,
+        );
+      }
+      return 'ACTIVE';
+    }
+
+    product.status = ProductStatus.AWAITING_FIRST_BID;
+    product.biddingStartedAt = null;
+    product.biddingEndsAt = null;
+    return 'AWAITING_FIRST_BID';
+  }
+
+  /**
+   * Aborts an in-flight Instant Buy hold that never reached a real payment
+   * attempt — specifically, PaymentsService.initiateInstantBuyPayment calling
+   * this after startInstantBuyHold succeeded but Fonepay QR generation (or
+   * the buyer's address validation) then failed. Releases immediately rather
+   * than making the buyer (and every other bidder) wait out the full hold
+   * window for nothing. No-ops if the product has already moved on (e.g. the
+   * hold's deadline was hit first by the cron).
+   *
+   * DELETES the hold bid/settlement rather than marking them EXPIRED: unlike
+   * a genuine unpaid timeout (handlePaymentExpiry), this buyer never actually
+   * had a chance to pay — e.g. their address was unserviceable — so this must
+   * not count against startInstantBuyHold's one-failed-attempt-per-buyer cap,
+   * or a buyer would be permanently locked out of Instant Buy on this product
+   * by a mistake they can fix and retry (wrong address, a transient Fonepay
+   * API error, etc).
+   */
+  async releaseInstantBuyHold(productId: string): Promise<void> {
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    let failedBidderId: string | null = null;
+    let resumedStatus: 'ACTIVE' | 'AWAITING_FIRST_BID' | null = null;
+
+    try {
+      const product = await qr.manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .setLock('pessimistic_write')
+        .where('product.id = :id', { id: productId })
+        .getOne();
+
+      if (!product || product.status !== ProductStatus.AWAITING_INSTANT_BUY) {
+        await qr.commitTransaction();
+        return;
+      }
+
+      const holdBid = await qr.manager.getRepository(Bid).findOne({
+        where: {
+          productId,
+          isCurrentlyPaymentResponsible: true,
+          isInstantBuy: true,
+        },
+      });
+
+      if (!holdBid) {
+        await qr.commitTransaction();
+        return;
+      }
+
+      const now = new Date();
+      failedBidderId = holdBid.bidderId;
+
+      // Settlement first — it FKs onto the bid with ON DELETE RESTRICT.
+      await qr.manager
+        .getRepository(ProductSettlement)
+        .delete({ bidId: holdBid.id });
+      await qr.manager.getRepository(Bid).delete({ id: holdBid.id });
+
+      resumedStatus = await this.revertProductAfterFailedInstantBuyHold(
+        qr.manager,
+        product,
+        holdBid.placedAt,
+        now,
+      );
+      await qr.manager.getRepository(Product).save(product);
+
+      await qr.commitTransaction();
+    } catch (err: unknown) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
+
+    if (!failedBidderId || !resumedStatus) return;
+
+    try {
+      const payload: AuctionResumedPayload = {
+        productId,
+        failedBidderId,
+        resumedStatus,
+      };
+      this.eventEmitter.emit(EventNames.AUCTION_RESUMED, payload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `releaseInstantBuyHold: auction.resumed emission failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   // ─── Core transition: expire a payment window and advance the fallback chain
@@ -459,7 +560,8 @@ export class AuctionLifecycleService {
     }
 
     // Captured for post-commit emails and events
-    let outcome: 'fallback' | 'abandoned' | 'noop' = 'noop';
+    let outcome: 'fallback' | 'abandoned' | 'resumed' | 'noop' = 'noop';
+    let resumedStatus: 'ACTIVE' | 'AWAITING_FIRST_BID' | null = null;
     let newWinnerId: string | null = null;
     let failedBidderId: string | null = null;
     let sellerId: string | null = null;
@@ -480,7 +582,11 @@ export class AuctionLifecycleService {
         .where('product.id = :id', { id: productId })
         .getOne();
 
-      if (!product || product.status !== ProductStatus.AWAITING_PAYMENT) {
+      if (
+        !product ||
+        (product.status !== ProductStatus.AWAITING_PAYMENT &&
+          product.status !== ProductStatus.AWAITING_INSTANT_BUY)
+      ) {
         if (isOwnQr) await qr.commitTransaction();
         return;
       }
@@ -526,11 +632,12 @@ export class AuctionLifecycleService {
       // Cap: round rank 2 (the 3rd bidder) is the last chance — no 4th round.
       const cascadeExhausted = responsibleBid.fallbackRank >= MAX_FALLBACK_RANK;
 
-      // Instant Buy never falls back to another bidder — the auction closed
-      // to exactly one buyer at click time, even if other (now
-      // NOT_RESPONSIBLE) bids exist below it. Skip the fallback search
-      // entirely and go straight to ABANDONED. Same for a cascade that has
-      // already used up its 3 rounds.
+      // Instant Buy never falls back to another bidder — it was only ever a
+      // hold on one buyer, not a close, so there is no "winner" to hand off
+      // to. A failed Instant Buy payment reopens bidding instead (handled
+      // separately below). Skip the fallback search entirely for it. A
+      // cascade that has already used up its 3 rounds still falls through to
+      // ABANDONED, unchanged.
       //
       // The fallback candidate is chosen by UNIQUE BIDDER, not by raw bid
       // row: a bidder who already had (and failed) a turn is excluded
@@ -558,7 +665,29 @@ export class AuctionLifecycleService {
               .addOrderBy('bid.placedAt', 'ASC')
               .getOne();
 
-      if (nextBid) {
+      if (responsibleBid.isInstantBuy) {
+        // Nothing else was ever written at hold-start (see
+        // startInstantBuyHold) — currentHighestBid/currentHighestBidderId/
+        // biddingEndsAt/closedAt/winningBidId are exactly what they were
+        // before the hold, so "resuming" is just recomputing what the real
+        // bidding state already is and flipping status back to it.
+        resumedStatus = await this.revertProductAfterFailedInstantBuyHold(
+          qr.manager,
+          product,
+          responsibleBid.placedAt,
+          now,
+        );
+        await qr.manager.getRepository(Product).save(product);
+
+        if (isOwnQr) await qr.commitTransaction();
+
+        outcome = 'resumed';
+        failedBidderId = responsibleBid.bidderId;
+        sellerId = product.ownerId;
+        // Non-null: only products past submission (title required) reach the auction lifecycle.
+        capturedProductTitle = product.title!;
+        capturedProductId = product.id;
+      } else if (nextBid) {
         const paymentWindowHours = this.configService.getOrThrow<number>(
           'PAYMENT_WINDOW_HOURS',
         );
@@ -674,8 +803,7 @@ export class AuctionLifecycleService {
             newWinnerBidAmount: newWinnerAmount!,
           });
         }
-      } else {
-        // outcome === 'abandoned'
+      } else if (outcome === 'abandoned') {
         const seller = await this.dataSource
           .getRepository(User)
           .findOne({ where: { id: sellerId } });
@@ -688,6 +816,9 @@ export class AuctionLifecycleService {
           });
         }
       }
+      // outcome === 'resumed': no email — the failed buyer gets an in-app
+      // notification below, and the live auction page updates via the
+      // auction.resumed SSE broadcast (InstantBuyHoldHandler).
     } catch (err: unknown) {
       this.logger.error(
         `handlePaymentExpiry: post-commit email failed for product ${capturedProductId}`,
@@ -714,6 +845,41 @@ export class AuctionLifecycleService {
       } catch (err: unknown) {
         this.logger.error(
           `handlePaymentExpiry: win.transferred emission failed for product ${capturedProductId}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+
+    // Emit AUCTION_RESUMED so the SSE stream (InstantBuyHoldHandler) picks up
+    // the pause lifting and PaymentsModule can expire the matching Fonepay
+    // QR row. Non-fatal — never blocks the expiry flow.
+    if (outcome === 'resumed') {
+      try {
+        const payload: AuctionResumedPayload = {
+          productId: capturedProductId,
+          failedBidderId: failedBidderId,
+          resumedStatus: resumedStatus!,
+        };
+        this.eventEmitter.emit(EventNames.AUCTION_RESUMED, payload);
+      } catch (err: unknown) {
+        this.logger.error(
+          `handlePaymentExpiry: auction.resumed emission failed for product ${capturedProductId}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+
+      try {
+        await this.notificationsService.createForUser({
+          userId: failedBidderId,
+          type: NotificationType.INSTANT_BUY_EXPIRED,
+          relatedId: capturedProductId,
+          title: 'Your Instant Buy payment window expired',
+          message: `You didn't complete payment for "${capturedProductTitle}" in time — bidding has reopened.`,
+          data: { productId: capturedProductId },
+        });
+      } catch (err: unknown) {
+        this.logger.error(
+          `handlePaymentExpiry: instant-buy-expired notification failed for product ${capturedProductId}`,
           err instanceof Error ? err.stack : String(err),
         );
       }
@@ -1054,7 +1220,10 @@ export class AuctionLifecycleService {
         throw new BadRequestException('Product not found');
       }
 
-      if (product.status !== ProductStatus.AWAITING_PAYMENT) {
+      if (
+        product.status !== ProductStatus.AWAITING_PAYMENT &&
+        product.status !== ProductStatus.AWAITING_INSTANT_BUY
+      ) {
         throw new BadRequestException(
           `Product is not awaiting payment (status: ${product.status})`,
         );
@@ -1103,6 +1272,16 @@ export class AuctionLifecycleService {
       // row written before that fix still ends up correct. See OPEN-ITEMS A26.
       product.winningBidId = responsibleBid.id;
       product.settledAmount = responsibleBid.amount;
+
+      // Instant Buy never wrote any of this at hold-start (see
+      // startInstantBuyHold) — this is the first and only point a winner is
+      // ever declared for it, now that payment is actually confirmed.
+      if (responsibleBid.isInstantBuy) {
+        product.closedAt = now;
+        product.biddingEndsAt = now;
+        product.currentHighestBid = responsibleBid.amount;
+        product.currentHighestBidderId = responsibleBid.bidderId;
+      }
 
       await qr.manager.getRepository(Bid).save(responsibleBid);
 
@@ -1276,6 +1455,50 @@ export class AuctionLifecycleService {
         errors++;
         this.logger.error(
           `expireAllOverduePaymentWindows: failed for product ${product.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+
+    return { processed, errors };
+  }
+
+  /**
+   * Same as expireAllOverduePaymentWindows, but scoped to AWAITING_INSTANT_BUY
+   * only and meant to be polled far more often (every few seconds rather than
+   * every minute) — a 3-minute hold needs tighter precision than the 18+ hour
+   * normal payment window does. Cheap to run frequently: there are realistically
+   * 0-1 matching rows at any given moment.
+   */
+  async expireAllOverdueInstantBuyHolds(): Promise<{
+    processed: number;
+    errors: number;
+  }> {
+    const overdueProducts = await this.dataSource
+      .getRepository(Product)
+      .createQueryBuilder('product')
+      .innerJoin(
+        Bid,
+        'bid',
+        'bid.productId = product.id AND bid.isCurrentlyPaymentResponsible = :responsible AND bid.paymentDeadline <= :now',
+        { responsible: true, now: new Date() },
+      )
+      .where('product.status = :status', {
+        status: ProductStatus.AWAITING_INSTANT_BUY,
+      })
+      .getMany();
+
+    let processed = 0;
+    let errors = 0;
+
+    for (const product of overdueProducts) {
+      try {
+        await this.handlePaymentExpiry(product.id);
+        processed++;
+      } catch (err: unknown) {
+        errors++;
+        this.logger.error(
+          `expireAllOverdueInstantBuyHolds: failed for product ${product.id}`,
           err instanceof Error ? err.stack : String(err),
         );
       }

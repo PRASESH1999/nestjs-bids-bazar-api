@@ -35,6 +35,7 @@ export const envValidationSchema = Joi.object({
   // Bidding & Auction Lifecycle
   BIDDING_DURATION_HOURS: Joi.number().integer().min(1).required(),
   PAYMENT_WINDOW_HOURS: Joi.number().integer().min(1).required(),
+  INSTANT_BUY_HOLD_SECONDS: Joi.number().integer().min(1).required(),
   BID_INCREMENT_MIN_FLAT: Joi.number().min(0.01).required(),
   BID_INCREMENT_PERCENT: Joi.number().min(0.001).max(1).required(),
 

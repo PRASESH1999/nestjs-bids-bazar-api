@@ -88,23 +88,9 @@ export class BiddingController {
     return bid;
   }
 
-  // ─── USER: instant buy ────────────────────────────────────────────────────
-
-  @Post('products/:id/instant-buy')
-  @RequirePermissions(Permission.BID_PLACE)
-  @ApiOperation({
-    summary:
-      'Instant Buy: immediately purchase at instantBuyPrice, closing the auction. No fallback to other bidders under any circumstance.',
-  })
-  async instantBuy(
-    @Param('id') productId: string,
-    @Request() req: RequestWithUser,
-  ) {
-    return this.auctionLifecycleService.executeInstantBuy(
-      productId,
-      req.user.sub,
-    );
-  }
+  // Instant Buy now lives on PaymentsController — POST
+  // /payments/:productId/instant-buy/initiate — since it starts a payment
+  // hold and generates the Fonepay QR in the same call (Rule 14 addendum).
 
   // ─── PUBLIC: SSE live-update stream for the product detail page ──────────
 

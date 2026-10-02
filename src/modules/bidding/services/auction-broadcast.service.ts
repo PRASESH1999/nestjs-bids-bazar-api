@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { Observable, Subject, filter, map } from 'rxjs';
 import type { MessageEvent } from '@nestjs/common';
 import { Product } from '@modules/products/entities/product.entity';
+import { ProductStatus } from '@common/enums/product-status.enum';
 import { Bid } from '../entities/bid.entity';
 import { BiddingService, type PublicBidRange } from './bidding.service';
 
@@ -145,7 +146,13 @@ export class AuctionBroadcastService {
         ? product.biddingEndsAt.toISOString()
         : null,
       instantBuyPrice: Number(product.instantBuyPrice),
-      showInstantBuy: currentBid < Number(product.instantBuyPrice),
+      // Also gated on status: once an Instant Buy hold is in flight
+      // (AWAITING_INSTANT_BUY), bidding is paused and the price comparison
+      // alone can no longer tell — see Rule 14 addendum.
+      showInstantBuy:
+        (product.status === ProductStatus.AWAITING_FIRST_BID ||
+          product.status === ProductStatus.ACTIVE) &&
+        currentBid < Number(product.instantBuyPrice),
       biddingEndPrice: Number(product.biddingEndPrice),
       topBidders,
       recentBids,

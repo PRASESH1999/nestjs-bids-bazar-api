@@ -15,6 +15,10 @@ export const EventNames = {
   AUCTION_CLOSED: 'auction.closed',
   AUCTION_SETTLED: 'auction.settled',
 
+  // Instant Buy payment hold (Rule 14 addendum)
+  AUCTION_PAUSED: 'auction.paused',
+  AUCTION_RESUMED: 'auction.resumed',
+
   // Fonepay payment lifecycle
   PAYMENT_INITIATED: 'payment.initiated',
   PAYMENT_SUCCEEDED: 'payment.succeeded',

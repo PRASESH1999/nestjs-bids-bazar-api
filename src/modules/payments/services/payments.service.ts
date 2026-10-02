@@ -184,9 +184,101 @@ export class PaymentsService implements OnModuleInit {
       return this.toInitiateResponse(existingPending);
     }
 
+    return this.createQrPayment(
+      product,
+      responsibleBid,
+      activeSettlement,
+      requestingUserId,
+      dto.shippingAddressId,
+    );
+  }
+
+  /**
+   * Starts an Instant Buy payment hold (pauses bidding — see
+   * AuctionLifecycleService.startInstantBuyHold) and immediately generates
+   * the Fonepay QR for it. The hold only ever exists alongside an actual
+   * in-flight payment attempt; there is no separate "reserve, decide later"
+   * step, since the whole point is to tie the short pause to real payment
+   * time (Rule 14 addendum).
+   *
+   * If QR generation fails right after the hold is created, the hold is
+   * released immediately — see the catch below — instead of leaving every
+   * other bidder locked out for the rest of the (now pointless) hold window.
+   */
+  async initiateInstantBuyPayment(
+    productId: string,
+    requestingUserId: string,
+    dto: InitiatePaymentDto,
+  ): Promise<InitiatePaymentResponseDto> {
+    const now = new Date();
+
+    // Idempotent retry: a slow first response re-submitted by the client
+    // should get back the same QR, not a second hold attempt that would
+    // immediately fail AuctionLifecycleService's own duplicate-hold guard.
+    const existingPending = await this.paymentRepo.findOne({
+      where: {
+        productId,
+        winnerUserId: requestingUserId,
+        status: PaymentStatus.PENDING,
+      },
+    });
+    if (
+      existingPending &&
+      existingPending.paymentDeadline > now &&
+      existingPending.qrString
+    ) {
+      this.logger.debug(
+        `initiateInstantBuyPayment: returning existing PENDING payment ${existingPending.id}`,
+      );
+      return this.toInitiateResponse(existingPending);
+    }
+
+    const { product, bid, settlement } =
+      await this.auctionLifecycleService.startInstantBuyHold(
+        productId,
+        requestingUserId,
+      );
+
+    try {
+      return await this.createQrPayment(
+        product,
+        bid,
+        settlement,
+        requestingUserId,
+        dto.shippingAddressId,
+      );
+    } catch (err: unknown) {
+      this.logger.error(
+        `initiateInstantBuyPayment: QR generation failed after the hold was created for product ${productId} — releasing`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      try {
+        await this.auctionLifecycleService.releaseInstantBuyHold(productId);
+      } catch (releaseErr: unknown) {
+        this.logger.error(
+          `initiateInstantBuyPayment: releaseInstantBuyHold also failed for product ${productId}`,
+          releaseErr instanceof Error ? releaseErr.stack : String(releaseErr),
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Shared tail of initiatePayment/initiateInstantBuyPayment: resolve and
+   * validate the delivery address, generate the Fonepay QR for the
+   * responsible bid's amount, and persist the ProductPayment row.
+   */
+  private async createQrPayment(
+    product: Product,
+    responsibleBid: Bid,
+    settlement: ProductSettlement,
+    requestingUserId: string,
+    shippingAddressId: string,
+  ): Promise<InitiatePaymentResponseDto> {
     // Guard: reject if this product already has a SUCCESS payment
     const successPayment = await this.paymentRepo.findOne({
-      where: { productId, status: PaymentStatus.SUCCESS },
+      where: { productId: product.id, status: PaymentStatus.SUCCESS },
     });
     if (successPayment) {
       throw new ConflictException('This product has already been paid for');
@@ -199,7 +291,7 @@ export class PaymentsService implements OnModuleInit {
      */
     const address = await this.shippingService.getOwned(
       requestingUserId,
-      dto.shippingAddressId,
+      shippingAddressId,
     );
     if (!address.pathaoCityId || !address.pathaoZoneId) {
       throw new BadRequestException(
@@ -215,9 +307,11 @@ export class PaymentsService implements OnModuleInit {
     // Generate a unique referenceLabel with collision retry
     const referenceLabel = await this.generateUniqueReferenceLabel();
 
-    const itemAmount = Number(
-      product.currentHighestBid ?? responsibleBid.amount,
-    );
+    // The responsible bid's own amount is always the authoritative "what do
+    // they owe" figure — including after a fallback cascade, where
+    // product.currentHighestBid still holds the ORIGINAL (higher) winner's
+    // amount rather than the current responsible bidder's lower one.
+    const itemAmount = Number(responsibleBid.amount);
     const deliveryCharge = this.resolveDeliveryCharge();
 
     // Call Fonepay to generate the QR — item + delivery, bundled into one
@@ -234,12 +328,12 @@ export class PaymentsService implements OnModuleInit {
     // by confirmSuccess) — the frozen recipient/address snapshot lives on
     // ProductDelivery, created only for the attempt that actually succeeds.
     const payment = this.paymentRepo.create({
-      productId,
-      productSettlementId: activeSettlement.id,
+      productId: product.id,
+      productSettlementId: settlement.id,
       sellerId: product.ownerId,
       shippingAddressId: address.id,
       winnerUserId: requestingUserId,
-      amount: Number(responsibleBid.amount),
+      amount: itemAmount,
       deliveryCharge,
       referenceLabel,
       terminalId: qrResult.terminalId,
@@ -247,7 +341,10 @@ export class PaymentsService implements OnModuleInit {
       qrMessage: qrResult.qrMessage,
       websocketUrl: qrResult.websocketUrl,
       status: PaymentStatus.PENDING,
-      paymentDeadline: responsibleBid.paymentDeadline,
+      // Non-null: both callers guarantee a live deadline before reaching here
+      // — initiatePayment checks it explicitly, startInstantBuyHold always
+      // sets one on the hold it just created.
+      paymentDeadline: responsibleBid.paymentDeadline!,
     });
 
     const saved = await this.paymentRepo.save(payment);
@@ -259,7 +356,7 @@ export class PaymentsService implements OnModuleInit {
 
     // Emit payment.initiated for SSE relay
     const initiatedPayload: PaymentInitiatedPayload = {
-      productId,
+      productId: product.id,
       paymentId: saved.id,
       referenceLabel,
       winnerUserId: requestingUserId,
@@ -410,6 +507,22 @@ export class PaymentsService implements OnModuleInit {
     await this.paymentRepo.update(paymentId, { status: PaymentStatus.EXPIRED });
     this.closeSocket(paymentId);
     this.logger.log(`expirePayment: payment ${paymentId} marked EXPIRED`);
+  }
+
+  // Called by PaymentEventsHandler on auction.resumed — an Instant Buy hold
+  // expired unpaid, so the QR generated for it is now moot. Expires it and
+  // closes the socket immediately rather than waiting for PaymentsCron's own
+  // 10-minute sweep.
+  async expirePendingInstantBuyPayment(
+    productId: string,
+    winnerUserId: string,
+  ): Promise<void> {
+    const payment = await this.paymentRepo.findOne({
+      where: { productId, winnerUserId, status: PaymentStatus.PENDING },
+      order: { createdAt: 'DESC' },
+    });
+    if (!payment) return;
+    await this.expirePayment(payment.id);
   }
 
   // ─── Admin: payment records (includes FAILED/EXPIRED attempts) ────────────
