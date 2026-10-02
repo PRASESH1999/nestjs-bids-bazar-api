@@ -4,6 +4,12 @@ export enum ProductStatus {
   REJECTED = 'REJECTED',
   AWAITING_FIRST_BID = 'AWAITING_FIRST_BID',
   ACTIVE = 'ACTIVE',
+  // Paused mid-auction for an in-flight Instant Buy payment attempt (a short
+  // hold, not a close — bidding is blocked but no winner is declared and the
+  // auction's own timer/current-bid state is left untouched). Resolves either
+  // to SETTLED (payment confirmed) or back to ACTIVE/AWAITING_FIRST_BID
+  // (payment window expired — see AuctionLifecycleService.handlePaymentExpiry).
+  AWAITING_INSTANT_BUY = 'AWAITING_INSTANT_BUY',
   AWAITING_PAYMENT = 'AWAITING_PAYMENT',
   SETTLED = 'SETTLED',
   ABANDONED = 'ABANDONED',
@@ -18,6 +24,7 @@ export enum ProductStatus {
 export const PUBLICLY_VISIBLE_STATUSES: ProductStatus[] = [
   ProductStatus.AWAITING_FIRST_BID,
   ProductStatus.ACTIVE,
+  ProductStatus.AWAITING_INSTANT_BUY,
   ProductStatus.AWAITING_PAYMENT,
   ProductStatus.SETTLED,
   ProductStatus.ABANDONED,
@@ -26,6 +33,24 @@ export const PUBLICLY_VISIBLE_STATUSES: ProductStatus[] = [
 export const OWNER_EDITABLE_STATUSES: ProductStatus[] = [
   ProductStatus.DRAFT,
   ProductStatus.REJECTED,
+];
+
+// Approved and in the auction lifecycle but not yet settled. Money and clock
+// fields are frozen here — see ProductsService.adminUpdateProduct.
+export const LIVE_STATUSES: ProductStatus[] = [
+  ProductStatus.AWAITING_FIRST_BID,
+  ProductStatus.ACTIVE,
+  ProductStatus.AWAITING_INSTANT_BUY,
+  ProductStatus.AWAITING_PAYMENT,
+];
+
+// Statuses an admin may edit: everything pre-listing plus the live set.
+// SETTLED, ABANDONED and WITHDRAWN are terminal records and stay untouched.
+export const ADMIN_EDITABLE_STATUSES: ProductStatus[] = [
+  ProductStatus.DRAFT,
+  ProductStatus.AWAITING_APPROVAL,
+  ProductStatus.REJECTED,
+  ...LIVE_STATUSES,
 ];
 
 // Still a live, biddable listing: publicly listed awaiting its first bid

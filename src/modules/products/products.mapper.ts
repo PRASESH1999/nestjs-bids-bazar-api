@@ -123,9 +123,14 @@ export function mapProduct(
     biddingStartPrice: product.biddingStartPrice,
     instantBuyPrice: product.instantBuyPrice,
     biddingEndPrice: product.biddingEndPrice,
+    // Also gated on status: once an Instant Buy hold is in flight
+    // (AWAITING_INSTANT_BUY), bidding is paused and this listing's own price
+    // comparison alone can no longer tell — see Rule 14 addendum.
     // Number() both sides: decimal columns arrive as strings, and comparing
     // strings is lexicographic ("880.00" < "1120.00" is false).
     showInstantBuy:
+      (product.status === ProductStatus.AWAITING_FIRST_BID ||
+        product.status === ProductStatus.ACTIVE) &&
       product.instantBuyPrice != null &&
       Number(currentBid) < Number(product.instantBuyPrice),
     currency: product.currency,

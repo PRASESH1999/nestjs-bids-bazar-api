@@ -33,6 +33,22 @@ export interface AuctionClosedPayload {
   paymentDeadline: string; // ISO string
 }
 
+export interface AuctionPausedPayload {
+  productId: string;
+  bidId: string;
+  bidderId: string;
+  instantBuyPrice: number;
+  paymentDeadline: string; // ISO string
+}
+
+export interface AuctionResumedPayload {
+  productId: string;
+  failedBidderId: string;
+  // 'resumed' into ACTIVE (a real bid exists) vs back to AWAITING_FIRST_BID
+  // (the Instant Buy attempt was the first thing ever done on this product).
+  resumedStatus: 'ACTIVE' | 'AWAITING_FIRST_BID';
+}
+
 export interface AuctionSettledPayload {
   productId: string;
   winningBidId: string;

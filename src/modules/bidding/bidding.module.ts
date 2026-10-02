@@ -17,6 +17,7 @@ import { AuctionLifecycleCron } from './cron/auction-lifecycle.cron';
 import { BidSubmittedHandler } from './handlers/bid-submitted.handler';
 import { AuctionClosedHandler } from './handlers/auction-closed.handler';
 import { AuctionSettledHandler } from './handlers/auction-settled.handler';
+import { InstantBuyHoldHandler } from './handlers/instant-buy-hold.handler';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AuctionSettledHandler } from './handlers/auction-settled.handler';
     BidSubmittedHandler,
     AuctionClosedHandler,
     AuctionSettledHandler,
+    InstantBuyHoldHandler,
   ],
   // Exported so ProductsModule can use them (lazy closure + top-bidders list).
   // AuctionBroadcastService exported so PaymentsModule can push payment SSE events.

@@ -1,5 +1,7 @@
 import Decimal from 'decimal.js';
 import {
+  ADMIN_EDITABLE_STATUSES,
+  LIVE_STATUSES,
   OWNER_EDITABLE_STATUSES,
   PUBLICLY_VISIBLE_STATUSES,
   ProductStatus,
@@ -78,6 +80,7 @@ export type ProductDetailResponse = Omit<ProductResponse, 'winningBidId'> & {
 
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
   ProductStatus.ACTIVE,
+  ProductStatus.AWAITING_INSTANT_BUY,
   ProductStatus.AWAITING_PAYMENT,
   ProductStatus.SETTLED,
   ProductStatus.ABANDONED,
@@ -97,7 +100,11 @@ const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
 function statusesForScope(scope?: ProductScope): ProductStatus[] {
   switch (scope) {
     case ProductScope.LIVE:
-      return [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE];
+      return [
+        ProductStatus.AWAITING_FIRST_BID,
+        ProductStatus.ACTIVE,
+        ProductStatus.AWAITING_INSTANT_BUY,
+      ];
     case ProductScope.SOLD:
       return [ProductStatus.SETTLED];
     default:
@@ -243,6 +250,69 @@ export class ProductsService {
   ): Promise<ProductResponse> {
     const product = await this.findOwnedProduct(userId, productId);
     this.assertEditable(product);
+    return this.applyProductUpdate(userId, product, dto, newImageFiles);
+  }
+
+  /**
+   * Admin edit of any product, including one that is live (bidding open, on
+   * hold, or awaiting payment). Descriptive fields and images are editable
+   * throughout; anything that feeds the auction's money or clock is not once
+   * the lot is live, because bids already placed were validated against it.
+   */
+  async adminUpdateProduct(
+    adminId: string,
+    productId: string,
+    dto: UpdateProductDto,
+    newImageFiles?: Express.Multer.File[],
+  ): Promise<ProductResponse> {
+    const product =
+      await this.productsRepository.findByIdWithoutImages(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (!ADMIN_EDITABLE_STATUSES.includes(product.status)) {
+      throw new BadRequestException(
+        `Cannot edit a product in status ${product.status}.`,
+      );
+    }
+
+    if (LIVE_STATUSES.includes(product.status)) {
+      if (
+        dto.basePrice !== undefined ||
+        dto.biddingDurationHours !== undefined
+      ) {
+        // Safe only while nobody has bid and nothing is in flight: no bid or
+        // Instant Buy hold has been validated against the current prices yet.
+        const { totalBids } =
+          await this.biddingService.getBidCountsForProduct(productId);
+        if (
+          product.status !== ProductStatus.AWAITING_FIRST_BID ||
+          totalBids > 0
+        ) {
+          throw new BadRequestException(
+            'Price and bidding duration can only be changed on a live product that has no bids yet.',
+          );
+        }
+      }
+      const lockedClears = (dto.clearFields ?? []).filter(
+        (field) => field !== 'specifications',
+      );
+      if (lockedClears.length > 0) {
+        throw new BadRequestException(
+          `These fields cannot be cleared on a live product: ${lockedClears.join(', ')}.`,
+        );
+      }
+    }
+
+    return this.applyProductUpdate(adminId, product, dto, newImageFiles);
+  }
+
+  private async applyProductUpdate(
+    userId: string,
+    product: Product,
+    dto: UpdateProductDto,
+    newImageFiles?: Express.Multer.File[],
+  ): Promise<ProductResponse> {
+    const productId = product.id;
 
     if (dto.categoryId !== undefined || dto.subcategoryId !== undefined) {
       const resolvedCategoryId = dto.categoryId ?? product.categoryId;
@@ -692,7 +762,10 @@ export class ProductsService {
             `${err instanceof Error ? err.message : String(err)}`,
         );
       }
-    } else if (product.status === ProductStatus.AWAITING_PAYMENT) {
+    } else if (
+      product.status === ProductStatus.AWAITING_PAYMENT ||
+      product.status === ProductStatus.AWAITING_INSTANT_BUY
+    ) {
       try {
         await this.auctionLifecycleService.handlePaymentExpiry(id);
         product = (await this.productsRepository.findById(id)) ?? product;

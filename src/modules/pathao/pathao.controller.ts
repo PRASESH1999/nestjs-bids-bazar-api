@@ -105,6 +105,20 @@ export class PathaoController {
     return this.productDeliveriesService.dispatch(id, req.user.sub, dto);
   }
 
+  @Post('admin/deliveries/:id/redispatch')
+  @RequirePermissions(Permission.SHIPMENT_MANAGE)
+  @ApiOperation({
+    summary:
+      'Admin: create a replacement Pathao order after the previous one was cancelled',
+  })
+  async redispatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DispatchDeliveryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productDeliveriesService.redispatch(id, req.user.sub, dto);
+  }
+
   @Post('admin/deliveries/:id/sync')
   @RequirePermissions(Permission.SHIPMENT_MANAGE)
   @ApiOperation({ summary: "Admin: refresh a delivery's status from Pathao" })

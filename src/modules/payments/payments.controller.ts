@@ -62,6 +62,31 @@ export class PaymentsController {
   }
 
   /**
+   * Instant Buy: pauses bidding (AWAITING_INSTANT_BUY) and immediately
+   * generates the Fonepay QR for it, all in one call — the hold only ever
+   * exists alongside an actual in-flight payment attempt. If the buyer
+   * doesn't pay within the (short) Instant Buy window, bidding automatically
+   * reopens; no other bidder is ever substituted in.
+   */
+  @Post(':productId/instant-buy/initiate')
+  @RequirePermissions(Permission.PAYMENT_INITIATE)
+  @ApiOperation({
+    summary:
+      'Instant Buy: pause bidding and generate a Fonepay QR for instantBuyPrice. Auto-resumes bidding if unpaid within the hold window.',
+  })
+  async initiateInstantBuyPayment(
+    @Param('productId') productId: string,
+    @Body() dto: InitiatePaymentDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.paymentsService.initiateInstantBuyPayment(
+      productId,
+      req.user.sub,
+      dto,
+    );
+  }
+
+  /**
    * Manual status fallback — verifies with Fonepay and reconciles the Payment row.
    * Frontend calls this if the SSE stream drops or no event arrives within a timeout.
    */

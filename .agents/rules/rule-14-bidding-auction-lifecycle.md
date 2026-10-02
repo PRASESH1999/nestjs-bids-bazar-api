@@ -112,33 +112,55 @@ Call sites:
 - Every product has a mandatory `instantBuyPrice` (see Rule 13 for the
   `1.4 × basePrice` formula and visibility rule) — completely independent of
   `biddingEndPrice` (the `1.6 × basePrice` regular-bidding ceiling, also Rule 13).
-  `AuctionLifecycleService
-  .executeInstantBuy(productId, buyerId)` is the purchase action:
-  `POST /products/:id/instant-buy`.
-- Preconditions, re-validated **inside** a `pessimistic_write` lock on the
-  product row (never from a pre-lock read, to close the race against a
-  concurrent bid or a concurrent `closeIfExpired`/expiry): product status
-  is `PENDING` or `ACTIVE`; caller is not the owner; `showInstantBuy` is
-  still true at lock time.
+- Instant Buy is a **pause, not a close**. It starts and ends entirely inside
+  `PaymentsController POST /payments/:productId/instant-buy/initiate` →
+  `PaymentsService.initiateInstantBuyPayment`, which (1) calls
+  `AuctionLifecycleService.startInstantBuyHold(productId, buyerId)` to open
+  the hold, then (2) immediately generates the Fonepay QR for it in the same
+  call — there is no separate "reserve, decide later" step, because the
+  pause is only ever meant to last as long as an actual in-flight payment
+  attempt. There is no longer a standalone `POST /products/:id/instant-buy`.
+- `startInstantBuyHold`'s preconditions, re-validated **inside** a
+  `pessimistic_write` lock on the product row (never from a pre-lock read):
+  product status is `AWAITING_FIRST_BID` or `ACTIVE`; caller is not the
+  owner; `showInstantBuy` is still true at lock time; no payment-responsible
+  bid already exists; the caller has no prior `EXPIRED` Instant Buy bid on
+  this product (one failed attempt per buyer per product — otherwise the
+  same buyer could pause bidding for free, repeatedly, by never paying).
 - On success: creates a synthetic `Bid` at `instantBuyPrice` with
   `isInstantBuy = true`, `isOriginalWinner = true`, `fallbackRank = 0`,
-  `isCurrentlyPaymentResponsible = true`; every other bid on the product
-  is permanently set `NOT_RESPONSIBLE`; product transitions straight to
-  `AWAITING_PAYMENT` (`biddingEndsAt = now`, `closedAt = now`,
-  `winningBidId` set). Emits `AUCTION_CLOSED` so `AuctionClosedHandler`
-  re-broadcasts current state — the same event a normal auction-timer
-  close emits.
-- **No fallback, ever.** Once Instant Buy is used, that buyer is the sole
-  eligible party for the product. `handlePaymentExpiry` checks
-  `isInstantBuy` on the expiring responsible bid and, if true, skips the
-  next-bidder search entirely and goes straight to `ABANDONED` — even
-  though other (now `NOT_RESPONSIBLE`) bids may exist below it. This is
-  the one place in the lifecycle where the fallback chain deliberately
-  does not apply.
-- Instant Buy still goes through the same `AWAITING_PAYMENT` /
-  `PAYMENT_WINDOW_HOURS` / gateway-payment path as a normal win (see
-  below) — the window exists only because Fonepay is a scan-and-wait QR
-  flow, not because Instant Buy tolerates non-payment.
+  `isCurrentlyPaymentResponsible = true`, and a **short**
+  `paymentDeadline = now + INSTANT_BUY_HOLD_SECONDS` (minutes, not the
+  `PAYMENT_WINDOW_HOURS` used elsewhere). Product status flips to
+  `AWAITING_INSTANT_BUY` — bidding is blocked (it is not in
+  `ACTIVE_BIDDING_STATUSES`) but **nothing else about the product changes**:
+  `currentHighestBid`, `currentHighestBidderId`, `biddingEndsAt`, `closedAt`,
+  and `winningBidId` are all left exactly as they were. No winner is
+  declared and no `ProductSettlement`/buyer-facing "you won" email is sent
+  yet — only once payment actually confirms. Emits `AUCTION_PAUSED` (new
+  `InstantBuyHoldHandler` re-broadcasts current state over SSE, same pattern
+  as `AuctionClosedHandler`).
+- **If payment confirms** (`confirmPaymentGateway`, same as any other sale):
+  this is the first and only point a winner is ever declared for an Instant
+  Buy sale — `closedAt`, `biddingEndsAt`, `currentHighestBid`, and
+  `currentHighestBidderId` are set here (gated on `responsibleBid.isInstantBuy`),
+  alongside the normal `status = SETTLED` / `winningBidId` / settlement
+  writes shared with every other sale.
+- **If the hold's short window lapses unpaid**: `handlePaymentExpiry` checks
+  `isInstantBuy` on the expiring responsible bid and, instead of searching
+  for a fallback bidder, **reopens bidding** — recomputes the real highest
+  non-instant-buy bid and flips status back to `ACTIVE` (or
+  `AWAITING_FIRST_BID` if there was none), shifting `biddingEndsAt` forward
+  by however long the hold lasted (the countdown is frozen during the pause,
+  not eaten by it). Emits `AUCTION_RESUMED` (same broadcast handler;
+  `PaymentEventsHandler` also listens to this to expire the now-moot Fonepay
+  QR row). No fallback bidder is ever substituted in — this is still the one
+  place in the lifecycle where the fallback chain deliberately does not
+  apply, it just resolves to "bidding reopens" instead of `ABANDONED`.
+- Polled by a dedicated `*/10 * * * * *` cron
+  (`AuctionLifecycleCron.expireOverdueInstantBuyHolds`) rather than the
+  once-a-minute payment-window cron — a multi-minute hold needs tighter
+  precision than the 18+ hour normal payment window does.
 
 ## Payment Window & Fallback Chain
 

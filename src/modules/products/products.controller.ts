@@ -541,6 +541,28 @@ export class ProductsController {
     );
   }
 
+  @Patch('admin/products/:id')
+  @RequirePermissions(Permission.PRODUCT_MODERATE)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Admin: edit any product, including a live one. Price and bidding duration are locked once bidding has opened.',
+  })
+  @UseInterceptors(FilesInterceptor('images', 8, multerOptions))
+  async adminUpdateProduct(
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.productsService.adminUpdateProduct(
+      req.user.sub,
+      id,
+      dto,
+      files?.length ? files : undefined,
+    );
+  }
+
   @Patch('admin/products/:id/approve')
   @RequirePermissions(Permission.PRODUCT_MODERATE)
   @ApiOperation({ summary: 'Admin: approve a submitted product' })

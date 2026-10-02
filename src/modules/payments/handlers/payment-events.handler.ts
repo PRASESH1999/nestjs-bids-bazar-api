@@ -1,5 +1,6 @@
 import { EventNames } from '@common/events/event-names';
 import type {
+  AuctionResumedPayload,
   PaymentFailedPayload,
   PaymentInitiatedPayload,
   PaymentSucceededPayload,
@@ -8,18 +9,22 @@ import type {
 import { AuctionBroadcastService } from '@modules/bidding/services/auction-broadcast.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { PaymentsService } from '../services/payments.service';
 
 /**
  * Relay payment domain events to the per-product SSE stream.
  * Each handler receives the event emitted by PaymentsService (or
- * AuctionLifecycleService for win.transferred) and calls
+ * AuctionLifecycleService for win.transferred/auction.resumed) and calls
  * broadcastPaymentEvent() so all SSE subscribers of that product receive it.
  */
 @Injectable()
 export class PaymentEventsHandler {
   private readonly logger = new Logger(PaymentEventsHandler.name);
 
-  constructor(private readonly broadcastService: AuctionBroadcastService) {}
+  constructor(
+    private readonly broadcastService: AuctionBroadcastService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   @OnEvent(EventNames.PAYMENT_INITIATED, { async: true })
   onPaymentInitiated(payload: PaymentInitiatedPayload): void {
@@ -66,6 +71,21 @@ export class PaymentEventsHandler {
       });
     } catch (err: unknown) {
       this.logger.error('payment.failed broadcast failed', err);
+    }
+  }
+
+  // An Instant Buy hold expired unpaid and bidding reopened — the Fonepay QR
+  // generated for that attempt is now moot. Expires the matching PENDING
+  // payment immediately rather than waiting for PaymentsCron's 10-minute sweep.
+  @OnEvent(EventNames.AUCTION_RESUMED, { async: true })
+  async onAuctionResumed(payload: AuctionResumedPayload): Promise<void> {
+    try {
+      await this.paymentsService.expirePendingInstantBuyPayment(
+        payload.productId,
+        payload.failedBidderId,
+      );
+    } catch (err: unknown) {
+      this.logger.error('auction.resumed payment cleanup failed', err);
     }
   }
 
