@@ -30,6 +30,17 @@ import {
 // rather than silently ignored, so ops can tell us the real terminal string.
 const DELIVERED_STATUS_MARKERS = ['delivered'];
 
+// Pathao's slugs for a cancelled order (e.g. "Pickup_Cancelled") all contain
+// "cancel". Deliberately a substring match and nothing broader: "Return" and
+// "Delivery_Failed" mean the parcel is physically coming back, which is a
+// different situation from the order being void.
+const CANCELLED_STATUS_MARKER = 'cancel';
+
+// A buyer/admin read re-syncs a dispatched delivery from Pathao, but no more
+// often than this — repeated polling of the payment-status endpoint must not
+// turn into a Pathao API call each time.
+const READ_SYNC_MIN_INTERVAL_MS = 60_000;
+
 @Injectable()
 export class ProductDeliveriesService {
   private readonly logger = new Logger(ProductDeliveriesService.name);
@@ -116,6 +127,8 @@ export class ProductDeliveriesService {
   }
 
   async getOne(id: string): Promise<AdminDeliveryView> {
+    const delivery = await this.findOneOrThrow(id);
+    await this.syncOnRead(delivery);
     return this.toAdminViewById(id);
   }
 
@@ -124,7 +137,8 @@ export class ProductDeliveriesService {
     productPaymentId: string,
   ): Promise<BuyerDeliveryView | null> {
     const delivery = await this.findByPaymentId(productPaymentId);
-    return delivery ? this.toBuyerView(delivery) : null;
+    if (!delivery) return null;
+    return this.toBuyerView(await this.syncOnRead(delivery));
   }
 
   quote(): DeliveryQuoteDto {
@@ -180,6 +194,52 @@ export class ProductDeliveriesService {
       );
     }
 
+    await this.createPathaoOrder(delivery, adminId, dto, delivery.id);
+    return this.toAdminViewById(id);
+  }
+
+  /**
+   * Replaces a cancelled Pathao order with a fresh one for the same parcel.
+   * The status is re-synced first so a stale local view can't redispatch a
+   * delivery that is in fact still live at Pathao.
+   */
+  async redispatch(
+    id: string,
+    adminId: string,
+    dto: DispatchDeliveryDto,
+  ): Promise<AdminDeliveryView> {
+    const delivery = await this.findOneOrThrow(id);
+    if (delivery.consignmentId && !delivery.cancelledAt) {
+      await this.refreshStatus(delivery);
+    }
+
+    if (!delivery.cancelledAt || !delivery.consignmentId) {
+      throw new BadRequestException(
+        'Only a delivery whose Pathao order was cancelled can be redispatched',
+      );
+    }
+
+    const attempt = delivery.previousConsignmentIds.length + 1;
+
+    // merchantOrderId must differ from the cancelled order's, or Pathao may
+    // reject it as a duplicate — the first dispatch used the bare delivery id.
+    await this.createPathaoOrder(
+      delivery,
+      adminId,
+      dto,
+      `${delivery.id}-r${attempt}`,
+      delivery.consignmentId,
+    );
+    return this.toAdminViewById(id);
+  }
+
+  private async createPathaoOrder(
+    delivery: ProductDelivery,
+    adminId: string,
+    dto: DispatchDeliveryDto,
+    merchantOrderId: string,
+    supersedes?: string,
+  ): Promise<void> {
     const storeId = this.configService.getOrThrow<number>('PATHAO_STORE_ID');
 
     const itemDescription =
@@ -187,7 +247,7 @@ export class ProductDeliveriesService {
 
     const result = await this.pathaoClientService.createOrder({
       storeId,
-      merchantOrderId: delivery.id,
+      merchantOrderId,
       recipientName: delivery.recipientName,
       recipientPhone: delivery.recipientPhone,
       recipientAddress: this.composeAddressText(delivery),
@@ -200,17 +260,25 @@ export class ProductDeliveriesService {
       amountToCollect: 0,
     });
 
+    if (supersedes) {
+      delivery.previousConsignmentIds = [
+        ...delivery.previousConsignmentIds,
+        supersedes,
+      ];
+      delivery.cancelledAt = null;
+    }
+
     delivery.storeId = storeId;
     delivery.consignmentId = result.consignmentId;
     delivery.pathaoDeliveryFee = result.deliveryFee;
     delivery.orderStatus = result.orderStatus;
+    delivery.lastStatusCheckAt = null;
     delivery.itemWeightKg = dto.itemWeightKg;
     delivery.itemDescription = itemDescription;
     delivery.dispatchedAt = new Date();
     delivery.dispatchedById = adminId;
 
     await this.deliveryRepo.save(delivery);
-    return this.toAdminViewById(id);
   }
 
   async syncStatus(id: string): Promise<AdminDeliveryView> {
@@ -234,12 +302,18 @@ export class ProductDeliveriesService {
     delivery.orderStatus = info.orderStatusSlug || info.orderStatus;
     delivery.lastStatusCheckAt = new Date();
 
-    const isDelivered = DELIVERED_STATUS_MARKERS.includes(
-      delivery.orderStatus.toLowerCase(),
-    );
+    const status = delivery.orderStatus.toLowerCase();
+    const isDelivered = DELIVERED_STATUS_MARKERS.includes(status);
+    const isCancelled = status.includes(CANCELLED_STATUS_MARKER);
+
     if (isDelivered && !delivery.deliveredAt) {
       delivery.deliveredAt = new Date();
-    } else if (!isDelivered) {
+    } else if (isCancelled && !delivery.cancelledAt) {
+      delivery.cancelledAt = new Date();
+      this.logger.warn(
+        `refreshStatus: delivery ${delivery.id} (consignment ${delivery.consignmentId}) was cancelled at Pathao ("${delivery.orderStatus}")`,
+      );
+    } else if (!isDelivered && !isCancelled) {
       this.logger.debug(
         `refreshStatus: delivery ${delivery.id} status is "${delivery.orderStatus}" (not recognized as terminal)`,
       );
@@ -248,9 +322,41 @@ export class ProductDeliveriesService {
     return this.deliveryRepo.save(delivery);
   }
 
+  /**
+   * Best-effort live sync for a read. A failing or slow Pathao must never take
+   * down the page that asked (the payment-status response embeds this), so any
+   * error is logged and the last stored state is returned instead.
+   */
+  private async syncOnRead(
+    delivery: ProductDelivery,
+  ): Promise<ProductDelivery> {
+    if (
+      !delivery.consignmentId ||
+      delivery.deliveredAt ||
+      delivery.cancelledAt
+    ) {
+      return delivery;
+    }
+    const lastCheck = delivery.lastStatusCheckAt?.getTime() ?? 0;
+    if (Date.now() - lastCheck < READ_SYNC_MIN_INTERVAL_MS) return delivery;
+
+    try {
+      return await this.refreshStatus(delivery);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `syncOnRead: could not refresh delivery ${delivery.id} from Pathao, serving stored state (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return delivery;
+    }
+  }
+
   async findDispatchedNotDelivered(): Promise<ProductDelivery[]> {
     return this.deliveryRepo.find({
-      where: { consignmentId: Not(IsNull()), deliveredAt: IsNull() },
+      where: {
+        consignmentId: Not(IsNull()),
+        deliveredAt: IsNull(),
+        cancelledAt: IsNull(),
+      },
     });
   }
 
@@ -309,12 +415,17 @@ export class ProductDeliveriesService {
         );
         break;
       case DeliveryStage.IN_TRANSIT:
-        qb.andWhere('delivery.consignmentId IS NOT NULL').andWhere(
-          'delivery.deliveredAt IS NULL',
-        );
+        qb.andWhere('delivery.consignmentId IS NOT NULL')
+          .andWhere('delivery.deliveredAt IS NULL')
+          .andWhere('delivery.cancelledAt IS NULL');
         break;
       case DeliveryStage.DELIVERED:
         qb.andWhere('delivery.deliveredAt IS NOT NULL');
+        break;
+      case DeliveryStage.CANCELLED:
+        qb.andWhere('delivery.cancelledAt IS NOT NULL').andWhere(
+          'delivery.deliveredAt IS NULL',
+        );
         break;
     }
   }
@@ -341,6 +452,7 @@ export class ProductDeliveriesService {
 
   private stageOf(d: ProductDelivery): DeliveryStage {
     if (d.deliveredAt) return DeliveryStage.DELIVERED;
+    if (d.cancelledAt) return DeliveryStage.CANCELLED;
     if (d.consignmentId) return DeliveryStage.IN_TRANSIT;
     if (d.receivedAtWarehouseAt) return DeliveryStage.AT_WAREHOUSE;
     return DeliveryStage.AWAITING_WAREHOUSE;
@@ -355,6 +467,7 @@ export class ProductDeliveriesService {
       receivedAtWarehouseAt: d.receivedAtWarehouseAt?.toISOString() ?? null,
       dispatchedAt: d.dispatchedAt?.toISOString() ?? null,
       deliveredAt: d.deliveredAt?.toISOString() ?? null,
+      cancelledAt: d.cancelledAt?.toISOString() ?? null,
       lastStatusCheckAt: d.lastStatusCheckAt?.toISOString() ?? null,
     };
   }
@@ -394,6 +507,7 @@ export class ProductDeliveriesService {
       itemDescription: d.itemDescription,
       pathaoDeliveryFee:
         d.pathaoDeliveryFee === null ? null : Number(d.pathaoDeliveryFee),
+      previousConsignmentIds: d.previousConsignmentIds ?? [],
       createdAt: d.createdAt.toISOString(),
     };
   }

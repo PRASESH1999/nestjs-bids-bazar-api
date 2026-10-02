@@ -145,4 +145,16 @@ export class ProductDelivery extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;
+
+  // Set when a status sync sees Pathao report the order as cancelled. The
+  // consignment stays on the row (so the admin can see what was cancelled)
+  // until a redispatch replaces it.
+  @Column({ type: 'timestamptz', nullable: true })
+  cancelledAt: Date | null;
+
+  // Consignments superseded by a redispatch, oldest first. `consignmentId` is
+  // unique, so the cancelled one has to move out before a new order can take
+  // its place — and keeping them is the audit trail of what was cancelled.
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  previousConsignmentIds: string[];
 }

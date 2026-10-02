@@ -29,6 +29,24 @@ export const OWNER_EDITABLE_STATUSES: ProductStatus[] = [
   ProductStatus.REJECTED,
 ];
 
+// Approved and in the auction lifecycle but not yet settled. Money and clock
+// fields are frozen here — see ProductsService.adminUpdateProduct.
+export const LIVE_STATUSES: ProductStatus[] = [
+  ProductStatus.AWAITING_FIRST_BID,
+  ProductStatus.ACTIVE,
+  ProductStatus.AWAITING_INSTANT_BUY,
+  ProductStatus.AWAITING_PAYMENT,
+];
+
+// Statuses an admin may edit: everything pre-listing plus the live set.
+// SETTLED, ABANDONED and WITHDRAWN are terminal records and stay untouched.
+export const ADMIN_EDITABLE_STATUSES: ProductStatus[] = [
+  ProductStatus.DRAFT,
+  ProductStatus.AWAITING_APPROVAL,
+  ProductStatus.REJECTED,
+  ...LIVE_STATUSES,
+];
+
 // Still a live, biddable listing: publicly listed awaiting its first bid
 // (AWAITING_FIRST_BID) or currently accepting bids (ACTIVE). Once a product
 // leaves this set (AWAITING_PAYMENT and beyond, WITHDRAWN, etc.) it no longer

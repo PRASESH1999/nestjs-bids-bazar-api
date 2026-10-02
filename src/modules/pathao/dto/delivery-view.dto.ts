@@ -12,12 +12,14 @@ import type { PaginationMeta } from '@common/types/paginated-result.type';
  *   AT_WAREHOUSE        received, not yet handed to Pathao
  *   IN_TRANSIT          Pathao order created, not yet delivered
  *   DELIVERED           Pathao reported delivery
+ *   CANCELLED           Pathao order was cancelled; awaiting an admin redispatch
  */
 export enum DeliveryStage {
   AWAITING_WAREHOUSE = 'AWAITING_WAREHOUSE',
   AT_WAREHOUSE = 'AT_WAREHOUSE',
   IN_TRANSIT = 'IN_TRANSIT',
   DELIVERED = 'DELIVERED',
+  CANCELLED = 'CANCELLED',
 }
 
 export class ListDeliveriesQueryDto extends PaginationDto {
@@ -50,6 +52,7 @@ export interface BuyerDeliveryView {
   receivedAtWarehouseAt: string | null;
   dispatchedAt: string | null;
   deliveredAt: string | null;
+  cancelledAt: string | null;
   lastStatusCheckAt: string | null;
 }
 
@@ -79,6 +82,8 @@ export interface AdminDeliveryView extends BuyerDeliveryView {
   itemWeightKg: number | null;
   itemDescription: string | null;
   pathaoDeliveryFee: number | null;
+  /** Consignments cancelled and replaced by a redispatch, oldest first. */
+  previousConsignmentIds: string[];
   createdAt: string;
 }
 
