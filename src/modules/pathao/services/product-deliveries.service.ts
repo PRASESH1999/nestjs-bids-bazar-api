@@ -9,13 +9,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { OnEvent } from '@nestjs/event-emitter';
 import { IsNull, Not, Repository, SelectQueryBuilder } from 'typeorm';
 import { EventNames } from '@common/events/event-names';
+import { NotificationType } from '@common/enums/notification-type.enum';
 import type { PaymentSucceededPayload } from '@common/events/event-payloads.type';
 import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
+import { User } from '@modules/users/entities/user.entity';
+import { MailService } from '@modules/mail/mail.service';
+import { NotificationsService } from '@modules/notifications/notifications.service';
 import { ProductDelivery } from '../entities/product-delivery.entity';
 import { PathaoClientService } from './pathao-client.service';
 import type { DispatchDeliveryDto } from '../dto/pathao.dto';
+import { classifyPathaoStatus, deliveryStageOf } from '../delivery-stage.util';
 import {
   DeliveryStage,
   type AdminDeliveryListDto,
@@ -25,16 +30,8 @@ import {
   type ListDeliveriesQueryDto,
 } from '../dto/delivery-view.dto';
 
-// Pathao's own status vocabulary isn't confirmed from the sandbox docs we
-// have — matched case-insensitively, and anything unrecognized is logged
-// rather than silently ignored, so ops can tell us the real terminal string.
-const DELIVERED_STATUS_MARKERS = ['delivered'];
-
-// Pathao's slugs for a cancelled order (e.g. "Pickup_Cancelled") all contain
-// "cancel". Deliberately a substring match and nothing broader: "Return" and
-// "Delivery_Failed" mean the parcel is physically coming back, which is a
-// different situation from the order being void.
-const CANCELLED_STATUS_MARKER = 'cancel';
+// Pathao status matching (DELIVERED_STATUS_MARKERS / CANCELLED_STATUS_MARKER,
+// both unverified — A43) lives in ../delivery-stage.util with the stage logic.
 
 // A buyer/admin read re-syncs a dispatched delivery from Pathao, but no more
 // often than this — repeated polling of the payment-status endpoint must not
@@ -54,8 +51,12 @@ export class ProductDeliveriesService {
     private readonly paymentRepo: Repository<ProductPayment>,
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     private readonly pathaoClientService: PathaoClientService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
   ) {}
 
   // ─── Creation (event-driven, exactly once per successful sale) ────────────
@@ -265,6 +266,12 @@ export class ProductDeliveriesService {
         ...delivery.previousConsignmentIds,
         supersedes,
       ];
+      // Index-aligned with previousConsignmentIds — the fee below is about to
+      // be overwritten with the new order's (A57).
+      delivery.previousPathaoDeliveryFees = [
+        ...(delivery.previousPathaoDeliveryFees ?? []),
+        delivery.pathaoDeliveryFee,
+      ];
       delivery.cancelledAt = null;
     }
 
@@ -302,14 +309,16 @@ export class ProductDeliveriesService {
     delivery.orderStatus = info.orderStatusSlug || info.orderStatus;
     delivery.lastStatusCheckAt = new Date();
 
-    const status = delivery.orderStatus.toLowerCase();
-    const isDelivered = DELIVERED_STATUS_MARKERS.includes(status);
-    const isCancelled = status.includes(CANCELLED_STATUS_MARKER);
+    const { isDelivered, isCancelled } = classifyPathaoStatus(
+      delivery.orderStatus,
+    );
+    let newlyCancelled = false;
 
     if (isDelivered && !delivery.deliveredAt) {
       delivery.deliveredAt = new Date();
     } else if (isCancelled && !delivery.cancelledAt) {
       delivery.cancelledAt = new Date();
+      newlyCancelled = true;
       this.logger.warn(
         `refreshStatus: delivery ${delivery.id} (consignment ${delivery.consignmentId}) was cancelled at Pathao ("${delivery.orderStatus}")`,
       );
@@ -319,7 +328,56 @@ export class ProductDeliveriesService {
       );
     }
 
-    return this.deliveryRepo.save(delivery);
+    const saved = await this.deliveryRepo.save(delivery);
+    // After the save, so the cancellation is on record before anyone is told.
+    if (newlyCancelled) await this.notifyCancelled(saved);
+    return saved;
+  }
+
+  /**
+   * A cancelled courier order used to be silent (A57) — it only surfaced if an
+   * admin happened to open the CANCELLED tab. Tells the buyer (in-app) that we
+   * are rebooking it, and the support mailbox that someone has to. Best-effort:
+   * a failed notification is logged and never undoes the status change.
+   */
+  private async notifyCancelled(delivery: ProductDelivery): Promise<void> {
+    try {
+      const payment = await this.paymentRepo.findOne({
+        where: { id: delivery.productPaymentId },
+      });
+      if (!payment) return;
+      const [product, buyer] = await Promise.all([
+        this.productRepo.findOne({ where: { id: payment.productId } }),
+        this.userRepo.findOne({ where: { id: payment.winnerUserId } }),
+      ]);
+      const productTitle = product?.title ?? 'your item';
+
+      await this.notificationsService.createForUser({
+        userId: payment.winnerUserId,
+        type: NotificationType.DELIVERY_CANCELLED,
+        // productId per the other buyer notifications. The (userId, type,
+        // relatedId) unique index means a second cancellation of the same
+        // parcel after a redispatch does not notify the buyer again.
+        relatedId: payment.productId,
+        title: "Your courier order was cancelled — we're rebooking it",
+        message: `The courier cancelled the delivery order for "${productTitle}". We're booking a new one — you don't need to do anything.`,
+        data: { productId: payment.productId },
+      });
+
+      await this.mailService.sendDeliveryCancelledAdmin({
+        productTitle,
+        deliveryId: delivery.id,
+        // Non-null: only a dispatched delivery can be cancelled.
+        consignmentId: delivery.consignmentId!,
+        orderStatus: delivery.orderStatus ?? '',
+        buyerUsername: buyer?.username ?? null,
+      });
+    } catch (err: unknown) {
+      this.logger.error(
+        `notifyCancelled: failed to notify about cancelled delivery ${delivery.id}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   /**
@@ -400,7 +458,7 @@ export class ProductDeliveriesService {
     ) as Record<DeliveryStage, number>;
   }
 
-  /** The SQL twin of `stageOf` — keep the two in step. */
+  /** The SQL twin of `deliveryStageOf` — keep the two in step. */
   private whereStage(
     qb: SelectQueryBuilder<ProductDelivery>,
     stage: DeliveryStage,
@@ -450,18 +508,10 @@ export class ProductDeliveriesService {
     return this.toAdminView(delivery);
   }
 
-  private stageOf(d: ProductDelivery): DeliveryStage {
-    if (d.deliveredAt) return DeliveryStage.DELIVERED;
-    if (d.cancelledAt) return DeliveryStage.CANCELLED;
-    if (d.consignmentId) return DeliveryStage.IN_TRANSIT;
-    if (d.receivedAtWarehouseAt) return DeliveryStage.AT_WAREHOUSE;
-    return DeliveryStage.AWAITING_WAREHOUSE;
-  }
-
   private toBuyerView(d: ProductDelivery): BuyerDeliveryView {
     return {
       id: d.id,
-      stage: this.stageOf(d),
+      stage: deliveryStageOf(d),
       consignmentId: d.consignmentId,
       orderStatus: d.orderStatus,
       receivedAtWarehouseAt: d.receivedAtWarehouseAt?.toISOString() ?? null,
@@ -508,6 +558,9 @@ export class ProductDeliveriesService {
       pathaoDeliveryFee:
         d.pathaoDeliveryFee === null ? null : Number(d.pathaoDeliveryFee),
       previousConsignmentIds: d.previousConsignmentIds ?? [],
+      previousPathaoDeliveryFees: (d.previousPathaoDeliveryFees ?? []).map(
+        (fee) => (fee === null ? null : Number(fee)),
+      ),
       createdAt: d.createdAt.toISOString(),
     };
   }

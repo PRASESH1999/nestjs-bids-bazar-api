@@ -157,4 +157,18 @@ export class ProductDelivery extends BaseEntity {
   // its place — and keeping them is the audit trail of what was cancelled.
   @Column({ type: 'text', array: true, default: () => "'{}'" })
   previousConsignmentIds: string[];
+
+  // Pathao's fee for each superseded consignment, index-aligned with
+  // `previousConsignmentIds` (null where Pathao never quoted one). A redispatch
+  // overwrites `pathaoDeliveryFee` with the new order's, so without this the
+  // cancelled order's charge vanished from the record (A57). Decimal arrays
+  // arrive from the driver as strings — coerce on read.
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    array: true,
+    default: () => "'{}'",
+  })
+  previousPathaoDeliveryFees: (number | null)[];
 }

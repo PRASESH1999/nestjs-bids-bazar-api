@@ -1135,7 +1135,7 @@ export class ProductsService {
     userId: string,
     productId: string,
     isAdmin: boolean,
-  ): Promise<ProductResponse> {
+  ): Promise<ProductResponse & { totalBids: number }> {
     const product = await this.productsRepository.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
 
@@ -1143,14 +1143,23 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    const { favoritedSet, sellerSummaries, boostedUntil } =
-      await this.responseContextFor(userId, [product]);
-    return mapProduct(
-      product,
-      favoritedSet.has(product.id),
-      sellerSummaries.get(product.ownerId) ?? null,
-      boostedUntil.get(product.id) ?? null,
-    );
+    // `totalBids` is the same count adminUpdateProduct checks before allowing a
+    // price/duration change, so the edit form can lock those fields exactly
+    // rather than guessing from currentHighestBid (OPEN-ITEMS A58).
+    const [{ favoritedSet, sellerSummaries, boostedUntil }, { totalBids }] =
+      await Promise.all([
+        this.responseContextFor(userId, [product]),
+        this.biddingService.getBidCountsForProduct(productId),
+      ]);
+    return {
+      ...mapProduct(
+        product,
+        favoritedSet.has(product.id),
+        sellerSummaries.get(product.ownerId) ?? null,
+        boostedUntil.get(product.id) ?? null,
+      ),
+      totalBids,
+    };
   }
 
   // ─── Admin moderation ─────────────────────────────────────────────────────

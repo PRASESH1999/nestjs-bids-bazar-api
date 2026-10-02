@@ -13,4 +13,9 @@ export class BidListItemAdminDto {
   isOriginalWinner: boolean;
   fallbackRank: number;
   isCurrentlyPaymentResponsible: boolean;
+  /**
+   * An Instant Buy payment hold rather than a bid placed in the auction. The
+   * public bid views leave these out until they pay (A53); admins see them.
+   */
+  isInstantBuy: boolean;
 }

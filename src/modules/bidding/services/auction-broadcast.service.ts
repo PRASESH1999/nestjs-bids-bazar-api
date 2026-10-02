@@ -5,6 +5,7 @@ import type { MessageEvent } from '@nestjs/common';
 import { Product } from '@modules/products/entities/product.entity';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { Bid } from '../entities/bid.entity';
+import { PUBLIC_BID_CONDITION } from '../bid-visibility';
 import { BiddingService, type PublicBidRange } from './bidding.service';
 
 export interface RecentBidItem {
@@ -181,17 +182,20 @@ export class AuctionBroadcastService {
    * same bidder are expected — this is a chronological feed, not a leaderboard.
    *
    * Bidder identity is the public-facing User.username — name is private and
-   * never exposed to other users.
+   * never exposed to other users. An unpaid Instant Buy hold bid is left out
+   * — see PUBLIC_BID_CONDITION.
    */
   private async fetchRecentBids(productId: string): Promise<RecentBidItem[]> {
     const rows = await this.dataSource
       .getRepository(Bid)
       .createQueryBuilder('bid')
       .innerJoin('bid.bidder', 'bidder')
+      .innerJoin('bid.product', 'product')
       .select('bidder.username', 'username')
       .addSelect('bid.amount', 'amount')
       .addSelect('bid.placedAt', 'placedAt')
       .where('bid.productId = :productId', { productId })
+      .andWhere(PUBLIC_BID_CONDITION)
       .orderBy('bid.placedAt', 'DESC')
       .limit(5)
       .getRawMany<{ username: string; amount: string; placedAt: Date }>();
