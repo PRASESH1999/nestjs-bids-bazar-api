@@ -85,6 +85,7 @@ describe('FavoritesService', () => {
     service = new FavoritesService(
       mockFavoritesRepository as unknown as FavoritesRepository,
       mockUsersService as never,
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never,
     );
   });
 

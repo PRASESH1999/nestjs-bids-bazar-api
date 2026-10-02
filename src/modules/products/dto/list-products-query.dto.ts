@@ -9,6 +9,8 @@ import {
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemCondition } from '@common/enums/item-condition.enum';
+import { ProductScope } from '@common/enums/product-scope.enum';
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
 import { PaginationDto } from '@common/dto/pagination.dto';
 
 export enum ProductSortBy {
@@ -23,6 +25,36 @@ export enum ProductSortOrder {
 }
 
 export class ListProductsQueryDto extends PaginationDto {
+  /*
+   * Whose listings to show.
+   *
+   * Public, and safe to be: the status filter below is not a caller's to set,
+   * so this can only ever return the seller's *publicly visible* rows. Without
+   * it there was no way to ask "what is this seller selling" at all — only
+   * /admin/products could filter by owner — which is most of what a seller
+   * profile page is. See OPEN-ITEMS A33.
+   */
+  @ApiPropertyOptional({
+    description: "Only this seller's listings. Public statuses only.",
+  })
+  // Shape-checked, not `@IsUUID()` — see IsUuidShape and OPEN-ITEMS A36.
+  @IsUuidShape()
+  @IsOptional()
+  sellerId?: string;
+
+  /*
+   * Which slice of the public statuses. Deliberately not a `status` filter —
+   * see the ProductScope enum for why that distinction is load-bearing.
+   */
+  @ApiPropertyOptional({
+    enum: ProductScope,
+    description:
+      '`live` → open for bidding (ACTIVE + AWAITING_FIRST_BID). `sold` → SETTLED. Omitted → every publicly visible status.',
+  })
+  @IsEnum(ProductScope)
+  @IsOptional()
+  scope?: ProductScope;
+
   @ApiPropertyOptional()
   @IsUUID()
   @IsOptional()

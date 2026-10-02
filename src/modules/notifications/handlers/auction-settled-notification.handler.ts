@@ -35,8 +35,9 @@ export class AuctionSettledNotificationHandler {
         userId: payload.sellerId,
         type: NotificationType.PAYMENT_CONFIRMED_SELLER,
         relatedId: payload.winningBidId,
-        title: 'Payment confirmed',
-        message: `Payment of ${payload.amount} for "${payload.productTitle}" has been confirmed. The sale is settled.`,
+        title: 'Sold — hand the item in at the warehouse',
+        // No warehouse address yet (OPEN-ITEMS A44) — "the warehouse" until one exists.
+        message: `Payment of ${payload.amount} for "${payload.productTitle}" has been confirmed. Please bring the item to the Bids Bazar warehouse so we can ship it to the buyer. Your payout follows once it is handed in.`,
         data: { productId: payload.productId, amount: payload.amount },
       });
 
@@ -45,7 +46,7 @@ export class AuctionSettledNotificationHandler {
         type: NotificationType.PAYMENT_CONFIRMED_BUYER,
         relatedId: payload.winningBidId,
         title: 'Payment confirmed',
-        message: `Your payment of ${payload.buyerTotalAmount} for "${payload.productTitle}" is confirmed. Your purchase is complete.`,
+        message: `Your payment of ${payload.buyerTotalAmount} for "${payload.productTitle}" is confirmed, delivery included. We will ship it to you with Pathao once the seller hands it in at our warehouse.`,
         data: {
           productId: payload.productId,
           amount: payload.buyerTotalAmount,

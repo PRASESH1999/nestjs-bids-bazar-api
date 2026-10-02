@@ -8,6 +8,8 @@ import { MailService } from '@modules/mail/mail.service';
 import { NotificationsService } from '@modules/notifications/notifications.service';
 import { Bid } from '../entities/bid.entity';
 import { ProductSettlement } from '../entities/product-settlement.entity';
+import { ShippingService } from '@modules/shipping/shipping.service';
+import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
 
 // Same fluent-stub approach as bidding.service.spec.ts — every chain method
@@ -113,6 +115,10 @@ function buildService(product: Product, highestBid: Bid | null) {
     mailService,
     eventEmitter,
     notificationsService,
+    // Only confirmPaymentManual / getWinnerAddresses touch these; the
+    // lifecycle transitions under test never do.
+    {} as unknown as ShippingService,
+    {} as unknown as PathaoClientService,
   );
 
   return { service, qr, productRepo, bidRepo, settlementRepo };

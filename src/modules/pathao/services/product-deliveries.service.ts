@@ -7,8 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OnEvent } from '@nestjs/event-emitter';
-import { IsNull, Not, Repository } from 'typeorm';
-import { PaginatedResult } from '@common/types/paginated-result.type';
+import { IsNull, Not, Repository, SelectQueryBuilder } from 'typeorm';
 import { EventNames } from '@common/events/event-names';
 import type { PaymentSucceededPayload } from '@common/events/event-payloads.type';
 import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
@@ -17,6 +16,14 @@ import { Product } from '@modules/products/entities/product.entity';
 import { ProductDelivery } from '../entities/product-delivery.entity';
 import { PathaoClientService } from './pathao-client.service';
 import type { DispatchDeliveryDto } from '../dto/pathao.dto';
+import {
+  DeliveryStage,
+  type AdminDeliveryListDto,
+  type AdminDeliveryView,
+  type BuyerDeliveryView,
+  type DeliveryQuoteDto,
+  type ListDeliveriesQueryDto,
+} from '../dto/delivery-view.dto';
 
 // Pathao's own status vocabulary isn't confirmed from the sandbox docs we
 // have — matched case-insensitively, and anything unrecognized is logged
@@ -108,8 +115,26 @@ export class ProductDeliveriesService {
     return this.deliveryRepo.findOne({ where: { productPaymentId } });
   }
 
-  async getOne(id: string): Promise<ProductDelivery> {
-    return this.findOneOrThrow(id);
+  async getOne(id: string): Promise<AdminDeliveryView> {
+    return this.toAdminViewById(id);
+  }
+
+  /** The buyer's view of the parcel for a payment, or null before it exists. */
+  async findBuyerViewByPaymentId(
+    productPaymentId: string,
+  ): Promise<BuyerDeliveryView | null> {
+    const delivery = await this.findByPaymentId(productPaymentId);
+    return delivery ? this.toBuyerView(delivery) : null;
+  }
+
+  quote(): DeliveryQuoteDto {
+    return {
+      deliveryCharge: Number(
+        this.configService.getOrThrow<number>('DELIVERY_CHARGE_FLAT'),
+      ),
+      currency: 'NPR',
+      serviceableCityIds: this.pathaoClientService.serviceableCityIds(),
+    };
   }
 
   private async findOneOrThrow(id: string): Promise<ProductDelivery> {
@@ -123,23 +148,25 @@ export class ProductDeliveriesService {
   async markReceivedAtWarehouse(
     id: string,
     adminId: string,
-  ): Promise<ProductDelivery> {
+  ): Promise<AdminDeliveryView> {
     const delivery = await this.findOneOrThrow(id);
-    if (delivery.receivedAtWarehouseAt) return delivery; // idempotent
-
-    delivery.receivedAtWarehouseAt = new Date();
-    delivery.receivedAtWarehouseById = adminId;
-    return this.deliveryRepo.save(delivery);
+    if (!delivery.receivedAtWarehouseAt) {
+      delivery.receivedAtWarehouseAt = new Date();
+      delivery.receivedAtWarehouseById = adminId;
+      await this.deliveryRepo.save(delivery);
+    }
+    return this.toAdminViewById(id);
   }
 
   async dispatch(
     id: string,
     adminId: string,
     dto: DispatchDeliveryDto,
-  ): Promise<ProductDelivery> {
+  ): Promise<AdminDeliveryView> {
     const delivery = await this.findOneOrThrow(id);
 
-    if (delivery.consignmentId) return delivery; // idempotent — already dispatched
+    // Idempotent — already dispatched.
+    if (delivery.consignmentId) return this.toAdminViewById(id);
 
     if (!delivery.receivedAtWarehouseAt) {
       throw new BadRequestException(
@@ -182,23 +209,26 @@ export class ProductDeliveriesService {
     delivery.dispatchedAt = new Date();
     delivery.dispatchedById = adminId;
 
-    return this.deliveryRepo.save(delivery);
+    await this.deliveryRepo.save(delivery);
+    return this.toAdminViewById(id);
   }
 
-  async syncStatus(id: string): Promise<ProductDelivery> {
+  async syncStatus(id: string): Promise<AdminDeliveryView> {
     const delivery = await this.findOneOrThrow(id);
     if (!delivery.consignmentId) {
       throw new BadRequestException(
         'This delivery has not been dispatched yet',
       );
     }
-    return this.refreshStatus(delivery);
+    await this.refreshStatus(delivery);
+    return this.toAdminViewById(id);
   }
 
   /** Shared by syncStatus (manual) and the cron sweep (automatic). */
   async refreshStatus(delivery: ProductDelivery): Promise<ProductDelivery> {
+    if (!delivery.consignmentId) return delivery;
     const info = await this.pathaoClientService.getOrderInfo(
-      delivery.consignmentId!,
+      delivery.consignmentId,
     );
 
     delivery.orderStatus = info.orderStatusSlug || info.orderStatus;
@@ -226,16 +256,146 @@ export class ProductDeliveriesService {
 
   // ─── Admin: listing ─────────────────────────────────────────────────────
 
-  async listAll(
-    page = 1,
-    limit = 20,
-  ): Promise<PaginatedResult<ProductDelivery>> {
-    const [data, total] = await this.deliveryRepo.findAndCount({
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-    return { data, meta: { page, limit, total } };
+  async listAll(query: ListDeliveriesQueryDto): Promise<AdminDeliveryListDto> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const qb = this.adminQuery().orderBy('delivery.createdAt', 'DESC');
+    if (query.stage) this.whereStage(qb, query.stage);
+
+    const [rows, total, counts] = await Promise.all([
+      qb
+        .clone()
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getMany(),
+      qb.clone().getCount(),
+      this.stageCounts(),
+    ]);
+
+    return {
+      data: rows.map((d) => this.toAdminView(d)),
+      meta: { page, limit, total },
+      counts,
+    };
+  }
+
+  private async stageCounts(): Promise<Record<DeliveryStage, number>> {
+    const stages = Object.values(DeliveryStage);
+    const totals = await Promise.all(
+      stages.map((stage) => {
+        const qb = this.deliveryRepo.createQueryBuilder('delivery');
+        this.whereStage(qb, stage);
+        return qb.getCount();
+      }),
+    );
+    return Object.fromEntries(
+      stages.map((stage, i) => [stage, totals[i]]),
+    ) as Record<DeliveryStage, number>;
+  }
+
+  /** The SQL twin of `stageOf` — keep the two in step. */
+  private whereStage(
+    qb: SelectQueryBuilder<ProductDelivery>,
+    stage: DeliveryStage,
+  ): void {
+    switch (stage) {
+      case DeliveryStage.AWAITING_WAREHOUSE:
+        qb.andWhere('delivery.receivedAtWarehouseAt IS NULL');
+        break;
+      case DeliveryStage.AT_WAREHOUSE:
+        qb.andWhere('delivery.receivedAtWarehouseAt IS NOT NULL').andWhere(
+          'delivery.consignmentId IS NULL',
+        );
+        break;
+      case DeliveryStage.IN_TRANSIT:
+        qb.andWhere('delivery.consignmentId IS NOT NULL').andWhere(
+          'delivery.deliveredAt IS NULL',
+        );
+        break;
+      case DeliveryStage.DELIVERED:
+        qb.andWhere('delivery.deliveredAt IS NOT NULL');
+        break;
+    }
+  }
+
+  // ─── Views ──────────────────────────────────────────────────────────────
+
+  private adminQuery(): SelectQueryBuilder<ProductDelivery> {
+    return this.deliveryRepo
+      .createQueryBuilder('delivery')
+      .leftJoinAndSelect('delivery.productPayment', 'payment')
+      .leftJoin('payment.product', 'product')
+      .addSelect(['product.id', 'product.title'])
+      .leftJoin('payment.winner', 'buyer')
+      .addSelect(['buyer.id', 'buyer.username', 'buyer.email']);
+  }
+
+  private async toAdminViewById(id: string): Promise<AdminDeliveryView> {
+    const delivery = await this.adminQuery()
+      .where('delivery.id = :id', { id })
+      .getOne();
+    if (!delivery) throw new NotFoundException('Delivery not found');
+    return this.toAdminView(delivery);
+  }
+
+  private stageOf(d: ProductDelivery): DeliveryStage {
+    if (d.deliveredAt) return DeliveryStage.DELIVERED;
+    if (d.consignmentId) return DeliveryStage.IN_TRANSIT;
+    if (d.receivedAtWarehouseAt) return DeliveryStage.AT_WAREHOUSE;
+    return DeliveryStage.AWAITING_WAREHOUSE;
+  }
+
+  private toBuyerView(d: ProductDelivery): BuyerDeliveryView {
+    return {
+      id: d.id,
+      stage: this.stageOf(d),
+      consignmentId: d.consignmentId,
+      orderStatus: d.orderStatus,
+      receivedAtWarehouseAt: d.receivedAtWarehouseAt?.toISOString() ?? null,
+      dispatchedAt: d.dispatchedAt?.toISOString() ?? null,
+      deliveredAt: d.deliveredAt?.toISOString() ?? null,
+      lastStatusCheckAt: d.lastStatusCheckAt?.toISOString() ?? null,
+    };
+  }
+
+  // Decimal columns arrive from the driver as strings — every money/weight
+  // field is coerced here so clients never see "120.00".
+  private toAdminView(d: ProductDelivery): AdminDeliveryView {
+    const payment = d.productPayment ?? null;
+    const product = payment?.product ?? null;
+    const buyer = payment?.winner ?? null;
+    return {
+      ...this.toBuyerView(d),
+      productPaymentId: d.productPaymentId,
+      product: product ? { id: product.id, title: product.title } : null,
+      buyer: buyer
+        ? { id: buyer.id, username: buyer.username, email: buyer.email }
+        : null,
+      referenceLabel: payment?.referenceLabel ?? null,
+      itemAmount: payment ? Number(payment.amount) : null,
+      deliveryCharge: Number(d.deliveryCharge),
+      recipientName: d.recipientName,
+      recipientPhone: d.recipientPhone,
+      province: d.province,
+      district: d.district,
+      city: d.city,
+      street: d.street,
+      wardNumber: d.wardNumber,
+      landmark: d.landmark,
+      pathaoCityId: d.pathaoCityId,
+      pathaoCityName: d.pathaoCityName,
+      pathaoZoneId: d.pathaoZoneId,
+      pathaoZoneName: d.pathaoZoneName,
+      pathaoAreaId: d.pathaoAreaId,
+      pathaoAreaName: d.pathaoAreaName,
+      storeId: d.storeId,
+      itemWeightKg: d.itemWeightKg === null ? null : Number(d.itemWeightKg),
+      itemDescription: d.itemDescription,
+      pathaoDeliveryFee:
+        d.pathaoDeliveryFee === null ? null : Number(d.pathaoDeliveryFee),
+      createdAt: d.createdAt.toISOString(),
+    };
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

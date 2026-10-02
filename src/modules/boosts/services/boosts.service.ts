@@ -323,6 +323,41 @@ export class BoostsService {
     return { ids: rows.map((row) => row.productId), total };
   }
 
+  /**
+   * When each of these products' running boost ends, for the ones that have one.
+   *
+   * One query for a whole page of products — the same batching FavoritesService
+   * uses for `isFavorited` — so a list response never costs a lookup per row.
+   * A product absent from the map is not boosted.
+   *
+   * "Running" means ACTIVE *and* not yet past its end. The cron that flips an
+   * elapsed boost to EXPIRED runs on an interval, so between its ticks an
+   * ACTIVE row can already be over; checking the end time here keeps a card
+   * from advertising a boost that has run out.
+   */
+  async boostedUntilFor(productIds: string[]): Promise<Map<string, Date>> {
+    if (productIds.length === 0) return new Map();
+
+    const rows = await this.boostItemRepo
+      .createQueryBuilder('boostItem')
+      .select(['boostItem.productId', 'boostItem.endDateTime'])
+      .where('boostItem.productId IN (:...productIds)', { productIds })
+      .andWhere('boostItem.status = :status', {
+        status: BoostItemStatus.ACTIVE,
+      })
+      .andWhere('boostItem.endDateTime > now()')
+      .getMany();
+
+    return new Map(
+      rows
+        .filter(
+          (row): row is BoostItem & { endDateTime: Date } =>
+            row.endDateTime !== null,
+        )
+        .map((row) => [row.productId, row.endDateTime]),
+    );
+  }
+
   // ─── Admin: boost records ──────────────────────────────────────────────────
 
   async listAllBoostItems(

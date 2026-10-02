@@ -28,6 +28,8 @@ import type {
   PendingEmailChangeSummary,
   RewardsSummary,
 } from './interfaces/own-profile.interface';
+import type { SellerProfileResponse } from './interfaces/seller-profile.interface';
+import { SellerRating } from '@modules/ratings/entities/seller-rating.entity';
 import { KycStatus } from '@common/enums/kyc-status.enum';
 import { formatGeneratedUsername } from './username-generator';
 
@@ -255,6 +257,90 @@ export class UsersService {
    * Return the rich own-profile for the authenticated user, including a KYC
    * summary (if submitted) and any pending email-change request.
    */
+  /**
+   * A seller's public profile — the read behind `GET /sellers/:id`.
+   *
+   * Public, so the shape is an allowlist rather than an entity: this returns a
+   * hand-built object and never a `User`, because the difference between the
+   * two is an email address and a phone number. `SellerProfileResponse` says
+   * what is on it and what must never join it.
+   *
+   * A soft-deleted account is treated as absent. `findById` already scopes to
+   * live rows, and a profile page for a deleted seller would be a page about
+   * somebody who asked to be gone.
+   */
+  async getSellerProfile(sellerId: string): Promise<SellerProfileResponse> {
+    const user = await this.findById(sellerId);
+    if (!user) throw new NotFoundException('Seller not found');
+
+    const [counts, kyc, rewards, breakdown] = await Promise.all([
+      this.usersRepository.countListingsAndSalesBySeller([sellerId]),
+      this.dataSource
+        .getRepository(KycVerification)
+        .findOne({ where: { userId: sellerId } }),
+      this.rewardsService.getOwnRewards(sellerId),
+      this.countRatingsByStar(sellerId),
+    ]);
+
+    const sellerCounts = counts.get(sellerId) ?? {
+      totalListings: 0,
+      totalSold: 0,
+    };
+
+    return {
+      id: user.id,
+      username: user.username,
+      /*
+       * `averageRating` is a decimal column, so pg hands it back as a string.
+       * Sending it on as one would make every client decide whether "0.00"
+       * means unrated, so it is a number here and `ratingCount` is what says
+       * whether it means anything.
+       */
+      averageRating: Number(user.averageRating),
+      ratingCount: user.ratingCount,
+      totalListings: sellerCounts.totalListings,
+      totalSold: sellerCounts.totalSold,
+      createdAt: user.createdAt,
+      // The badge, and nothing behind it. A pending or rejected submission is
+      // not a verified identity, so only APPROVED counts.
+      isIdentityVerified: kyc?.status === KycStatus.APPROVED,
+      // No rewards row yet = BRONZE, not an error (Rule 16).
+      sellerTier: rewards?.sellerTier ?? SellerTier.BRONZE,
+      ratingBreakdown: breakdown,
+    };
+  }
+
+  /**
+   * How many of a seller's ratings gave each star.
+   *
+   * Every bucket is present even at zero, so a client can render five bars
+   * without deciding what a missing key means.
+   */
+  private async countRatingsByStar(
+    sellerId: string,
+  ): Promise<Record<string, number>> {
+    const rows = await this.dataSource
+      .getRepository(SellerRating)
+      .createQueryBuilder('rating')
+      .select('rating.rating', 'star')
+      .addSelect('COUNT(*)', 'count')
+      .where('rating.sellerId = :sellerId', { sellerId })
+      .groupBy('rating.rating')
+      .getRawMany<{ star: number; count: string }>();
+
+    const breakdown: Record<string, number> = {
+      '1': 0,
+      '2': 0,
+      '3': 0,
+      '4': 0,
+      '5': 0,
+    };
+    for (const row of rows) {
+      breakdown[String(row.star)] = Number(row.count);
+    }
+    return breakdown;
+  }
+
   async getOwnProfile(userId: string): Promise<OwnProfileResponse> {
     const user = await this.findById(userId);
     if (!user) throw new NotFoundException('User not found');

@@ -34,7 +34,7 @@ const hash = (code: string) =>
   crypto.createHash('sha256').update(code).digest('hex');
 
 describe('PhoneVerificationService', () => {
-  let repo: { findOne: jest.Mock; save: jest.Mock };
+  let repo: { findOne: jest.Mock; save: jest.Mock<Promise<User>, [User]> };
   let sms: { sendSms: jest.Mock };
   let service: PhoneVerificationService;
 
@@ -79,7 +79,7 @@ describe('PhoneVerificationService', () => {
 
       await service.sendOtp('user-1', { phone: '+9779800000009' });
 
-      const saved = repo.save.mock.calls[0][0] as User;
+      const saved = repo.save.mock.calls[0][0];
       // The verified number survives an unconfirmed change request — losing it
       // here would mean a mistyped number cost you the one you already had.
       expect(saved.phone).toBe('+9779800000001');
@@ -131,7 +131,7 @@ describe('PhoneVerificationService', () => {
       await expect(
         service.verifyOtp('user-1', { code: '000000' }),
       ).rejects.toThrow(BadRequestException);
-      expect((repo.save.mock.calls[0][0] as User).phoneOtpAttempts).toBe(1);
+      expect(repo.save.mock.calls[0][0].phoneOtpAttempts).toBe(1);
     });
 
     it('refuses once the attempt limit is spent', async () => {
@@ -146,7 +146,7 @@ describe('PhoneVerificationService', () => {
 
       const status = await service.verifyOtp('user-1', { code: '123456' });
 
-      const saved = repo.save.mock.calls[0][0] as User;
+      const saved = repo.save.mock.calls[0][0];
       expect(saved.phone).toBe('+9779800000002');
       expect(saved.phoneVerifiedAt).toEqual(expect.any(Date));
       expect(saved.pendingPhone).toBeNull();
@@ -165,7 +165,7 @@ describe('PhoneVerificationService', () => {
       await expect(
         service.verifyOtp('user-1', { code: '123456' }),
       ).rejects.toThrow(ConflictException);
-      expect((repo.save.mock.calls[0][0] as User).phone).toBeNull();
+      expect(repo.save.mock.calls[0][0].phone).toBeNull();
     });
   });
 });

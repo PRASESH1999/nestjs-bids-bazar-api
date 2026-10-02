@@ -112,5 +112,4 @@ export class KycVerification extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   reviewedAt: Date | null;
-
 }

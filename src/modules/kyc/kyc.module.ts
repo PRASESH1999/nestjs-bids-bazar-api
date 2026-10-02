@@ -13,7 +13,7 @@ import { UsersModule } from '../users/users.module';
     TypeOrmModule.forFeature([KycVerification, BankDetail]),
     CommonModule,
     UsersModule,
-      ],
+  ],
   controllers: [KycController],
   providers: [KycService, KycRepository],
   exports: [KycService],

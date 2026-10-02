@@ -512,6 +512,13 @@ export class KycService {
             accountNumber: this.maskAccountNumber(
               this.encryptionService.decrypt(bank.accountNumber),
             ),
+            // Not secrets — they identify the branch, not the account — and a
+            // reviewer checks them against the bank. Only the account number
+            // stays masked here; GET /kyc/:id/bank is the decrypted view.
+            branch: this.encryptionService.decrypt(bank.branch),
+            swiftCode: bank.swiftCode
+              ? this.encryptionService.decrypt(bank.swiftCode)
+              : null,
           }
         : null,
       citizenshipFrontUrl: kyc.citizenshipFrontPath

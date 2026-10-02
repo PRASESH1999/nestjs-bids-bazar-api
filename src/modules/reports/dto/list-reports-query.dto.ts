@@ -1,4 +1,5 @@
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
+import { IsEnum, IsOptional } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationDto } from '@common/dto/pagination.dto';
 import { ReportStatus } from '@common/enums/report-status.enum';
@@ -10,7 +11,8 @@ export class ListReportsQueryDto extends PaginationDto {
   status?: ReportStatus;
 
   @ApiPropertyOptional({ description: 'Filter by the reported seller' })
-  @IsUUID()
+  // A user id — shape-checked; see IsUuidShape and OPEN-ITEMS A36.
+  @IsUuidShape()
   @IsOptional()
   reportedUserId?: string;
 }

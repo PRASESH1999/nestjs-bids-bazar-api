@@ -59,6 +59,34 @@ export class BoostsController {
     );
   }
 
+  /*
+   * The seller's own boost history, every status.
+   *
+   * `GET /boosts/:productId/status` only ever answers "the latest boost on this
+   * one lot", so there was no way for a seller to see what they had bought or
+   * spent across their listings. This is the admin list with the seller forced
+   * to the caller — the same filters and sort, and no way to aim it at anyone
+   * else's boosts, because `sellerId` is overwritten rather than trusted.
+   *
+   * Declared before `boosts/:productId/status`. The segment counts differ so
+   * there is no ambiguity today, but keeping static routes above parameterised
+   * ones means a later `boosts/:productId` cannot swallow "me".
+   */
+  @Get('boosts/me')
+  @RequirePermissions(Permission.BOOST_MANAGE_OWN)
+  @ApiOperation({
+    summary: "List the calling seller's boosts (all statuses, paginated)",
+  })
+  async listMyBoosts(
+    @Query() query: ListBoostItemsAdminQueryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.boostsService.listAllBoostItems({
+      ...query,
+      sellerId: req.user.sub,
+    });
+  }
+
   @Get('boosts/:productId/status')
   @RequirePermissions(Permission.BOOST_MANAGE_OWN)
   @ApiOperation({

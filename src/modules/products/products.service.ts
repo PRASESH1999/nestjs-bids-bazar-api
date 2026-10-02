@@ -4,6 +4,7 @@ import {
   PUBLICLY_VISIBLE_STATUSES,
   ProductStatus,
 } from '@common/enums/product-status.enum';
+import { ProductScope } from '@common/enums/product-scope.enum';
 import {
   roundDownToMultipleOf5,
   roundUpToMultipleOf5,
@@ -76,10 +77,37 @@ export type ProductDetailResponse = Omit<ProductResponse, 'winningBidId'> & {
 
 const AUCTION_ACTIVE_STATUSES: ProductStatus[] = [
   ProductStatus.ACTIVE,
+  ProductStatus.AWAITING_INSTANT_BUY,
   ProductStatus.AWAITING_PAYMENT,
   ProductStatus.SETTLED,
   ProductStatus.ABANDONED,
 ];
+
+/**
+ * The statuses a public `scope` stands for.
+ *
+ * Kept as a function beside the service rather than on the enum so the mapping
+ * is checked against `ProductStatus` by the compiler, and so adding a scope
+ * forces a decision here rather than defaulting to "everything public".
+ *
+ * Each arm is a subset of PUBLICLY_VISIBLE_STATUSES. That invariant is the
+ * whole safety argument for exposing `scope` on an unauthenticated endpoint,
+ * so a new arm must keep it.
+ */
+function statusesForScope(scope?: ProductScope): ProductStatus[] {
+  switch (scope) {
+    case ProductScope.LIVE:
+      return [
+        ProductStatus.AWAITING_FIRST_BID,
+        ProductStatus.ACTIVE,
+        ProductStatus.AWAITING_INSTANT_BUY,
+      ];
+    case ProductScope.SOLD:
+      return [ProductStatus.SETTLED];
+    default:
+      return PUBLICLY_VISIBLE_STATUSES;
+  }
+}
 
 @Injectable()
 export class ProductsService {
@@ -199,14 +227,13 @@ export class ProductsService {
     const createdProduct = (await this.productsRepository.findById(
       savedProduct.id,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [createdProduct],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [createdProduct]);
     return mapProduct(
       createdProduct,
       favoritedSet.has(createdProduct.id),
       sellerSummaries.get(createdProduct.ownerId) ?? null,
+      boostedUntil.get(createdProduct.id) ?? null,
     );
   }
 
@@ -317,14 +344,13 @@ export class ProductsService {
     const updatedProduct = (await this.productsRepository.findById(
       productId,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [updatedProduct],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [updatedProduct]);
     return mapProduct(
       updatedProduct,
       favoritedSet.has(updatedProduct.id),
       sellerSummaries.get(updatedProduct.ownerId) ?? null,
+      boostedUntil.get(updatedProduct.id) ?? null,
     );
   }
 
@@ -363,14 +389,13 @@ export class ProductsService {
       );
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [saved],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [saved]);
     return mapProduct(
       saved,
       favoritedSet.has(saved.id),
       sellerSummaries.get(saved.ownerId) ?? null,
+      boostedUntil.get(saved.id) ?? null,
     );
   }
 
@@ -424,29 +449,87 @@ export class ProductsService {
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
-    const { page = 1, limit = 20, ...filters } = query;
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      sellerId: _,
+      scope,
+      ...filters
+    } = query;
     const [data, total] = await this.productsRepository.findPaginated(
       page,
       limit,
       {
         ...filters,
         ownerId: userId,
+        /*
+         * `status` is a list here, unlike on the public endpoint — the scope is
+         * already this caller's own rows, so every status is theirs to ask for.
+         * `sellerId` is dropped rather than honoured: it is inherited from the
+         * public DTO and would otherwise let a seller aim this at somebody
+         * else's listings, which `ownerId` below is what decides.
+         */
+        statuses: status,
+        // `scope` is the public shorthand and is redundant next to `status`,
+        // but honouring it keeps one query string working against both lists.
+        ...(status === undefined && scope !== undefined
+          ? { statuses: statusesForScope(scope) }
+          : {}),
       },
     );
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      data,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, data);
     return {
       data: data.map((p) =>
         mapProduct(
           p,
           favoritedSet.has(p.id),
           sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
         ),
       ),
       meta: { page, limit, total },
     };
+  }
+
+  /**
+   * How many of the caller's listings sit in each status — `GET /products/me/counts`.
+   *
+   * Exists because a tabbed My Listings needs ten numbers to label ten tabs,
+   * and the only way to get them was ten `limit=1` requests reading `meta.total`
+   * off each. One query, and the same filters as the list itself so a badge can
+   * never contradict the table under it. See OPEN-ITEMS A31.
+   */
+  async countMyProductsByStatus(
+    userId: string,
+    query: ListMyProductsQueryDto,
+  ): Promise<{ counts: Record<string, number>; total: number }> {
+    const {
+      page: _p,
+      limit: _l,
+      status: _s,
+      sellerId: _sid,
+      scope: _sc,
+      ...filters
+    } = query;
+
+    const found = await this.productsRepository.countByStatusForOwner({
+      ...filters,
+      ownerId: userId,
+    });
+
+    // Every status present, including the empty ones: a client rendering a tab
+    // per status should not have to treat "absent" and "zero" as the same.
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const status of Object.values(ProductStatus)) {
+      const count = found.get(status) ?? 0;
+      counts[status] = count;
+      total += count;
+    }
+
+    return { counts, total };
   }
 
   // ─── Public views ─────────────────────────────────────────────────────────
@@ -458,25 +541,30 @@ export class ProductsService {
     data: ProductResponse[];
     meta: { page: number; limit: number; total: number };
   }> {
-    const { page = 1, limit = 20, ...filters } = query;
+    const { page = 1, limit = 20, sellerId, scope, ...filters } = query;
     const [data, total] = await this.productsRepository.findPaginated(
       page,
       limit,
       {
         ...filters,
-        statuses: PUBLICLY_VISIBLE_STATUSES,
+        ownerId: sellerId,
+        /*
+         * The scope narrows the public set; it never widens it. Every value it
+         * can take is a subset of PUBLICLY_VISIBLE_STATUSES, which is what
+         * makes it safe to expose on an endpoint anyone may call.
+         */
+        statuses: statusesForScope(scope),
       },
     );
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      data,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, data);
     return {
       data: data.map((p) =>
         mapProduct(
           p,
           favoritedSet.has(p.id),
           sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
         ),
       ),
       meta: { page, limit, total },
@@ -528,7 +616,7 @@ export class ProductsService {
       bidCounts,
       winningBidder,
       similarProducts,
-      { favoritedSet, sellerSummaries },
+      { favoritedSet, sellerSummaries, boostedUntil },
     ] = await Promise.all([
       this.biddingService.getTopBiddersForProduct(id),
       this.biddingService.getBidCountsForProduct(id),
@@ -542,6 +630,7 @@ export class ProductsService {
       product,
       favoritedSet.has(product.id),
       sellerSummaries.get(product.ownerId) ?? null,
+      boostedUntil.get(product.id) ?? null,
     );
 
     return {
@@ -564,15 +653,14 @@ export class ProductsService {
   ): Promise<HomeProductResponse | null> {
     const result = await this.productsRepository.findHotProduct();
     if (!result) return null;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      [result.product],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, [result.product]);
     return {
       ...mapProduct(
         result.product,
         favoritedSet.has(result.product.id),
         sellerSummaries.get(result.product.ownerId) ?? null,
+        boostedUntil.get(result.product.id) ?? null,
       ),
       totalBids: result.totalBids,
     };
@@ -583,15 +671,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findTrendingProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -602,15 +692,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findNewestProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -621,15 +713,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findRareProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -640,15 +734,17 @@ export class ProductsService {
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
     const results = await this.productsRepository.findRecentlySoldProducts(10);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return results.map((r) => ({
       ...mapProduct(
         r.product,
         favoritedSet.has(r.product.id),
         sellerSummaries.get(r.product.ownerId) ?? null,
+        boostedUntil.get(r.product.id) ?? null,
       ),
       totalBids: r.totalBids,
     }));
@@ -670,16 +766,18 @@ export class ProductsService {
       limit,
     );
     const results = await this.productsRepository.findFeaturedRanked(ids);
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      results.map((r) => r.product),
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(
+        requesterId,
+        results.map((r) => r.product),
+      );
     return {
       data: results.map((r) => ({
         ...mapProduct(
           r.product,
           favoritedSet.has(r.product.id),
           sellerSummaries.get(r.product.ownerId) ?? null,
+          boostedUntil.get(r.product.id) ?? null,
         ),
         totalBids: r.totalBids,
       })),
@@ -751,15 +849,14 @@ export class ProductsService {
       excludeIds.push(...found.map((p) => p.id));
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      collected,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, collected);
     return collected.map((p) =>
       mapProduct(
         p,
         favoritedSet.has(p.id),
         sellerSummaries.get(p.ownerId) ?? null,
+        boostedUntil.get(p.id) ?? null,
       ),
     );
   }
@@ -817,14 +914,13 @@ export class ProductsService {
     const reordered = (await this.productsRepository.findById(
       productId,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      [reordered],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, [reordered]);
     return mapProduct(
       reordered,
       favoritedSet.has(reordered.id),
       sellerSummaries.get(reordered.ownerId) ?? null,
+      boostedUntil.get(reordered.id) ?? null,
     );
   }
 
@@ -851,14 +947,13 @@ export class ProductsService {
     const updated = (await this.productsRepository.findById(
       productId,
     )) as Product;
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      [updated],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, [updated]);
     return mapProduct(
       updated,
       favoritedSet.has(updated.id),
       sellerSummaries.get(updated.ownerId) ?? null,
+      boostedUntil.get(updated.id) ?? null,
     );
   }
 
@@ -876,14 +971,13 @@ export class ProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      userId,
-      [product],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(userId, [product]);
     return mapProduct(
       product,
       favoritedSet.has(product.id),
       sellerSummaries.get(product.ownerId) ?? null,
+      boostedUntil.get(product.id) ?? null,
     );
   }
 
@@ -902,16 +996,15 @@ export class ProductsService {
       limit,
       { ...filters, status, ownerId },
     );
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      requesterId,
-      data,
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, data);
     return {
       data: data.map((p) =>
         mapProduct(
           p,
           favoritedSet.has(p.id),
           sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
         ),
       ),
       meta: { page, limit, total },
@@ -950,14 +1043,13 @@ export class ProductsService {
       );
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      adminId,
-      [saved],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(adminId, [saved]);
     return mapProduct(
       saved,
       favoritedSet.has(saved.id),
       sellerSummaries.get(saved.ownerId) ?? null,
+      boostedUntil.get(saved.id) ?? null,
     );
   }
 
@@ -995,14 +1087,13 @@ export class ProductsService {
       );
     }
 
-    const { favoritedSet, sellerSummaries } = await this.responseContextFor(
-      adminId,
-      [saved],
-    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(adminId, [saved]);
     return mapProduct(
       saved,
       favoritedSet.has(saved.id),
       sellerSummaries.get(saved.ownerId) ?? null,
+      boostedUntil.get(saved.id) ?? null,
     );
   }
 
@@ -1162,11 +1253,13 @@ export class ProductsService {
   ): Promise<{
     favoritedSet: Set<string>;
     sellerSummaries: Map<string, ProductSellerSummary>;
+    boostedUntil: Map<string, Date>;
   }> {
-    const [favoritedSet, sellerSummaries] = await Promise.all([
+    const [favoritedSet, sellerSummaries, boostedUntil] = await Promise.all([
       this.favoritedSetFor(requesterId, products),
       this.sellerSummaryFor(products),
+      this.boostsService.boostedUntilFor(products.map((p) => p.id)),
     ]);
-    return { favoritedSet, sellerSummaries };
+    return { favoritedSet, sellerSummaries, boostedUntil };
   }
 }

@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 // ─── Pathao API shapes (raw, as returned by their sandbox/live API) ───────────
 
@@ -67,10 +74,12 @@ export class DispatchDeliveryDto {
   })
   @IsNumber()
   @Min(0.5)
+  @Max(10)
   itemWeightKg: number;
 
   @ApiPropertyOptional({ example: 'Vintage camera' })
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   itemDescription?: string;
 }

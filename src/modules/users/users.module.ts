@@ -5,6 +5,7 @@ import { SmsModule } from '@modules/sms/sms.module';
 import { Product } from '@modules/products/entities/product.entity';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
+import { SellersController } from './sellers.controller';
 import { PhoneVerificationService } from './services/phone-verification.service';
 import { User } from './entities/user.entity';
 import { UsersRepository } from './users.repository';
@@ -23,7 +24,7 @@ import { PendingEmailChangeRepository } from '@modules/auth/pending-email-change
     RewardsModule,
     SmsModule,
   ],
-  controllers: [UsersController],
+  controllers: [UsersController, SellersController],
   providers: [
     UsersService,
     UsersRepository,

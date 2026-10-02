@@ -1,3 +1,4 @@
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
 import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -23,7 +24,8 @@ export class ListBidsAdminQueryDto extends PaginationDto {
 
   @ApiPropertyOptional({ description: 'Filter by bidder UUID' })
   @IsOptional()
-  @IsUUID()
+  // A user id — shape-checked; see IsUuidShape and OPEN-ITEMS A36.
+  @IsUuidShape()
   bidderId?: string;
 
   @ApiPropertyOptional({

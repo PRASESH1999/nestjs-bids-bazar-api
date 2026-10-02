@@ -22,7 +22,9 @@ export class RatingsRepository {
     this.paymentRepo = this.dataSource.getRepository(ProductPayment);
   }
 
-  async findPaymentWithProduct(paymentId: string): Promise<ProductPayment | null> {
+  async findPaymentWithProduct(
+    paymentId: string,
+  ): Promise<ProductPayment | null> {
     return this.paymentRepo.findOne({
       where: { id: paymentId },
       relations: ['product'],

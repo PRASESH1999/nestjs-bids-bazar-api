@@ -84,6 +84,11 @@ export type ProductResponse = Omit<Product, 'images' | 'viewCount'> & {
   isFavorited: boolean;
   // Null only if the owning account no longer resolves (e.g. soft-deleted).
   seller: ProductSellerSummary | null;
+  // When this product's running boost ends; null if it is not boosted. Public
+  // on purpose — it is what the Featured badge on a card is drawn from, and a
+  // boost is a thing the seller bought to be seen. See
+  // BoostsService.boostedUntilFor.
+  boostedUntil: Date | null;
   // What still has to be filled in before this listing can be submitted for
   // review. Empty array = ready. Null on any status where submission is not
   // the next step. See computeMissingSubmissionFields.
@@ -98,6 +103,7 @@ export function mapProduct(
   product: Product,
   isFavorited: boolean,
   seller: ProductSellerSummary | null,
+  boostedUntil: Date | null = null,
 ): ProductResponse {
   // Both sides can be null on an in-progress DRAFT that hasn't set a price
   // yet — showInstantBuy is simply false until then.
@@ -120,11 +126,13 @@ export function mapProduct(
     // Also gated on status: once an Instant Buy hold is in flight
     // (AWAITING_INSTANT_BUY), bidding is paused and this listing's own price
     // comparison alone can no longer tell — see Rule 14 addendum.
+    // Number() both sides: decimal columns arrive as strings, and comparing
+    // strings is lexicographic ("880.00" < "1120.00" is false).
     showInstantBuy:
       (product.status === ProductStatus.AWAITING_FIRST_BID ||
         product.status === ProductStatus.ACTIVE) &&
       product.instantBuyPrice != null &&
-      currentBid < product.instantBuyPrice,
+      Number(currentBid) < Number(product.instantBuyPrice),
     currency: product.currency,
     biddingDurationHours: product.biddingDurationHours,
     currentHighestBid: product.currentHighestBid,
@@ -160,6 +168,7 @@ export function mapProduct(
     deletedAt: product.deletedAt,
     isFavorited,
     seller,
+    boostedUntil,
     previewImage: (() => {
       const p = product.images?.find((img) => img.displayOrder === 0);
       return p

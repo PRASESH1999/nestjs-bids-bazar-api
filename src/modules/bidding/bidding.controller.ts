@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Request,
@@ -184,6 +185,16 @@ export class BiddingController {
 
   // ─── ADMIN: confirm payment manually ─────────────────────────────────────
 
+  @Get('admin/products/:id/winner-addresses')
+  @RequirePermissions(Permission.PAYMENT_CONFIRM_MANUAL)
+  @ApiOperation({
+    summary:
+      "Admin: the payment-responsible bidder's saved addresses, each flagged `deliverable` — pick one for confirm-payment",
+  })
+  async adminGetWinnerAddresses(@Param('id', ParseUUIDPipe) productId: string) {
+    return this.auctionLifecycleService.getWinnerAddresses(productId);
+  }
+
   @Post('admin/products/:id/confirm-payment')
   @RequirePermissions(Permission.PAYMENT_CONFIRM_MANUAL)
   @ApiOperation({
@@ -191,7 +202,7 @@ export class BiddingController {
       'Admin: manually confirm payment for the currently-responsible bid, settling the auction',
   })
   async confirmPayment(
-    @Param('id') productId: string,
+    @Param('id', ParseUUIDPipe) productId: string,
     @Body() dto: ConfirmPaymentManualDto,
     @Request() req: RequestWithUser,
   ) {

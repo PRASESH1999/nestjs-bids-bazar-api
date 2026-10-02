@@ -68,9 +68,7 @@ export class UsersController {
   @ApiResponse(R409)
   @RequirePermissions(Permission.ROLE_ASSIGN)
   async createAdmin(@Body() createAdminDto: CreateAdminDto) {
-    const user = await this.usersService.createAdmin(createAdminDto);
-    const { password: _, hashedRefreshToken: __, ...result } = user;
-    return result;
+    return this.usersService.createAdmin(createAdminDto);
   }
 
   @Get('me')
@@ -254,11 +252,11 @@ export class UsersController {
       requesterRole,
     );
 
-    // Map users to remove sensitive data
-    const data = users.map((user) => {
-      const { password: _, hashedRefreshToken: __, ...result } = user;
-      return result;
-    });
+    /*
+     * Returned as User instances on purpose — see `findOne` below. Spreading
+     * them into plain objects is what used to leak the OTP columns.
+     */
+    const data = users;
 
     return {
       data,
@@ -284,10 +282,22 @@ export class UsersController {
   async findOne(@Param('id') id: string) {
     const user = await this.usersService.findById(id);
     if (!user) throw new NotFoundException('User not found');
-    // Redundant since User marks both @Exclude(), but kept in line with the
-    // other handlers here so one pattern governs the whole controller.
-    const { password: _, hashedRefreshToken: __, ...result } = user;
-    return result;
+    /*
+     * Returned as the entity, deliberately.
+     *
+     * This used to spread it into a plain object to strip `password` and
+     * `hashedRefreshToken` by hand — which was described as "redundant since
+     * User marks both @Exclude()" and was in fact the opposite. Spreading
+     * discards the prototype, ClassSerializerInterceptor only transforms class
+     * *instances*, so the hand-written pick silently disabled every other
+     * @Exclude() on the entity. That shipped `phoneOtpHash` — the verifier for
+     * the SMS code that gates KYC submission — on every one of these handlers.
+     *
+     * Handing the interceptor a real User is what makes the entity the single
+     * place that decides what is public, including for the next column someone
+     * adds. See OPEN-ITEMS A35.
+     */
+    return user;
   }
 
   @Patch(':id/suspend')
@@ -303,9 +313,7 @@ export class UsersController {
   @RequirePermissions(Permission.USER_MANAGE)
   @UseGuards(HierarchyGuard)
   async suspendUser(@Param('id') id: string) {
-    const user = await this.usersService.suspendUser(id);
-    const { password: _, hashedRefreshToken: __, ...result } = user;
-    return result;
+    return this.usersService.suspendUser(id);
   }
 
   @Delete(':id')
@@ -343,10 +351,8 @@ export class UsersController {
     @Param('id') id: string,
     @Body() assignRoleDto: AssignRoleDto,
   ) {
-    const user = await this.usersService.updateUser(id, {
+    return this.usersService.updateUser(id, {
       role: assignRoleDto.role,
     });
-    const { password: _, hashedRefreshToken: __, ...result } = user;
-    return result;
   }
 }

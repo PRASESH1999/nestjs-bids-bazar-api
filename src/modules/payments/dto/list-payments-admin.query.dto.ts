@@ -1,3 +1,4 @@
+import { IsUuidShape } from '@common/validators/is-uuid-shape.decorator';
 import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -24,7 +25,8 @@ export class ListPaymentsAdminQueryDto extends PaginationDto {
 
   @ApiPropertyOptional({ description: 'Filter by winner (buyer) UUID' })
   @IsOptional()
-  @IsUUID()
+  // A user id — shape-checked; see IsUuidShape and OPEN-ITEMS A36.
+  @IsUuidShape()
   winnerUserId?: string;
 
   @ApiPropertyOptional({
@@ -35,7 +37,10 @@ export class ListPaymentsAdminQueryDto extends PaginationDto {
   @IsEnum(PaymentStatus)
   status?: PaymentStatus;
 
-  @ApiPropertyOptional({ enum: PaymentSortBy, default: PaymentSortBy.CREATED_AT })
+  @ApiPropertyOptional({
+    enum: PaymentSortBy,
+    default: PaymentSortBy.CREATED_AT,
+  })
   @IsOptional()
   @IsEnum(PaymentSortBy)
   @Type(() => String)
