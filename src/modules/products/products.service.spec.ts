@@ -139,6 +139,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
       settledAt: null,
       settledAmount: null,
       abandonedAt: null,
+      relistedProductId: null,
       withdrawnAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -270,6 +271,7 @@ describe('ProductsService — isFavorited flag', () => {
       settledAt: null,
       settledAmount: null,
       abandonedAt: null,
+      relistedProductId: null,
       withdrawnAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -435,6 +437,7 @@ describe('ProductsService — seller rating summary', () => {
       settledAt: null,
       settledAmount: null,
       abandonedAt: null,
+      relistedProductId: null,
       withdrawnAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -498,5 +501,183 @@ describe('ProductsService — seller rating summary', () => {
       totalSold: 3,
     });
     expect(result.data.find((p) => p.id === 'product-b')?.seller).toBeNull();
+  });
+});
+
+describe('ProductsService.relistProduct', () => {
+  function buildAbandonedProduct(overrides: Partial<Product> = {}): Product {
+    return {
+      id: 'abandoned-1',
+      ownerId: 'user-1',
+      title: 'Abandoned lot',
+      description: 'A lot whose winner and fallbacks all failed to pay.',
+      specifications: null,
+      categoryId: 'cat-1',
+      subcategoryId: 'sub-1',
+      condition: ItemCondition.USED_GOOD,
+      status: ProductStatus.ABANDONED,
+      basePrice: 1000,
+      biddingStartPrice: 1200,
+      instantBuyPrice: 1400,
+      biddingEndPrice: 1600,
+      currency: 'NPR',
+      biddingDurationHours: 24,
+      currentHighestBid: 1500,
+      currentHighestBidderId: 'bidder-1',
+      biddingStartedAt: new Date('2026-09-01'),
+      biddingEndsAt: new Date('2026-09-02'),
+      viewCount: 40,
+      isRare: true,
+      submittedAt: new Date('2026-08-30'),
+      reviewedById: 'admin-1',
+      reviewedAt: new Date('2026-08-31'),
+      rejectionReason: null,
+      province: 'Bagmati',
+      district: 'Lalitpur',
+      city: 'Patan',
+      street: null,
+      wardNumber: 3,
+      winningBidId: 'bid-1',
+      closedAt: new Date('2026-09-02'),
+      settledAt: null,
+      settledAmount: null,
+      abandonedAt: new Date('2026-09-04'),
+      relistedProductId: null,
+      withdrawnAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+      images: [],
+      ...overrides,
+    };
+  }
+
+  function buildService(
+    original: Product,
+    { claimWins = true }: { claimWins?: boolean } = {},
+  ) {
+    const saved: Product[] = [];
+    const productsRepository = {
+      findByIdWithoutImages: jest.fn().mockResolvedValue(original),
+      createProduct: jest.fn((data: Partial<Product>) => ({ ...data })),
+      saveProduct: jest.fn((p: Product) => {
+        const withId = { ...p, id: 'relisted-1', images: [] } as Product;
+        saved.push(withId);
+        return Promise.resolve(withId);
+      }),
+      claimRelist: jest.fn().mockResolvedValue(claimWins),
+      deleteProduct: jest.fn().mockResolvedValue(undefined),
+      findImagesByProductId: jest.fn().mockResolvedValue([
+        {
+          filePath: 'products/abandoned-1/0-a.jpg',
+          originalFilename: 'a.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 10,
+          displayOrder: 0,
+        },
+      ]),
+      createImage: jest.fn((data: object) => data),
+      saveImages: jest.fn().mockResolvedValue([]),
+      findById: jest.fn(() => Promise.resolve(saved[0])),
+    };
+    const productStorage = {
+      copyProductImages: jest.fn(
+        (productId: string, images: Array<{ displayOrder: number }>) =>
+          Promise.resolve(
+            images.map((img) => ({
+              ...img,
+              filePath: `products/${productId}/${img.displayOrder}-copy.jpg`,
+            })),
+          ),
+      ),
+    };
+    const kycService = {
+      isVerified: jest.fn().mockResolvedValue(true),
+      hasBankDetails: jest.fn().mockResolvedValue(true),
+    };
+
+    const service = new ProductsService(
+      productsRepository as unknown as ProductsRepository,
+      productStorage as never,
+      kycService as never,
+      mockUsersService as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      mockFavoritesService as never,
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
+    );
+    return { service, productsRepository, productStorage };
+  }
+
+  it('creates a clean copy open for bids, with the same details, price and photos', async () => {
+    const { service, productsRepository, productStorage } = buildService(
+      buildAbandonedProduct(),
+    );
+
+    const result = await service.relistProduct('user-1', 'abandoned-1');
+
+    expect(result.id).toBe('relisted-1');
+    expect(result.status).toBe(ProductStatus.AWAITING_FIRST_BID);
+    expect(result.title).toBe('Abandoned lot');
+    expect(result.basePrice).toBe(1000);
+    expect(result.biddingEndPrice).toBe(1600);
+    expect(result.isRare).toBe(true);
+    // Nothing from the failed auction carries over.
+    expect(result.currentHighestBid).toBeNull();
+    expect(result.currentHighestBidderId).toBeNull();
+    expect(result.biddingStartedAt).toBeNull();
+    expect(result.biddingEndsAt).toBeNull();
+    expect(result.winningBidId ?? null).toBeNull();
+    expect(result.abandonedAt ?? null).toBeNull();
+
+    expect(productsRepository.claimRelist).toHaveBeenCalledWith(
+      'abandoned-1',
+      'relisted-1',
+    );
+    expect(productStorage.copyProductImages).toHaveBeenCalledWith(
+      'relisted-1',
+      expect.any(Array),
+    );
+    expect(productsRepository.saveImages).toHaveBeenCalled();
+  });
+
+  it('refuses a product that is not ABANDONED', async () => {
+    const { service } = buildService(
+      buildAbandonedProduct({ status: ProductStatus.SETTLED }),
+    );
+    await expect(
+      service.relistProduct('user-1', 'abandoned-1'),
+    ).rejects.toThrow('Only an abandoned product can be relisted');
+  });
+
+  it('refuses a product that has already been relisted', async () => {
+    const { service } = buildService(
+      buildAbandonedProduct({ relistedProductId: 'earlier-copy' }),
+    );
+    await expect(
+      service.relistProduct('user-1', 'abandoned-1'),
+    ).rejects.toThrow('already been relisted');
+  });
+
+  it("refuses another seller's product", async () => {
+    const { service } = buildService(buildAbandonedProduct());
+    await expect(
+      service.relistProduct('someone-else', 'abandoned-1'),
+    ).rejects.toThrow('You do not own this product');
+  });
+
+  it('removes its own copy when a concurrent relist won the race', async () => {
+    const { service, productsRepository, productStorage } = buildService(
+      buildAbandonedProduct(),
+      { claimWins: false },
+    );
+
+    await expect(
+      service.relistProduct('user-1', 'abandoned-1'),
+    ).rejects.toThrow('already been relisted');
+    expect(productsRepository.deleteProduct).toHaveBeenCalled();
+    expect(productStorage.copyProductImages).not.toHaveBeenCalled();
   });
 });

@@ -84,6 +84,11 @@ export interface AdminDeliveryView extends BuyerDeliveryView {
   pathaoDeliveryFee: number | null;
   /** Consignments cancelled and replaced by a redispatch, oldest first. */
   previousConsignmentIds: string[];
+  /**
+   * Pathao's fee for each of `previousConsignmentIds`, same order and length
+   * (null where none was quoted). `pathaoDeliveryFee` is the current order's.
+   */
+  previousPathaoDeliveryFees: (number | null)[];
   createdAt: string;
 }
 

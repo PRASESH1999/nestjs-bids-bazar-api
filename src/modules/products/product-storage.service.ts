@@ -1,8 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { extname, resolve } from 'path';
-import { mkdir, unlink, writeFile } from 'fs/promises';
+import { copyFile, mkdir, unlink, writeFile } from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  normalizeImage,
+  PRODUCT_IMAGE_PROFILE,
+} from '@common/utils/image-normalize.util';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -65,21 +69,80 @@ export class ProductStorageService {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const ext =
-        extname(file.originalname).toLowerCase() ||
-        MIME_TO_EXT[file.mimetype] ||
-        '';
-      const filename = `${i}-${uuidv4()}${ext}`;
+      // Stored as a 1920 px WebP with no metadata, whatever was uploaded —
+      // see normalizeImage. The row records what is on disk, not the upload.
+      const image = await normalizeImage(file.buffer, PRODUCT_IMAGE_PROFILE);
+      const filename = `${i}-${uuidv4()}${image.ext}`;
       const relativePath = `products/${productId}/${filename}`;
 
-      await writeFile(resolve(this.baseDir, relativePath), file.buffer);
+      await writeFile(resolve(this.baseDir, relativePath), image.buffer);
 
       results.push({
         filePath: relativePath,
         originalFilename: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
+        mimeType: image.mimeType,
+        sizeBytes: image.buffer.length,
         displayOrder: i,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Copies another product's image files into this product's directory.
+   *
+   * A real copy, not a shared path: each product owns its folder, and the
+   * delete paths remove files by product, so two rows pointing at one file
+   * would let deleting either listing break the other's photos.
+   */
+  async copyProductImages(
+    productId: string,
+    images: Array<{
+      filePath: string;
+      originalFilename: string;
+      mimeType: string;
+      sizeBytes: number;
+      displayOrder: number;
+    }>,
+  ): Promise<
+    Array<{
+      filePath: string;
+      originalFilename: string;
+      mimeType: string;
+      sizeBytes: number;
+      displayOrder: number;
+    }>
+  > {
+    const dir = resolve(this.baseDir, 'products', productId);
+    await mkdir(dir, { recursive: true });
+
+    const results: Array<{
+      filePath: string;
+      originalFilename: string;
+      mimeType: string;
+      sizeBytes: number;
+      displayOrder: number;
+    }> = [];
+
+    for (const image of images) {
+      const ext =
+        extname(image.filePath).toLowerCase() ||
+        MIME_TO_EXT[image.mimeType] ||
+        '';
+      const relativePath = `products/${productId}/${image.displayOrder}-${uuidv4()}${ext}`;
+
+      await copyFile(
+        this.getAbsolutePath(image.filePath),
+        resolve(this.baseDir, relativePath),
+      );
+
+      results.push({
+        filePath: relativePath,
+        originalFilename: image.originalFilename,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        displayOrder: image.displayOrder,
       });
     }
 

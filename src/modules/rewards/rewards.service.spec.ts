@@ -70,3 +70,44 @@ describe('RewardsService — tier resolution & commission', () => {
     });
   });
 });
+
+describe('RewardsService.listPendingSettlements — delivery stage (A56)', () => {
+  it('shows a cancelled courier order as CANCELLED, not IN_TRANSIT', async () => {
+    const payment = {
+      id: 'pay-1',
+      productId: 'product-1',
+      product: { id: 'product-1', title: 'Camera', basePrice: 100 },
+      sellerId: 'seller-1',
+      seller: null,
+      winnerUserId: 'buyer-1',
+      winner: null,
+      referenceLabel: 'REF',
+      status: 'SUCCESS',
+      amount: 150,
+      deliveryCharge: 120,
+      createdAt: new Date('2026-10-01T00:00:00Z'),
+    };
+    const delivery = {
+      productPaymentId: 'pay-1',
+      receivedAtWarehouseAt: new Date('2026-10-01T00:00:00Z'),
+      consignmentId: 'DT-1',
+      deliveredAt: null,
+      cancelledAt: new Date('2026-10-02T00:00:00Z'),
+    };
+    const results: Record<string, unknown[]> = {
+      ProductPayment: [payment],
+      UserRewards: [],
+      ProductDelivery: [delivery],
+    };
+    const dataSource = {
+      getRepository: jest.fn((entity: { name: string }) => ({
+        find: jest.fn().mockResolvedValue(results[entity.name]),
+      })),
+    };
+    const service = new RewardsService(dataSource as never, {} as never);
+
+    const [row] = await service.listPendingSettlements();
+
+    expect(row.deliveryStage).toBe('CANCELLED');
+  });
+});

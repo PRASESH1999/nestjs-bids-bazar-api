@@ -453,6 +453,19 @@ export class ProductsController {
     return { message: 'Product withdrawn successfully' };
   }
 
+  @Post('products/:id/relist')
+  @RequirePermissions(Permission.PRODUCT_MANAGE_OWN)
+  @ApiOperation({
+    summary:
+      'Relist an ABANDONED product as a new listing, open for bids immediately',
+  })
+  async relistProduct(
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+  ) {
+    return this.productsService.relistProduct(req.user.sub, id);
+  }
+
   @Delete('products/:id')
   @RequirePermissions(Permission.PRODUCT_MANAGE_OWN)
   @ApiOperation({ summary: 'Hard-delete own product (DRAFT or REJECTED only)' })

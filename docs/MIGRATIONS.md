@@ -7,7 +7,7 @@ Migrations live in `src/database/migrations/`.
 
 ## Baseline reset (2026-10-08)
 
-Every database (dev, test, live) was wiped and the 23 incremental migrations were squashed into a
+Every database (dev, test, live) was wiped and the 26 incremental migrations were squashed into a
 single `1791448028981-InitialSchema.ts`. The old files remain in git history only. `InitialSchema`
 is generated from the entities, plus two hand-added statements that generation cannot produce:
 `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` (needed by every `uuid_generate_v4()` default) and

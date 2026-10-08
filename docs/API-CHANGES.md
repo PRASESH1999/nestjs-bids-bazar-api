@@ -16,7 +16,7 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ## 2026-10-08 — name and phone move to registration; database reset
 
-Every database was wiped and the migrations squashed into one `InitialSchema`
+Every database was wiped and all 26 migrations squashed into one `InitialSchema`
 (see `docs/MIGRATIONS.md`). **All existing accounts, tokens and sessions are
 gone** — clients must sign everyone out and treat stored tokens as invalid.
 

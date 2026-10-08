@@ -15,6 +15,8 @@ import type { SellerMarkedPaidPayload } from '@common/events/event-payloads.type
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
 import { ProductDelivery } from '@modules/pathao/entities/product-delivery.entity';
+import type { DeliveryStage } from '@modules/pathao/dto/delivery-view.dto';
+import { deliveryStageOf } from '@modules/pathao/delivery-stage.util';
 import { UserRewards } from './entities/user-rewards.entity';
 import { PointsTransaction } from './entities/points-transaction.entity';
 
@@ -289,7 +291,9 @@ export class RewardsService {
    *  - The raw row also carried gateway internals (QR payloads, websocket URL).
    *
    * `deliveryStage` is included so a payout can wait until the item has
-   * actually reached the warehouse.
+   * actually reached the warehouse. It is the same stage the delivery queue
+   * shows (`deliveryStageOf`) — derived here by hand it once missed
+   * `cancelledAt` and showed a cancelled courier order as IN_TRANSIT (A56).
    */
   async listPendingSettlements(): Promise<PendingSettlementView[]> {
     const payments = await this.dataSource.getRepository(ProductPayment).find({
@@ -351,15 +355,7 @@ export class RewardsService {
         sellerCommissionPercent: commission.commissionPercent,
         sellerPayoutAmount: commission.sellerPayoutAmount,
         sellerPaidAt: null,
-        deliveryStage: delivery
-          ? delivery.deliveredAt
-            ? 'DELIVERED'
-            : delivery.consignmentId
-              ? 'IN_TRANSIT'
-              : delivery.receivedAtWarehouseAt
-                ? 'AT_WAREHOUSE'
-                : 'AWAITING_WAREHOUSE'
-          : null,
+        deliveryStage: delivery ? deliveryStageOf(delivery) : null,
         createdAt: p.createdAt.toISOString(),
       };
     });
@@ -410,11 +406,7 @@ export interface PendingSettlementView {
   sellerCommissionPercent: number;
   sellerPayoutAmount: number;
   sellerPaidAt: null;
-  deliveryStage:
-    | 'AWAITING_WAREHOUSE'
-    | 'AT_WAREHOUSE'
-    | 'IN_TRANSIT'
-    | 'DELIVERED'
-    | null;
+  /** Includes CANCELLED: the courier order was cancelled, awaiting redispatch. */
+  deliveryStage: DeliveryStage | null;
   createdAt: string;
 }

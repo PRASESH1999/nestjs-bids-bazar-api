@@ -168,6 +168,13 @@ export class Product extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   abandonedAt: Date | null;
 
+  // Set on an ABANDONED lot once its seller relists it: the id of the fresh
+  // listing that replaced it. The abandoned row keeps its bids, settlements and
+  // failed buyers as the record of what happened; the relist starts clean.
+  // Non-null also means "already relisted" — a lot can be relisted once.
+  @Column({ type: 'uuid', nullable: true })
+  relistedProductId: string | null;
+
   // ─── Audit ────────────────────────────────────────────────────────────────
 
   @Column({ type: 'timestamptz', nullable: true })

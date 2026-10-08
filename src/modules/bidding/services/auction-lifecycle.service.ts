@@ -34,6 +34,7 @@ import { ShippingAddress } from '@modules/shipping/entities/shipping-address.ent
 import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
 import { Bid } from '../entities/bid.entity';
 import { ProductSettlement } from '../entities/product-settlement.entity';
+import { StaleSettlementRoundException } from '../stale-settlement-round.exception';
 
 // A fallback round's rank is capped at 2 (0 = original winner, 1 = 2nd
 // bidder, 2 = 3rd bidder). If the 3rd bidder also fails to pay, the product
@@ -110,10 +111,15 @@ export class AuctionLifecycleService {
         return;
       }
 
+      // An Instant Buy hold bid is never an auction bid: a failed hold leaves
+      // its row behind (EXPIRED, or NOT_RESPONSIBLE after a gateway failure)
+      // at instantBuyPrice — above every real bid — and without this filter
+      // the lapsed buyer would win the auction at a price nobody bid. A53.
       const highestBid = await qr.manager
         .getRepository(Bid)
         .createQueryBuilder('bid')
         .where('bid.productId = :productId', { productId })
+        .andWhere('bid.isInstantBuy = false')
         .orderBy('bid.amount', 'DESC')
         .addOrderBy('bid.placedAt', 'ASC')
         .getOne();
@@ -469,8 +475,21 @@ export class AuctionLifecycleService {
    * or a buyer would be permanently locked out of Instant Buy on this product
    * by a mistake they can fix and retry (wrong address, a transient Fonepay
    * API error, etc).
+   *
+   * Also called by PaymentsService.markFailed when the gateway reports the
+   * hold's payment FAILED (A54): the buyer did not let the window run out,
+   * the bank declined, so bidding reopens at once and the attempt is not
+   * counted either. That path passes `settlementId` — the round the failed
+   * payment belonged to — so a stale failure can never release somebody
+   * else's newer hold. A payment row FKs onto the settlement (RESTRICT) and
+   * is the record of the attempt, so in that case the bid and settlement are
+   * retired rather than deleted: the bid goes NOT_RESPONSIBLE (the attempt
+   * cap only counts EXPIRED) and the settlement EXPIRED.
    */
-  async releaseInstantBuyHold(productId: string): Promise<void> {
+  async releaseInstantBuyHold(
+    productId: string,
+    settlementId?: string,
+  ): Promise<void> {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -504,14 +523,40 @@ export class AuctionLifecycleService {
         return;
       }
 
+      const settlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .findOne({ where: { bidId: holdBid.id } });
+
+      if (settlementId !== undefined && settlement?.id !== settlementId) {
+        // The failed payment was for an earlier round, not this hold.
+        await qr.commitTransaction();
+        return;
+      }
+
       const now = new Date();
       failedBidderId = holdBid.bidderId;
 
-      // Settlement first — it FKs onto the bid with ON DELETE RESTRICT.
-      await qr.manager
-        .getRepository(ProductSettlement)
-        .delete({ bidId: holdBid.id });
-      await qr.manager.getRepository(Bid).delete({ id: holdBid.id });
+      const paymentRows = settlement
+        ? await qr.manager
+            .getRepository(ProductPayment)
+            .count({ where: { productSettlementId: settlement.id } })
+        : 0;
+
+      if (settlement && paymentRows > 0) {
+        holdBid.isCurrentlyPaymentResponsible = false;
+        holdBid.paymentStatus = BidPaymentStatus.NOT_RESPONSIBLE;
+        await qr.manager.getRepository(Bid).save(holdBid);
+
+        settlement.status = SettlementStatus.EXPIRED;
+        settlement.resolvedAt = now;
+        await qr.manager.getRepository(ProductSettlement).save(settlement);
+      } else {
+        // Settlement first — it FKs onto the bid with ON DELETE RESTRICT.
+        await qr.manager
+          .getRepository(ProductSettlement)
+          .delete({ bidId: holdBid.id });
+        await qr.manager.getRepository(Bid).delete({ id: holdBid.id });
+      }
 
       resumedStatus = await this.revertProductAfterFailedInstantBuyHold(
         qr.manager,
@@ -646,6 +691,10 @@ export class AuctionLifecycleService {
       // entirely, even if they have another, lower bid still sitting as
       // NOT_RESPONSIBLE — otherwise the win could cycle back to someone who
       // already proved they wouldn't pay.
+      //
+      // Instant Buy hold bids are neither candidates nor disqualifying: a
+      // lapsed hold is not a bid in the auction, and letting an Instant Buy
+      // window run out is not the same as refusing to pay for a win. A53.
       const nextBid =
         responsibleBid.isInstantBuy || cascadeExhausted
           ? null
@@ -656,10 +705,12 @@ export class AuctionLifecycleService {
               .andWhere('bid.paymentStatus = :status', {
                 status: BidPaymentStatus.NOT_RESPONSIBLE,
               })
+              .andWhere('bid.isInstantBuy = false')
               .andWhere(
                 `bid.bidderId NOT IN (
                   SELECT b2."bidderId" FROM bids b2
                   WHERE b2."productId" = :productId AND b2."paymentStatus" = :expiredStatus
+                    AND b2."isInstantBuy" = false
                 )`,
                 { productId, expiredStatus: BidPaymentStatus.EXPIRED },
               )
@@ -763,6 +814,7 @@ export class AuctionLifecycleService {
           .createQueryBuilder('bid')
           .select('COUNT(DISTINCT bid.bidderId)', 'cnt')
           .where('bid.productId = :productId', { productId })
+          .andWhere('bid.isInstantBuy = false')
           .getRawOne<{ cnt: string }>()
           .then((row) => parseInt(row?.cnt ?? '0', 10));
       }
@@ -1250,6 +1302,11 @@ export class AuctionLifecycleService {
    * check, that payment would silently settle the product to whoever is
    * CURRENTLY responsible instead of the person who actually paid. Passing
    * this rejects that mismatch instead of settling on stale/incorrect data.
+   *
+   * Both "the round is no longer live" rejections — this mismatch, and a
+   * product that has left AWAITING_PAYMENT / AWAITING_INSTANT_BUY for anything
+   * but SETTLED — throw StaleSettlementRoundException, so the caller can flag
+   * the payment for a refund (A50, A55).
    */
   async confirmPaymentGateway(
     productId: string,
@@ -1284,11 +1341,21 @@ export class AuctionLifecycleService {
         throw new BadRequestException('Product not found');
       }
 
+      if (product.status === ProductStatus.SETTLED) {
+        // Not stale: PaymentsService decides whether this is the same payment
+        // repeating itself (benign) or a second charge (refund).
+        throw new BadRequestException(
+          `Product is not awaiting payment (status: ${product.status})`,
+        );
+      }
+
       if (
         product.status !== ProductStatus.AWAITING_PAYMENT &&
         product.status !== ProductStatus.AWAITING_INSTANT_BUY
       ) {
-        throw new BadRequestException(
+        // The round this payment belonged to is over: an Instant Buy hold
+        // lapsed and bidding reopened (A55), or the lot was abandoned.
+        throw new StaleSettlementRoundException(
           `Product is not awaiting payment (status: ${product.status})`,
         );
       }
@@ -1316,7 +1383,7 @@ export class AuctionLifecycleService {
         expectedProductSettlementId !== undefined &&
         expectedProductSettlementId !== currentSettlement.id
       ) {
-        throw new BadRequestException(
+        throw new StaleSettlementRoundException(
           'This payment is for a settlement round that is no longer active — the win has since moved to a different bidder',
         );
       }

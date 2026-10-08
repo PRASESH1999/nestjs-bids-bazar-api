@@ -18,6 +18,10 @@ import { paymentFailedSellerTemplate } from './templates/payment-failed-seller.t
 import { paymentConfirmedSellerTemplate } from './templates/payment-confirmed-seller.template';
 import { paymentConfirmedBuyerTemplate } from './templates/payment-confirmed-buyer.template';
 import { auctionAbandonedTemplate } from './templates/auction-abandoned.template';
+import {
+  deliveryCancelledAdminTemplate,
+  type DeliveryCancelledAdminTemplateParams,
+} from './templates/delivery-cancelled-admin.template';
 import { passwordResetTemplate } from './templates/password-reset.template';
 import { passwordChangedConfirmationTemplate } from './templates/password-changed-confirmation.template';
 import { nameChangedTemplate } from './templates/name-changed.template';
@@ -371,6 +375,21 @@ export class MailService implements OnModuleInit {
     const { subject, html } = auctionAbandonedTemplate(params);
     await this.send(to, subject, html);
     this.logger.log('Auction abandoned email dispatched', { to });
+  }
+
+  /**
+   * Ops alert: a dispatched Pathao order was cancelled and needs a redispatch.
+   * Sent to the support mailbox (MAIL_FROM, the same address the password
+   * emails give users as "support") — the app has no admin notification
+   * channel. See OPEN-ITEMS A57.
+   */
+  async sendDeliveryCancelledAdmin(
+    params: DeliveryCancelledAdminTemplateParams,
+  ): Promise<void> {
+    const to = this.configService.getOrThrow<string>('MAIL_FROM');
+    const { subject, html } = deliveryCancelledAdminTemplate(params);
+    await this.send(to, subject, html);
+    this.logger.log('Delivery cancelled admin alert dispatched', { to });
   }
 
   // ─── Password reset emails ────────────────────────────────────────────────

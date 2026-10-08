@@ -26,6 +26,7 @@ import { MailService } from '@modules/mail/mail.service';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { RatingsService } from '@modules/ratings/ratings.service';
 import { Bid } from '../entities/bid.entity';
+import { PUBLIC_BID_CONDITION } from '../bid-visibility';
 import { BidListItemAdminDto } from '../dto/bid-list-item-admin.dto';
 import { BidListItemDto } from '../dto/bid-list-item.dto';
 import {
@@ -359,13 +360,19 @@ export class BiddingService {
       throw new NotFoundException('Product not found');
     }
 
-    const bids = await this.dataSource
+    const qb = this.dataSource
       .getRepository(Bid)
       .createQueryBuilder('bid')
       .leftJoinAndSelect('bid.bidder', 'bidder')
+      .innerJoin('bid.product', 'product')
       .where('bid.productId = :productId', { productId })
-      .orderBy('bid.placedAt', 'DESC')
-      .getMany();
+      .orderBy('bid.placedAt', 'DESC');
+
+    // Admins see an Instant Buy hold bid as it is; everyone else only once it
+    // has actually paid. See PUBLIC_BID_CONDITION.
+    if (viewerType !== 'admin') qb.andWhere(PUBLIC_BID_CONDITION);
+
+    const bids = await qb.getMany();
 
     if (viewerType === 'admin') {
       return bids.map(
@@ -383,6 +390,7 @@ export class BiddingService {
           isOriginalWinner: bid.isOriginalWinner,
           fallbackRank: bid.fallbackRank,
           isCurrentlyPaymentResponsible: bid.isCurrentlyPaymentResponsible,
+          isInstantBuy: bid.isInstantBuy,
         }),
       );
     }
@@ -403,6 +411,8 @@ export class BiddingService {
    * Returns up to 5 distinct bidders for the product, ranked by each bidder's
    * highest bid amount (DESC). Bidder identity is the public-facing
    * User.username — name is private and never exposed to other users.
+   *
+   * An unpaid Instant Buy hold bid is not a bid — see PUBLIC_BID_CONDITION.
    */
   async getTopBiddersForProduct(
     productId: string,
@@ -411,10 +421,12 @@ export class BiddingService {
       .getRepository(Bid)
       .createQueryBuilder('bid')
       .innerJoin('bid.bidder', 'bidder')
+      .innerJoin('bid.product', 'product')
       .select('bid.bidderId', 'bidderId')
       .addSelect('MAX(bid.amount)', 'highestBid')
       .addSelect('bidder.username', 'username')
       .where('bid.productId = :productId', { productId })
+      .andWhere(PUBLIC_BID_CONDITION)
       .groupBy('bid.bidderId')
       .addGroupBy('bidder.username')
       .orderBy('MAX(bid.amount)', 'DESC')
@@ -436,6 +448,8 @@ export class BiddingService {
    *
    * Single round-trip using Postgres conditional aggregation
    * (`COUNT(*) FILTER (WHERE ...)`).
+   *
+   * An unpaid Instant Buy hold bid is not counted — see PUBLIC_BID_CONDITION.
    */
   async getBidCountsForProduct(
     productId: string,
@@ -456,12 +470,14 @@ export class BiddingService {
     const row = await this.dataSource
       .getRepository(Bid)
       .createQueryBuilder('bid')
+      .innerJoin('bid.product', 'product')
       .select('COUNT(*)', 'total')
       .addSelect(
         'COUNT(*) FILTER (WHERE bid."placedAt" >= :startOfToday)',
         'today',
       )
       .where('bid.productId = :productId', { productId })
+      .andWhere(PUBLIC_BID_CONDITION)
       .setParameter('startOfToday', startOfTodayUtc)
       .getRawOne<{ total: string; today: string }>();
 

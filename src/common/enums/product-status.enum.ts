@@ -16,12 +16,18 @@ export enum ProductStatus {
   WITHDRAWN = 'WITHDRAWN',
 }
 
+// Everything a visitor may open: live lots, and every lot whose auction has
+// run — sold or not. ABANDONED (no buyer completed payment) is included so the
+// listing's page, photos and bid history stay reachable after the auction,
+// the same as a SETTLED lot; a relisted one points at its replacement through
+// `relistedProductId`.
 export const PUBLICLY_VISIBLE_STATUSES: ProductStatus[] = [
   ProductStatus.AWAITING_FIRST_BID,
   ProductStatus.ACTIVE,
   ProductStatus.AWAITING_INSTANT_BUY,
   ProductStatus.AWAITING_PAYMENT,
   ProductStatus.SETTLED,
+  ProductStatus.ABANDONED,
 ];
 
 export const OWNER_EDITABLE_STATUSES: ProductStatus[] = [

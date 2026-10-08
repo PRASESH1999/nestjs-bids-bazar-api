@@ -7,8 +7,13 @@ import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { ItemCondition } from '@common/enums/item-condition.enum';
 import { Bid } from '@modules/bidding/entities/bid.entity';
+import { PUBLIC_BID_CONDITION } from '@modules/bidding/bid-visibility';
 import { Product } from './entities/product.entity';
 import { ProductImage } from './entities/product-image.entity';
+
+// Bid counts on home-page cards leave out an unpaid Instant Buy hold bid, the
+// same as the detail page's `totalBids` — see PUBLIC_BID_CONDITION (A53).
+const PUBLIC_BID_JOIN = `bid.productId = product.id AND ${PUBLIC_BID_CONDITION}`;
 
 export interface RankedProduct {
   product: Product;
@@ -132,7 +137,7 @@ export class ProductsRepository {
   async findHotProduct(): Promise<RankedProduct | null> {
     const rows = await this.productRepo
       .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.status = :status', { status: ProductStatus.ACTIVE })
@@ -150,7 +155,7 @@ export class ProductsRepository {
   async findTrendingProducts(limit: number): Promise<RankedProduct[]> {
     const rows = await this.productRepo
       .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.status = :status', { status: ProductStatus.ACTIVE })
@@ -168,7 +173,7 @@ export class ProductsRepository {
   async findNewestProducts(limit: number): Promise<RankedProduct[]> {
     const rows = await this.productRepo
       .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.status = :status', {
@@ -187,7 +192,7 @@ export class ProductsRepository {
   async findRareProducts(limit: number): Promise<RankedProduct[]> {
     const rows = await this.productRepo
       .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.isRare = true')
@@ -208,7 +213,7 @@ export class ProductsRepository {
   async findRecentlySoldProducts(limit: number): Promise<RankedProduct[]> {
     const rows = await this.productRepo
       .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.status = :status', { status: ProductStatus.SETTLED })
@@ -229,7 +234,7 @@ export class ProductsRepository {
 
     const countRows = await this.productRepo
       .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', 'bid.productId = product.id')
+      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
       .select('product.id', 'id')
       .addSelect('COUNT(bid.id)', 'totalBids')
       .where('product.id IN (:...ids)', { ids })
@@ -305,6 +310,22 @@ export class ProductsRepository {
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
+  }
+
+  /**
+   * Records that `abandonedId` was relisted as `relistedId` — only if it has
+   * not been already. Returns false when another request won the race, so two
+   * quick clicks on "Relist" cannot leave two live copies of one lot.
+   */
+  async claimRelist(abandonedId: string, relistedId: string): Promise<boolean> {
+    const result = await this.productRepo
+      .createQueryBuilder()
+      .update(Product)
+      .set({ relistedProductId: relistedId })
+      .where('id = :abandonedId', { abandonedId })
+      .andWhere('"relistedProductId" IS NULL')
+      .execute();
+    return (result.affected ?? 0) > 0;
   }
 
   // ─── Image helpers ────────────────────────────────────────────────────────

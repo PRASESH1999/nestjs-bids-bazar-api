@@ -9,6 +9,7 @@ import type {
 import { Bid } from '@modules/bidding/entities/bid.entity';
 import { ProductSettlement } from '@modules/bidding/entities/product-settlement.entity';
 import { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
+import { StaleSettlementRoundException } from '@modules/bidding/stale-settlement-round.exception';
 import type { FonepayPaymentStatusResponse } from '@modules/fonepay/dto/fonepay.dto';
 import { FonepayClientService } from '@modules/fonepay/services/fonepay-client.service';
 import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
@@ -42,6 +43,21 @@ import {
 } from '../dto/list-payments-admin.query.dto';
 import { ProductPayment } from '../entities/product-payment.entity';
 import { ShippingService } from '@modules/shipping/shipping.service';
+
+// Refund reasons written to `paymentMessage` by flagForRefund. All start with
+// "REFUND DUE" — that prefix is what the admin payment records look for.
+const REFUND_SETTLED_ELSEWHERE =
+  'REFUND DUE — paid after this sale was already settled by another payment';
+const REFUND_WINDOW_CLOSED =
+  'REFUND DUE — paid after this payment window had closed; nothing was sold';
+const REFUND_ROUND_SUPERSEDED =
+  'REFUND DUE — paid after this round had ended (the win moved to another bidder, or the Instant Buy hold lapsed); nothing was sold';
+
+// How long after its deadline an EXPIRED attempt is still re-checked with
+// Fonepay when the buyer asks for its status. A QR stays payable in the
+// buyer's banking app after we stop listening, so a late payment is only
+// discovered by asking. See getStatus and OPEN-ITEMS A55.
+const LATE_PAYMENT_RECONCILE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class PaymentsService implements OnModuleInit {
@@ -384,7 +400,10 @@ export class PaymentsService implements OnModuleInit {
      * delivery and a second seller payout). Record it for a refund instead.
      */
     if (payment.status !== PaymentStatus.PENDING) {
-      await this.flagForRefund(payment, statusResult);
+      const reason = (await this.isSettledByAnotherPayment(payment))
+        ? REFUND_SETTLED_ELSEWHERE
+        : REFUND_WINDOW_CLOSED;
+      await this.flagForRefund(payment, statusResult, reason);
       return;
     }
 
@@ -400,6 +419,22 @@ export class PaymentsService implements OnModuleInit {
         Number(payment.deliveryCharge),
       );
     } catch (err: unknown) {
+      /*
+       * The round this payment was for is over — the win moved to a fallback
+       * bidder before PaymentsCron expired this row (A50), or the Instant Buy
+       * hold lapsed and bidding reopened (A55). The money moved and nothing
+       * was sold: flag it for a refund rather than only logging, which used to
+       * leave the row PENDING for the cron to expire as if it were unpaid.
+       */
+      if (err instanceof StaleSettlementRoundException) {
+        await this.flagForRefund(
+          payment,
+          statusResult,
+          REFUND_ROUND_SUPERSEDED,
+        );
+        return;
+      }
+
       // If product is already SETTLED (parallel admin confirmation or duplicate WS message)
       // we still want to mark this Payment as SUCCESS.
       const isAlreadySettled =
@@ -409,7 +444,11 @@ export class PaymentsService implements OnModuleInit {
       // (a duplicate socket message racing the first). If a different payment
       // settled the sale, this one is a second charge for the same item.
       if (isAlreadySettled && (await this.isSettledByAnotherPayment(payment))) {
-        await this.flagForRefund(payment, statusResult);
+        await this.flagForRefund(
+          payment,
+          statusResult,
+          REFUND_SETTLED_ELSEWHERE,
+        );
         return;
       }
 
@@ -418,8 +457,8 @@ export class PaymentsService implements OnModuleInit {
           `confirmSuccess: confirmPaymentGateway failed for payment ${paymentId}`,
           err instanceof Error ? err.stack : String(err),
         );
-        // Don't mark the Payment SUCCESS if we couldn't settle the product
-        // (e.g. this was a stale round — see confirmPaymentGateway's check)
+        // Don't mark the Payment SUCCESS if we couldn't settle the product.
+        // Left PENDING so a later status check can retry it.
         return;
       }
     }
@@ -460,24 +499,24 @@ export class PaymentsService implements OnModuleInit {
   }
 
   /**
-   * A gateway payment that arrived after the sale was already settled another
-   * way. Marked FAILED (it settled nothing) with a message that says why, so
-   * it shows on the admin payment records for a manual refund — and logged
-   * as an error, since money is owed back.
+   * A gateway payment that was paid but settled nothing — the sale was already
+   * settled another way, or the round it belonged to had ended. Marked FAILED
+   * with a `reason` that says why, so it shows on the admin payment records
+   * for a manual refund — and logged as an error, since money is owed back.
    */
   private async flagForRefund(
     payment: ProductPayment,
-    statusResult?: FonepayPaymentStatusResponse,
+    statusResult: FonepayPaymentStatusResponse | undefined,
+    reason: string,
   ): Promise<void> {
     await this.paymentRepo.update(payment.id, {
       status: PaymentStatus.FAILED,
       fonepayTraceId: statusResult?.fonepayTraceId ?? null,
-      paymentMessage:
-        'REFUND DUE — paid after this sale was already settled by another payment',
+      paymentMessage: reason,
     });
     this.closeSocket(payment.id);
     this.logger.error(
-      `confirmSuccess: payment ${payment.id} (${payment.referenceLabel}) was paid after product ${payment.productId} was already settled — refund required`,
+      `confirmSuccess: payment ${payment.id} (${payment.referenceLabel}) for product ${payment.productId} settled nothing — ${reason}`,
     );
   }
 
@@ -503,6 +542,29 @@ export class PaymentsService implements OnModuleInit {
       message,
     };
     this.eventEmitter.emit(EventNames.PAYMENT_FAILED, failedPayload);
+
+    /*
+     * If this was an Instant Buy hold's payment, the hold is now pointless:
+     * the buyer cannot pay a FAILED attempt, and the product would otherwise
+     * sit paused until the deadline and then count this as their one failed
+     * attempt. Release it now, uncounted, so bidding reopens and the buyer
+     * may retry (A54). A no-op for anything that isn't the live hold —
+     * releaseInstantBuyHold checks the product status and this payment's
+     * settlement round itself.
+     */
+    if (payment.status === PaymentStatus.PENDING) {
+      try {
+        await this.auctionLifecycleService.releaseInstantBuyHold(
+          payment.productId,
+          payment.productSettlementId,
+        );
+      } catch (err: unknown) {
+        this.logger.error(
+          `markFailed: releasing the Instant Buy hold failed for product ${payment.productId}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
   }
 
   async getStatus(
@@ -519,8 +581,15 @@ export class PaymentsService implements OnModuleInit {
       throw new NotFoundException('No payment found for this product');
     }
 
-    // If PENDING, reconcile with Fonepay
-    if (payment.status === PaymentStatus.PENDING) {
+    // If PENDING, reconcile with Fonepay. A recently EXPIRED attempt is
+    // re-checked too: its QR can still be paid after we stopped listening, and
+    // asking is the only way to find that out (it is then flagged for a
+    // refund by confirmSuccess — A55).
+    const recentlyExpired =
+      payment.status === PaymentStatus.EXPIRED &&
+      Date.now() - payment.paymentDeadline.getTime() <
+        LATE_PAYMENT_RECONCILE_WINDOW_MS;
+    if (payment.status === PaymentStatus.PENDING || recentlyExpired) {
       try {
         const fonepayStatus = await this.fonepayClientService.getPaymentStatus({
           referenceLabel: payment.referenceLabel,
@@ -533,7 +602,10 @@ export class PaymentsService implements OnModuleInit {
             where: { id: payment.id },
           });
           return this.toStatusResponse(updated ?? payment);
-        } else if (fonepayStatus.paymentStatus === 'failed') {
+        } else if (
+          fonepayStatus.paymentStatus === 'failed' &&
+          payment.status === PaymentStatus.PENDING
+        ) {
           await this.markFailed(payment.id, fonepayStatus.paymentMessage);
           const updated = await this.paymentRepo.findOne({
             where: { id: payment.id },
@@ -558,6 +630,29 @@ export class PaymentsService implements OnModuleInit {
       where: { id: paymentId },
     });
     if (!payment || payment.status !== PaymentStatus.PENDING) return;
+
+    /*
+     * Ask Fonepay once before giving up on it. A payment made just before the
+     * deadline (or inside the cron gap) whose socket message was missed would
+     * otherwise be expired as unpaid with the buyer's money taken. If it was
+     * paid, confirmSuccess settles it when its round is still live, or flags
+     * it for a refund when it isn't (A50, A55). Fonepay being unreachable must
+     * not block expiry, so any error falls through to expiring it.
+     */
+    try {
+      const fonepayStatus = await this.fonepayClientService.getPaymentStatus({
+        referenceLabel: payment.referenceLabel,
+      });
+      if (fonepayStatus.paymentStatus === 'success') {
+        await this.confirmSuccess(payment.id, fonepayStatus);
+        return;
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        `expirePayment: Fonepay status check failed for payment ${paymentId}, expiring anyway`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
 
     await this.paymentRepo.update(paymentId, { status: PaymentStatus.EXPIRED });
     this.closeSocket(paymentId);
