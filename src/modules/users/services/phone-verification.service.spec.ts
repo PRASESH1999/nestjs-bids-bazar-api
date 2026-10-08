@@ -8,6 +8,7 @@ function buildUser(overrides: Partial<User> = {}): User {
     id: 'user-1',
     username: 'BB000001-2026',
     email: 'u@test.local',
+    fullName: 'Lily Shrestha',
     password: null,
     googleId: null,
     facebookId: null,
@@ -86,6 +87,31 @@ describe('PhoneVerificationService', () => {
       expect(saved.pendingPhone).toBe('+9779800000009');
       expect(saved.phoneOtpHash).toEqual(expect.any(String));
       expect(saved.phoneOtpAttempts).toBe(0);
+    });
+
+    it('sends to the pending number (from registration) when none is given', async () => {
+      repo.findOne
+        .mockResolvedValueOnce(buildUser({ pendingPhone: '+9779800000005' }))
+        .mockResolvedValueOnce(null);
+
+      await service.sendOtp('user-1', {});
+
+      expect(sms.sendSms).toHaveBeenCalledWith(
+        '+9779800000005',
+        expect.any(String),
+      );
+      const saved = repo.save.mock.calls[0][0];
+      expect(saved.pendingPhone).toBe('+9779800000005');
+      expect(saved.phoneOtpHash).toEqual(expect.any(String));
+    });
+
+    it('asks for a number when none is given and none is pending', async () => {
+      repo.findOne.mockResolvedValueOnce(buildUser());
+
+      await expect(service.sendOtp('user-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(sms.sendSms).not.toHaveBeenCalled();
     });
 
     it('does not store a code it failed to send', async () => {

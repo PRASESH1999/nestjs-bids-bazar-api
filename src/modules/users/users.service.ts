@@ -22,6 +22,8 @@ import * as crypto from 'crypto';
 import type { QueryRunner } from 'typeorm';
 import { DataSource } from 'typeorm';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { UpdateSelfDto } from './dto/update-self.dto';
+import { computeMissingProfileFields } from './profile-completion';
 import type {
   KycSummary,
   OwnProfileResponse,
@@ -143,6 +145,19 @@ export class UsersService {
     }
     Object.assign(user, data);
     return this.usersRepository.saveUser(user);
+  }
+
+  /**
+   * Rejects a number that is already some other account's verified phone.
+   * An unverified claim (another account's `pendingPhone`) doesn't block —
+   * whoever verifies first keeps the number.
+   */
+  async assertPhoneNotTaken(phone: string, excludeUserId?: string) {
+    if (await this.usersRepository.isPhoneTaken(phone, excludeUserId)) {
+      throw new ConflictException(
+        'That number is already registered to another account',
+      );
+    }
   }
 
   async suspendUser(id: string): Promise<User> {
@@ -379,16 +394,17 @@ export class UsersService {
       id: user.id,
       username: user.username,
       email: user.email,
+      fullName: user.fullName,
       /*
-       * The legal name, surfaced from the KYC record and only once APPROVED.
-       * Null otherwise — a pending or rejected submission's name has not been
-       * checked against anything, and showing it as the account's name would
-       * give unreviewed input the authority of a verified one.
+       * Self-declared until a KYC reviewer has checked it against the
+       * document. Approval locks the name, so the approved snapshot and the
+       * account's name can't drift apart afterwards.
        */
-      fullName:
-        kycSummary && kycSummary.status === KycStatus.APPROVED
-          ? kycSummary.fullName
-          : null,
+      isNameVerified: kycSummary?.status === KycStatus.APPROVED,
+      canEditName:
+        kycSummary?.status !== KycStatus.PENDING &&
+        kycSummary?.status !== KycStatus.APPROVED,
+      missingProfileFields: computeMissingProfileFields(user),
       phone: user.phone,
       isPhoneVerified: user.phoneVerifiedAt !== null,
       phoneVerifiedAt: user.phoneVerifiedAt,
@@ -405,21 +421,57 @@ export class UsersService {
   }
 
   /**
-   * One-time display name change.
-   * nameChangedAt null = available; non-null = already used.
-   * Sends a confirmation email after the DB update.
-   */
-  /*
-   * `updateSelfName` used to live here, with a one-change quota tracked by
-   * `nameChangedAt` and a SUPERADMIN endpoint to reset it.
+   * PATCH /users/me — set or correct the account's full name and phone.
    *
-   * All of it is gone. A person's name is now whatever their identity document
-   * says (KycVerification.fullName), so it is not something to edit on a
-   * profile — correcting it means resubmitting KYC, where it is checked. The
-   * public identity is `username`, which is system-generated and does not
-   * change. That removes the quota, the reset endpoint, and the question of
-   * which of two names was the real one.
+   * Name: free to change until KYC is submitted, and again after a rejection
+   * (that is how a reviewer-flagged name is fixed before resubmitting). Locked
+   * while a submission is PENDING — the reviewer is checking the snapshot taken
+   * at submission — and once APPROVED, when it has been verified.
+   *
+   * Phone: never written to `phone` directly. It becomes the pending number,
+   * and any outstanding code is discarded — that code went to a different
+   * number, and letting it confirm this one would verify a number nobody
+   * proved. Sending the already-verified number cancels a pending change.
    */
+  async updateOwnProfile(
+    userId: string,
+    dto: UpdateSelfDto,
+  ): Promise<OwnProfileResponse> {
+    const user = await this.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (dto.fullName !== undefined && dto.fullName !== user.fullName) {
+      const kyc = await this.dataSource
+        .getRepository(KycVerification)
+        .findOne({ where: { userId }, select: { id: true, status: true } });
+      if (kyc?.status === KycStatus.PENDING) {
+        throw new ConflictException(
+          'Your name cannot be changed while your KYC is under review',
+        );
+      }
+      if (kyc?.status === KycStatus.APPROVED) {
+        throw new ConflictException(
+          'Your name has been verified through KYC and can no longer be changed. Please contact support.',
+        );
+      }
+      user.fullName = dto.fullName;
+    }
+
+    if (dto.phone !== undefined && dto.phone !== user.pendingPhone) {
+      const isOwnVerified =
+        user.phoneVerifiedAt !== null && dto.phone === user.phone;
+      if (!isOwnVerified) {
+        await this.assertPhoneNotTaken(dto.phone, userId);
+      }
+      user.pendingPhone = isOwnVerified ? null : dto.phone;
+      user.phoneOtpHash = null;
+      user.phoneOtpExpiresAt = null;
+      user.phoneOtpAttempts = 0;
+    }
+
+    await this.usersRepository.saveUser(user);
+    return this.getOwnProfile(userId);
+  }
 
   /**
    * Initiate an email-address change.

@@ -45,7 +45,6 @@ function buildKyc(overrides: Partial<KycVerification> = {}): KycVerification {
 
 function buildDto(overrides: Partial<SubmitKycDto> = {}): SubmitKycDto {
   return {
-    fullName: 'Lily Shrestha',
     documentType: DocumentType.NID_CARD,
     documentId: 'NID-001',
     permanentAddressStreet: 'Kathmandu-10',
@@ -88,6 +87,7 @@ describe('KycService.submitKyc', () => {
     id: 'user-1',
     email: 'u@test.local',
     username: 'BB000001-2026',
+    fullName: 'Lily Shrestha',
     phoneVerifiedAt: new Date(),
   };
 
@@ -144,6 +144,34 @@ describe('KycService.submitKyc', () => {
         nidFront: [fakeFile('nid.png')],
       }),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  // ─── The name comes from the account ──────────────────────────────────────
+
+  it('refuses a submission from an account with no full name', async () => {
+    users.findById.mockResolvedValue({ ...verifiedUser, fullName: null });
+
+    await expect(
+      service.submitKyc('user-1', buildDto(), {
+        nidFront: [fakeFile('nid.png')],
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(repo.saveKyc).not.toHaveBeenCalled();
+  });
+
+  it('snapshots the account’s name onto the submission', async () => {
+    users.findById.mockResolvedValue({
+      ...verifiedUser,
+      fullName: 'Ram Bahadur Thapa',
+    });
+
+    await service.submitKyc('user-1', buildDto(), {
+      nidFront: [fakeFile('nid.png')],
+    });
+
+    expect(repo.createKyc).toHaveBeenCalledWith(
+      expect.objectContaining({ fullName: 'Ram Bahadur Thapa' }),
+    );
   });
 
   // ─── One document, one account ────────────────────────────────────────────

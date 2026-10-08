@@ -42,15 +42,24 @@ erDiagram
 erDiagram
     USER {
         uuid id PK
-        string name
         string username UK
         string email UK
+        string fullName
         string password
+        string googleId UK
+        string facebookId UK
         enum role
         boolean isActive
         boolean isEmailVerified
         string hashedRefreshToken
-        timestamp nameChangedAt
+        string phone UK
+        timestamp phoneVerifiedAt
+        string phoneOtpHash
+        timestamp phoneOtpExpiresAt
+        int phoneOtpAttempts
+        string pendingPhone
+        decimal averageRating
+        int ratingCount
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -85,18 +94,20 @@ erDiagram
     KYCVERIFICATION {
         uuid id PK
         uuid userId FK,UK
+        string fullName
         enum documentType
+        string documentId
         string citizenshipFrontPath
         string citizenshipBackPath
         string passportPath
         string nidFrontPath
-        string primaryPhone
-        string secondaryPhone
+        string emergencyContactPhone
         json permanentAddress
         json temporaryAddress
         string remarks
         enum status
         string rejectionReason
+        json rejectedFields
         uuid reviewedBy
         timestamp reviewedAt
         timestamp createdAt
@@ -383,8 +394,9 @@ erDiagram
 - `hashedRefreshToken` stores a bcrypt hash of the refresh token, not the raw token. Set to `null` on logout.
 - `role` enum values: `SUPERADMIN`, `ADMIN`, `USER`. Default: `USER`.
 - `isActive` soft-disables the account without deletion. Checked on every authenticated request.
-- `nameChangedAt` is `null` until the user exercises their one-time display-name change. Once set it cannot be cleared except by a SUPERADMIN via `POST /admin/users/:id/reset-name-change`.
-- `username` is the public-facing handle. It is **system-generated** at account creation (both public registration and admin creation) — format `BB000001-2026` (`BB` + a 6-digit, never-resetting sequence number from the `username_seq` Postgres sequence + the creation year). Nobody types a username; there is no self-service or admin change path. `nextval('username_seq')` is atomic across concurrent sessions, so simultaneous account creations never collide. Backed by a column-level `unique` constraint as a safety net. `name` is private (emails, admin views, own profile only).
+- `fullName` (max 150) is the person's name — the **only** place it is stored. Collected at registration (`POST /auth/register`), taken from the Google/Facebook profile on social signup, set by staff on `POST /users/admin`. Self-declared until KYC is `APPROVED`; `KycService.submitKyc` snapshots it onto `kyc_verifications.fullName` for the reviewer. Editable via `PATCH /users/me` except while KYC is `PENDING` or `APPROVED`. Nullable only because a social provider may not share a name.
+- `phone` holds the **verified** number only (partial unique index `WHERE phone IS NOT NULL`, so a verified number identifies one account). `pendingPhone` holds a number awaiting verification — the one given at registration or via `PATCH /users/me`, or one an OTP was sent to. `pendingPhone` is not unique: the first account to verify a number keeps it. `phoneVerifiedAt` is set when the OTP is confirmed; KYC submission and approval both require it. `phoneOtpHash`/`phoneOtpExpiresAt`/`phoneOtpAttempts` are the outstanding code's state (excluded from serialization).
+- `username` is the public-facing handle. It is **system-generated** at account creation (both public registration and admin creation) — format `BB000001-2026` (`BB` + a 6-digit, never-resetting sequence number from the `username_seq` Postgres sequence + the creation year). Nobody types a username; there is no self-service or admin change path. `nextval('username_seq')` is atomic across concurrent sessions, so simultaneous account creations never collide. Backed by a column-level `unique` constraint as a safety net. `fullName` is private (own profile, KYC review, admin views) — public surfaces show `username`.
 - `deletedAt` enables TypeORM soft-delete via `@DeleteDateColumn`. Queries exclude soft-deleted rows by default.
 
 ### EMAILVERIFICATIONTOKEN
@@ -416,10 +428,15 @@ erDiagram
 - `status` enum values: `PENDING`, `APPROVED`, `REJECTED`. Default: `PENDING`.
 - `nidFrontPath` (single side — NID cards have no back side) is populated only when
   `documentType === NID_CARD`.
-- `primaryPhone`/`secondaryPhone`: contact numbers collected at KYC submission.
-  `primaryPhone` is required by `SubmitKycDto` for new submissions but nullable at the DB
-  level (existing rows predate the column); `secondaryPhone` (emergency contact) is always
-  optional.
+- `fullName` (NOT NULL): a snapshot of `users.fullName` taken at submission — not typed into
+  the KYC form. Keeps exactly the name the reviewer compared against the document.
+- `documentId` (NOT NULL): the number printed on the document. Unique per
+  `(documentType, documentId)`, so one physical document backs one account.
+- `emergencyContactPhone`: optional, unverified alternative contact. The account's own phone
+  is `users.phone`, verified before KYC can be submitted.
+- `rejectedFields`: the field keys a reviewer flagged on a rejection (`fullName`,
+  `documentId`, `citizenshipFront`, …). A flagged `fullName` is corrected via
+  `PATCH /users/me`, then KYC is resubmitted.
 - `permanentAddress` and `temporaryAddress` are `jsonb` columns with shape `{ street, city, district, province, country }`.
 - `remarks`: optional free-text note (max 1000 chars) entered by the applicant at submission time, shown to the reviewer.
 - `reviewedBy` is a UUID referencing `users.id` (the admin who reviewed) — stored as a plain column, no TypeORM relation defined.
@@ -523,7 +540,7 @@ erDiagram
 ### SHIPPINGADDRESS
 - A buyer's saved delivery address book, capped at 5 per user (`MAX_SHIPPING_ADDRESSES`, service-enforced, not a DB constraint) — see `shipping.controller.ts`/`shipping.service.ts`.
 - Exactly one `isDefault = true` per user while any address exists (service-enforced: the first address saved becomes the default, setting a new default clears the old one in the same transaction, deleting the default promotes the oldest survivor).
-- `pathaoCityId`/`pathaoZoneId`/`pathaoAreaId` (+ denormalized `pathaoCityName`/`pathaoZoneName`/`pathaoAreaName`) — Pathao's own location taxonomy, picked via a cascading picker backed by `PathaoModule`'s proxy endpoints (`GET /pathao/cities` → `/cities/:id/zones` → `/zones/:id/areas`). Nullable at this level (existing rows predate this, and an address can be saved before it's ever used at checkout) but required by the time it's used to initiate a payment (`PaymentsService.initiatePayment` enforces this, and also that the city is inside `PATHAO_VALLEY_CITY_IDS` — Kathmandu Valley only, for now).
+- `pathaoCityId`/`pathaoZoneId`/`pathaoAreaId` (+ denormalized `pathaoCityName`/`pathaoZoneName`/`pathaoAreaName`) — Pathao's own location taxonomy, picked via a cascading picker backed by `PathaoModule`'s proxy endpoints (`GET /pathao/cities` → `/cities/:id/zones` → `/zones/:id/areas`). Nullable at this level (an address can be saved before it's ever used at checkout) but required by the time it's used to initiate a payment (`PaymentsService.initiatePayment` enforces this, and also that the city is inside `PATHAO_VALLEY_CITY_IDS` — Kathmandu Valley only, for now).
 - Deliberately **not** linked to KYC addresses (a seller's identity-document address) — these are wherever a buyer wants a parcel delivered, unrelated to identity verification.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 

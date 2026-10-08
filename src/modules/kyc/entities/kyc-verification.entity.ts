@@ -14,29 +14,23 @@ export interface AddressData {
 @Entity('kyc_verifications')
 // One identity document may back exactly one account. Scoped to the type
 // because the numbers live in different namespaces — a citizenship number and
-// a passport number are unrelated sequences and could coincide. Partial, so
-// the rows that predate `documentId` (which have none) don't collide on null.
-@Index(['documentType', 'documentId'], {
-  unique: true,
-  where: '"documentId" IS NOT NULL',
-})
+// a passport number are unrelated sequences and could coincide.
+@Index(['documentType', 'documentId'], { unique: true })
 export class KycVerification extends BaseEntity {
   @Index()
   @Column({ type: 'uuid', unique: true })
   userId: string;
 
   /*
-   * The applicant's legal full name, as printed on the document.
+   * The name under review: a snapshot of User.fullName taken at submission.
    *
-   * This is the authoritative name for the account — User carries none (see
-   * that entity's note). It is only trustworthy once `status` is APPROVED,
-   * which is precisely why it sits behind review rather than on the profile.
-   *
-   * Nullable at the DB level because rows predating this field have no value;
-   * required by SubmitKycDto for every submission going forward.
+   * The applicant no longer types it into the KYC form — it was collected at
+   * registration. It is copied here so the record keeps exactly what the
+   * reviewer compared against the document, even if a later rejection leads
+   * the user to correct the name on their account and resubmit.
    */
-  @Column({ type: 'varchar', length: 150, nullable: true })
-  fullName: string | null;
+  @Column({ type: 'varchar', length: 150 })
+  fullName: string;
 
   @Column({ type: 'enum', enum: DocumentType })
   documentType: DocumentType;
@@ -49,11 +43,9 @@ export class KycVerification extends BaseEntity {
    * physical document backing two accounts. Without it the only thing tying a
    * submission to a real document was the photograph, and nothing prevented
    * the same citizenship certificate being submitted twice.
-   *
-   * Nullable for the same reason as `fullName`: existing rows have none.
    */
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  documentId: string | null;
+  @Column({ type: 'varchar', length: 50 })
+  documentId: string;
 
   @Column({ type: 'varchar', nullable: true })
   citizenshipFrontPath: string | null;

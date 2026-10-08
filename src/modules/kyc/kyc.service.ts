@@ -100,6 +100,14 @@ export class KycService {
         'Verify your phone number before submitting KYC',
       );
     }
+    // The name is collected at registration; a social-login account that never
+    // supplied one sets it via PATCH /users/me first.
+    if (!user.fullName) {
+      throw new BadRequestException(
+        'Add your full name to your profile before submitting KYC',
+      );
+    }
+    const fullName = user.fullName;
 
     /*
      * One document backs one account. Checked here so the applicant gets an
@@ -209,7 +217,9 @@ export class KycService {
 
     const kycPayload = {
       userId,
-      fullName: dto.fullName,
+      // Snapshot of the account's name — what the reviewer checks against the
+      // document. PATCH /users/me refuses name changes while this is PENDING.
+      fullName,
       documentType: dto.documentType,
       documentId: dto.documentId,
       ...resolved,

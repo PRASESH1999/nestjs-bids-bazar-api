@@ -246,6 +246,28 @@ export const AccessTokenResponse: ApiResponseOptions = {
   },
 };
 
+/** Login (password, Google, Facebook): the access token plus what the profile still lacks. */
+export const LoginResponse: ApiResponseOptions = {
+  schema: {
+    type: 'object',
+    properties: {
+      accessToken: {
+        type: 'string',
+        example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        description:
+          'Short-lived JWT. Send as Authorization: Bearer <token> on protected routes.',
+      },
+      missingProfileFields: {
+        type: 'array',
+        items: { type: 'string', enum: ['fullName', 'phone'] },
+        example: ['phone'],
+        description:
+          'Identity fields the account has not supplied yet — typically a fresh Google/Facebook signup. When non-empty, show the "complete your profile" step and submit it to PATCH /users/me.',
+      },
+    },
+  },
+};
+
 export const SuccessResponse: ApiResponseOptions = {
   schema: {
     type: 'object',

@@ -2,6 +2,7 @@ import { Role } from '@common/enums/role.enum';
 import { MailService } from '@modules/mail/mail.service';
 import { User } from '@modules/users/entities/user.entity';
 import { UsersService } from '@modules/users/users.service';
+import { computeMissingProfileFields } from '@modules/users/profile-completion';
 import {
   BadRequestException,
   ConflictException,
@@ -27,10 +28,22 @@ import { PasswordResetRepository } from './password-reset.repository';
 import { PendingEmailChangeRepository } from './pending-email-change.repository';
 import { RolePermissionsMap } from './role-permissions.map';
 
+export type LoginUser = Pick<
+  User,
+  | 'id'
+  | 'email'
+  | 'role'
+  | 'isEmailVerified'
+  | 'fullName'
+  | 'phone'
+  | 'pendingPhone'
+>;
+
 interface SocialLoginParams {
   provider: 'google' | 'facebook';
   providerId: string;
   email: string | null;
+  name: string | null;
 }
 
 interface FacebookProfile {
@@ -88,7 +101,7 @@ export class AuthService {
     return result;
   }
 
-  async login(user: Pick<User, 'id' | 'email' | 'role' | 'isEmailVerified'>) {
+  async login(user: LoginUser) {
     if (!user.isEmailVerified) {
       throw new ForbiddenException({
         statusCode: 403,
@@ -113,6 +126,9 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
+      // Non-empty mostly for a fresh social-login account: tells the client to
+      // ask for the missing name/phone straight away.
+      missingProfileFields: computeMissingProfileFields(user),
     };
   }
 
@@ -142,6 +158,7 @@ export class AuthService {
       provider: 'google',
       providerId: payload.sub,
       email: payload.email ?? null,
+      name: payload.name ?? null,
     });
 
     return this.login(user);
@@ -154,6 +171,7 @@ export class AuthService {
       provider: 'facebook',
       providerId: profile.id,
       email: profile.email,
+      name: profile.name,
     });
 
     return this.login(user);
@@ -243,21 +261,25 @@ export class AuthService {
         : { facebookId: params.providerId };
 
     const normalizedEmail = params.email.toLowerCase();
+    const fullName = params.name?.trim().slice(0, 150) || null;
     const existingByEmail =
       await this.usersService.findByEmail(normalizedEmail);
     if (existingByEmail) {
       return this.usersService.updateUser(existingByEmail.id, {
         ...providerColumns,
         isEmailVerified: true,
+        // Only fills a gap — never replaces a name the user already gave.
+        ...(existingByEmail.fullName || !fullName ? {} : { fullName }),
       });
     }
 
     const username = await this.usersService.generateNextUsername();
     return this.usersService.create({
       email: normalizedEmail,
-      // The provider's display name is deliberately dropped: User carries no
-      // name, and an unverified one from Google/Facebook is exactly the
-      // second, non-authoritative copy that moving names to KYC removed.
+      // The provider's display name, self-declared like a registration name.
+      // The user can correct it before KYC; providers never share a phone, so
+      // that is asked for right after signup (`missingProfileFields`).
+      fullName,
       username,
       password: null,
       isEmailVerified: true,
@@ -281,12 +303,18 @@ export class AuthService {
       throw new ConflictException('User with this email already exists');
     }
 
-    const { password, ...rest } = data;
-    const hashedPassword = await bcrypt.hash(password, 12);
+    // Only a *verified* number can be taken; an unverified claim on the same
+    // number doesn't block registration (the first account to verify it wins).
+    await this.usersService.assertPhoneNotTaken(data.phone);
+
+    const hashedPassword = await bcrypt.hash(data.password, 12);
     const username = await this.usersService.generateNextUsername();
     const user = await this.usersService.create({
-      ...rest,
       email,
+      fullName: data.fullName,
+      // Unverified until the OTP flow confirms it — `phone` holds only verified
+      // numbers (see the User entity).
+      pendingPhone: data.phone,
       username,
       password: hashedPassword,
       role: Role.USER, // Force USER role for public registration

@@ -6,14 +6,6 @@ import { Role } from '@common/enums/role.enum';
 @Entity('users')
 export class User extends BaseEntity {
   /*
-   * There is deliberately no `name` on User.
-   *
-   * A person's full name is a *verified* attribute — it is whatever their
-   * identity document says — so it lives on KycVerification.fullName and is
-   * only trustworthy once a reviewer has approved it. Keeping an unverified
-   * copy here meant the platform carried two names for everyone, with nothing
-   * deciding which was authoritative.
-   *
    * `username` is the public identity everywhere: seller cards, admin lists and
    * transactional email all address people by it. It is system-generated and
    * stable, which is exactly what those surfaces need.
@@ -27,6 +19,22 @@ export class User extends BaseEntity {
 
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
+
+  /*
+   * The person's full name. The one place it is stored.
+   *
+   * Collected at registration (or taken from the Google/Facebook profile) and
+   * self-declared until KYC is APPROVED, at which point the reviewer has
+   * checked it against the identity document. KycService.submitKyc snapshots it
+   * onto the submission so the record shows exactly what was reviewed. Editable
+   * via PATCH /users/me until KYC is submitted, locked while it is under review
+   * or approved.
+   *
+   * Nullable only because a social provider may not share a name; such an
+   * account is asked for it right after signup (see `missingProfileFields`).
+   */
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  fullName: string | null;
 
   // Null for accounts created via social login (Google/Facebook) that have
   // never set a local password.
@@ -78,9 +86,10 @@ export class User extends BaseEntity {
    * KYC: a phone is how the platform reaches an account, so it is established
    * once and then reused, instead of being re-proved inside every submission.
    *
-   * Unique: a verified number identifies one account. Nullable because accounts
-   * created before this existed have none, and because the column is written
-   * before it is verified.
+   * Unique: a verified number identifies one account. Holds only a *verified*
+   * number, so it is null until the first OTP is confirmed — the number given
+   * at registration waits in `pendingPhone`. Keeping unverified numbers out of
+   * this column is what stops someone squatting another person's number.
    */
   @Index({ unique: true, where: '"phone" IS NOT NULL' })
   @Column({ type: 'varchar', length: 20, nullable: true })
@@ -107,8 +116,11 @@ export class User extends BaseEntity {
   @Column({ type: 'int', default: 0 })
   phoneOtpAttempts: number;
 
-  // The number the pending OTP was issued for. Kept separate from `phone` so a
-  // verified number is never overwritten by an unconfirmed change request.
+  // A number awaiting verification: the one given at registration (or via
+  // PATCH /users/me), or one an OTP has been sent to. Kept separate from
+  // `phone` so a verified number is never overwritten by an unconfirmed one.
+  // Not unique — two accounts may both claim a number; the first to verify it
+  // keeps it (PhoneVerificationService.verifyOtp).
   @Column({ type: 'varchar', length: 20, nullable: true })
   pendingPhone: string | null;
 

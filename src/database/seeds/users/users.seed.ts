@@ -22,6 +22,7 @@ export async function seedUsers(dataSource: DataSource): Promise<void> {
       repo.create({
         id: user.id,
         email: user.email,
+        fullName: user.fullName,
         password: hashedPassword,
         username: user.username,
         role: user.role,

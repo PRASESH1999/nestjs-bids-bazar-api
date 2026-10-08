@@ -1,11 +1,12 @@
 import { Role } from '@common/enums/role.enum';
 import { KycStatus } from '@common/enums/kyc-status.enum';
 import { SellerTier } from '@common/enums/seller-tier.enum';
+import type { ProfileField } from '../profile-completion';
 
 export interface KycSummary {
   status: KycStatus;
-  /** The legal name on the submission. Only authoritative once APPROVED. */
-  fullName: string | null;
+  /** The name snapshotted onto the submission — what the reviewer checked. */
+  fullName: string;
   submittedAt: Date;
   reviewedAt: Date | null;
   rejectionReason: string | null;
@@ -30,12 +31,19 @@ export interface OwnProfileResponse {
    *  surfaces have — see the note on the User entity. */
   username: string;
   email: string;
-  /** Legal name from an APPROVED KYC, else null. Never editable here. */
+  /** The account's full name, collected at registration. */
   fullName: string | null;
+  /** True once KYC is APPROVED — the name has been checked against a document. */
+  isNameVerified: boolean;
+  /** False while KYC is under review or approved; PATCH /users/me refuses then. */
+  canEditName: boolean;
+  /** Identity fields still to supply (social-login signups); empty when complete. */
+  missingProfileFields: ProfileField[];
+  /** The verified number. Null until the first OTP is confirmed. */
   phone: string | null;
   isPhoneVerified: boolean;
   phoneVerifiedAt: Date | null;
-  /** A number with an outstanding verification code, if any. */
+  /** A number awaiting verification — e.g. the one given at registration. */
   pendingPhone: string | null;
   role: Role;
   isActive: boolean;

@@ -157,11 +157,18 @@ enum Permission {
 - Accepted formats: JPEG, PNG, PDF
 - Max file size: 5 MB per file
 
-### Contact Requirements
-- `primaryPhone`: required on every new submission
-- `secondaryPhone` (emergency contact): optional
-- Both live on the KYC record itself, not on the User entity — collected at KYC time,
-  same as address
+### Identity & Contact Requirements
+- Full name and mobile number are collected at **registration**, not in the KYC form
+  (`POST /auth/register` requires `fullName` + `phone`). Social signups get the name from
+  the provider and are asked for the phone right after signup (`missingProfileFields` on
+  the login response → `PATCH /users/me`).
+- The phone is stored as `users.pendingPhone` and verified later by OTP
+  (`POST /users/me/phone/send-otp` with no body → `verify-otp`), which promotes it to
+  `users.phone`. `submitKyc` and KYC approval both require `users.phoneVerifiedAt`.
+- `submitKyc` requires `users.fullName` and snapshots it onto `kyc_verifications.fullName`
+  (NOT NULL) for the reviewer. The name is locked (`PATCH /users/me` → 409) while KYC is
+  PENDING or APPROVED; after a rejection the user corrects it and resubmits.
+- `emergencyContactPhone`: optional, unverified, lives on the KYC record
 
 ### Address Requirements
 - Permanent address: required (street, city, district, province, country)

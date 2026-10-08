@@ -6,24 +6,14 @@ import {
   IsString,
   Matches,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 import { DocumentType } from '@common/enums/document-type.enum';
 
 export class SubmitKycDto {
   // --- Identity ---
-
-  @ApiProperty({
-    example: 'Lily Shrestha',
-    description:
-      'Legal full name exactly as printed on the document. This becomes the authoritative name for the account once approved — User carries none.',
-    maxLength: 150,
-  })
-  @IsString()
-  @IsNotEmpty()
-  @MinLength(2)
-  @MaxLength(150)
-  fullName: string;
+  //
+  // No `fullName`: the name is collected at registration and lives on User.
+  // submitKyc snapshots it onto the submission for the reviewer.
 
   @ApiProperty({ enum: DocumentType })
   @IsNotEmpty()

@@ -5,6 +5,26 @@ We now have live data — schema changes MUST go through migrations. Never flip 
 
 Migrations live in `src/database/migrations/`.
 
+## Baseline reset (2026-10-08)
+
+Every database (dev, test, live) was wiped and the 23 incremental migrations were squashed into a
+single `1791448028981-InitialSchema.ts`. The old files remain in git history only. `InitialSchema`
+is generated from the entities, plus two hand-added statements that generation cannot produce:
+`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` (needed by every `uuid_generate_v4()` default) and
+`CREATE SEQUENCE "username_seq"` (see `UsersRepository.nextUsernameSequenceValue`).
+
+**Bringing up an empty database:**
+
+```bash
+npm run migration:run   # creates the whole schema
+npm run seed:run        # staff/test users, categories, specifications; advances username_seq
+```
+
+A database that still has tables from the old chain **cannot** take `InitialSchema` — it will fail
+on `CREATE TABLE "users"`. Wipe it first (drop and recreate the `public` schema, which also removes
+the `migrations` history table). From here on the normal flow below applies again: every entity
+change gets its own generated migration on top of `InitialSchema`.
+
 ## Golden rule
 
 **Every time you add, remove, or change an entity/column/index/relation, you must generate and
@@ -24,7 +44,7 @@ does nothing to the database anymore.
    ```
 
    Use a short PascalCase name describing the change, e.g. `AddProductViewCount`,
-   `AddSellerCommissionToPayments`. Do not reuse `InitSchema`.
+   `AddSellerCommissionToPayments`. Do not reuse `InitSchema`/`InitialSchema`.
 
 3. **Read the generated file** in `src/database/migrations/`. Sanity-check the `up()` SQL — TypeORM
    is usually right, but double check on:

@@ -36,6 +36,9 @@ export interface PhoneStatus {
  * request is held in `pendingPhone` and only promoted to `phone` when the code
  * checks out. Requesting a code for a new number therefore cannot cost someone
  * the number they already have.
+ *
+ * The number given at registration starts out in `pendingPhone` with no code
+ * sent; sendOtp with no `phone` in the body sends the code to it.
  */
 @Injectable()
 export class PhoneVerificationService {
@@ -60,15 +63,25 @@ export class PhoneVerificationService {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    if (user.phoneVerifiedAt && user.phone === dto.phone) {
+    // No number in the request = verify the one already pending, typically the
+    // number given at registration.
+    const phone = dto.phone ?? user.pendingPhone;
+    if (!phone) {
+      throw new BadRequestException(
+        'No phone number on file. Provide the number to verify.',
+      );
+    }
+
+    if (user.phoneVerifiedAt && user.phone === phone) {
       throw new BadRequestException('This number is already verified');
     }
 
     // The unique index would reject this at write time anyway; catching it here
     // means the caller gets an explanation rather than a constraint violation.
     const takenBySomeoneElse = await this.userRepo.findOne({
-      where: { phone: dto.phone, id: Not(userId) },
+      where: { phone, id: Not(userId) },
       select: { id: true },
+      withDeleted: true,
     });
     if (takenBySomeoneElse) {
       throw new ConflictException(
@@ -81,11 +94,11 @@ export class PhoneVerificationService {
     // Sent before the hash is stored: if Sparrow fails, the previous pending
     // request stays valid rather than being replaced by a code nobody received.
     await this.smsService.sendSms(
-      dto.phone,
+      phone,
       `Your BidsBazar phone verification code is ${code}. It expires in 5 minutes.`,
     );
 
-    user.pendingPhone = dto.phone;
+    user.pendingPhone = phone;
     user.phoneOtpHash = crypto.createHash('sha256').update(code).digest('hex');
     user.phoneOtpExpiresAt = new Date(Date.now() + PHONE_OTP_TTL_MS);
     user.phoneOtpAttempts = 0;
@@ -130,6 +143,7 @@ export class PhoneVerificationService {
     const takenBySomeoneElse = await this.userRepo.findOne({
       where: { phone: user.pendingPhone, id: Not(userId) },
       select: { id: true },
+      withDeleted: true,
     });
     if (takenBySomeoneElse) {
       user.pendingPhone = null;

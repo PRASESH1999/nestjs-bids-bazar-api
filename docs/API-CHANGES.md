@@ -14,6 +14,51 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-10-08 — name and phone move to registration; database reset
+
+Every database was wiped and the migrations squashed into one `InitialSchema`
+(see `docs/MIGRATIONS.md`). **All existing accounts, tokens and sessions are
+gone** — clients must sign everyone out and treat stored tokens as invalid.
+
+The person's full name and mobile number are now asked for at registration
+instead of in the KYC form. The phone is still verified later, by OTP, exactly
+as before — and verification still gates KYC.
+
+### New
+
+| Endpoint | Why |
+|---|---|
+| `PATCH /users/me` `{ fullName?, phone? }` → own profile | The "complete your profile" step after a Google/Facebook signup (providers never share a phone), and how a KYC-rejected name is fixed before resubmitting. `phone` is saved as `pendingPhone` (unverified) and discards any outstanding code. `fullName` is refused (409) while KYC is `PENDING` or `APPROVED`. 409 if the number is already verified on another account. |
+
+### Changed — check your client
+
+- **`POST /auth/register`** now **requires** `fullName` (2–150 chars, trimmed)
+  and `phone` (`^\+?\d{7,15}$`). The phone is stored as `pendingPhone`; no SMS
+  is sent at registration. 409 if the number is already *verified* on another
+  account (an unverified claim doesn't block).
+- **`POST /auth/login`, `/auth/google`, `/auth/facebook`** return
+  `{ accessToken, missingProfileFields }`. `missingProfileFields` is
+  `('fullName' | 'phone')[]` — empty for a password registration, `['phone']`
+  for a fresh social signup (also `'fullName'` if the provider shared no
+  name). **When it is non-empty, show the "complete your profile" screen right
+  away** and submit it to `PATCH /users/me`. Always `[]` for staff accounts.
+- **Social signup keeps the provider's name** as `fullName` (it used to be
+  discarded). Linking a social login to an existing account only fills a
+  missing name, never replaces one.
+- **`POST /users/me/phone/send-otp`**: `phone` is now **optional**. Omit it to
+  send the code to the pending number (the one from registration). 400 if
+  neither is present.
+- **`POST /kyc/submit`** no longer takes `fullName` — the account's name is
+  snapshotted onto the submission. 400 *"Add your full name to your profile
+  before submitting KYC"* if the account has none.
+- **`GET /users/me`**: `fullName` is now the account's name **always** (it was
+  null until KYC approval). New: `isNameVerified` (KYC approved),
+  `canEditName` (false while KYC is pending/approved), and
+  `missingProfileFields`. `kyc.fullName` is the name on the submission.
+- **`POST /users/admin`** now **requires** `fullName`.
+
+---
+
 ## 2026-09-25 — delivery endpoints the Pathao commit needed, and an audit pass
 
 Follow-up to `5b819f8`. Everything here was verified end to end against the

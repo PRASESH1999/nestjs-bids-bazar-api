@@ -63,8 +63,8 @@ export class ShippingAddress extends BaseEntity {
   /*
    * Pathao's own location taxonomy (city → zone → area), picked via a
    * cascading dropdown backed by PathaoModule's proxy endpoints. Nullable —
-   * existing rows predate this, and it's only required once a buyer actually
-   * checks out (see PaymentsService.initiatePayment). Names are denormalized
+   * optional when the address is saved, and only required once a buyer
+   * actually checks out (see PaymentsService.initiatePayment). Names are denormalized
    * alongside the ids purely for display; the ids are what's sent to Pathao.
    */
   @Column({ type: 'int', nullable: true })

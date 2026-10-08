@@ -18,6 +18,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   AccessTokenResponse,
+  LoginResponse,
   MessageResponse,
   R400,
   R401,
@@ -38,7 +39,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { FacebookLoginDto } from './dto/facebook-login.dto';
-import type { User } from '../users/entities/user.entity';
+import type { LoginUser } from './auth.service';
 
 interface DecodedJwtPayload {
   sub?: string;
@@ -83,7 +84,7 @@ export class AuthController {
     status: 200,
     description:
       'Login successful. Sets HttpOnly refreshToken cookie. Returns short-lived accessToken.',
-    ...AccessTokenResponse,
+    ...LoginResponse,
   })
   @ApiResponse({ status: 400, description: 'Validation failed.', ...R400 })
   @ApiResponse({
@@ -119,17 +120,14 @@ export class AuthController {
   @Post('login')
   async login(
     @Request()
-    req: ExpressRequest & {
-      user: Pick<User, 'id' | 'email' | 'role' | 'isEmailVerified'>;
-    },
+    req: ExpressRequest & { user: LoginUser },
     @NestResponse({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshToken } = await this.authService.login(
-      req.user,
-    );
+    const { accessToken, refreshToken, missingProfileFields } =
+      await this.authService.login(req.user);
 
     this.setRefreshTokenCookie(res, refreshToken);
-    return { accessToken };
+    return { accessToken, missingProfileFields };
   }
 
   @Public()
@@ -139,7 +137,7 @@ export class AuthController {
     status: 200,
     description:
       'Login successful. Sets HttpOnly refreshToken cookie. Returns short-lived accessToken.',
-    ...AccessTokenResponse,
+    ...LoginResponse,
   })
   @ApiResponse({ status: 400, description: 'Validation failed.', ...R400 })
   @ApiResponse({
@@ -155,10 +153,10 @@ export class AuthController {
     @Body() dto: GoogleLoginDto,
     @NestResponse({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshToken } =
+    const { accessToken, refreshToken, missingProfileFields } =
       await this.authService.loginWithGoogle(dto.idToken);
     this.setRefreshTokenCookie(res, refreshToken);
-    return { accessToken };
+    return { accessToken, missingProfileFields };
   }
 
   @Public()
@@ -170,7 +168,7 @@ export class AuthController {
     status: 200,
     description:
       'Login successful. Sets HttpOnly refreshToken cookie. Returns short-lived accessToken.',
-    ...AccessTokenResponse,
+    ...LoginResponse,
   })
   @ApiResponse({ status: 400, description: 'Validation failed.', ...R400 })
   @ApiResponse({
@@ -186,10 +184,10 @@ export class AuthController {
     @Body() dto: FacebookLoginDto,
     @NestResponse({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshToken } =
+    const { accessToken, refreshToken, missingProfileFields } =
       await this.authService.loginWithFacebook(dto.accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
-    return { accessToken };
+    return { accessToken, missingProfileFields };
   }
 
   @Public()

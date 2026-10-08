@@ -1,18 +1,18 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Matches } from 'class-validator';
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class SendPhoneOtpDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '+9779812345678',
     description:
-      'The number to verify. Sending a code for a different number than the one on file replaces the pending request; a already-verified number is rejected.',
+      'The number to verify. Omit it to send the code to your pending number (the one given at registration). Sending a different number replaces the pending one; an already-verified number is rejected.',
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Matches(/^\+?\d{7,15}$/, {
     message: 'phone must be 7–15 digits, optionally starting with +',
   })
-  phone: string;
+  phone?: string;
 }
 
 export class VerifyPhoneOtpDto {

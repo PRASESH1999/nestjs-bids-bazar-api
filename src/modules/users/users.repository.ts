@@ -29,6 +29,20 @@ export class UsersRepository {
       .getOne();
   }
 
+  /**
+   * Whether another account already holds this number as its *verified* phone.
+   * Includes soft-deleted accounts, matching the unique index on `phone`.
+   */
+  async isPhoneTaken(phone: string, excludeUserId?: string): Promise<boolean> {
+    const qb = this.repo
+      .createQueryBuilder('user')
+      .where('user.phone = :phone', { phone })
+      .withDeleted();
+    if (excludeUserId)
+      qb.andWhere('user.id != :excludeUserId', { excludeUserId });
+    return (await qb.getCount()) > 0;
+  }
+
   /** Atomically claims the next value from the `username_seq` Postgres sequence. */
   async nextUsernameSequenceValue(): Promise<number> {
     const [{ seq }] = await this.dataSource.query<{ seq: string }[]>(

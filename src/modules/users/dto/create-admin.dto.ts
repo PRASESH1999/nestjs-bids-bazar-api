@@ -3,17 +3,23 @@ import {
   IsIn,
   IsNotEmpty,
   IsString,
+  MaxLength,
   MinLength,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@common/enums/role.enum';
 
-/*
- * No `name`: User has no name column (a person's name is KYC data, and staff
- * are identified by their generated username). It was still required here and
- * then silently dropped on save.
- */
 export class CreateAdminDto {
+  @ApiProperty({
+    example: 'Sita Sharma',
+    description: 'The staff member’s full name',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(150)
+  fullName: string;
+
   @ApiProperty({
     example: 'admin@test.com',
     description: 'The email of the admin',

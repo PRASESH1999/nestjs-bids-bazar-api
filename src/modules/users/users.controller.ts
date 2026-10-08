@@ -39,6 +39,7 @@ import { AssignRoleDto } from './dto/assign-role.dto';
 import { ChangeEmailDto } from './dto/change-email.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { UpdateSelfDto } from './dto/update-self.dto';
 import { UsersService } from './users.service';
 import { PhoneVerificationService } from './services/phone-verification.service';
 import { SendPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone.dto';
@@ -87,12 +88,28 @@ export class UsersController {
     return this.usersService.getOwnProfile(req.user.sub);
   }
 
-  /*
-   * PATCH /users/me (display-name change) is gone, along with its one-change
-   * quota. A person's name now comes from their approved KYC document, so it is
-   * corrected by resubmitting KYC rather than edited on a profile; `username`
-   * is the public identity and does not change. See the User entity's note.
-   */
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Set or correct your full name and phone number',
+    description:
+      'The "complete your profile" step after a Google/Facebook signup (see `missingProfileFields` on the login response), and how a KYC-rejected name is fixed before resubmitting. The phone is saved unverified, as `pendingPhone`; verify it with POST /users/me/phone/send-otp. The name is locked while KYC is under review and once it is approved. Returns the updated profile.',
+  })
+  @ApiResponse({ status: 200, description: 'Updated own profile.' })
+  @ApiResponse(R400)
+  @ApiResponse(R401)
+  @ApiResponse(R403)
+  @ApiResponse({
+    ...R409,
+    description:
+      'The number is already verified on another account, or the name is locked by KYC.',
+  })
+  @RequirePermissions(Permission.PROFILE_EDIT)
+  async updateProfile(
+    @Request() req: RequestWithUser,
+    @Body() dto: UpdateSelfDto,
+  ) {
+    return this.usersService.updateOwnProfile(req.user.sub, dto);
+  }
 
   // ─── Phone verification ───────────────────────────────────────────────────
   //
@@ -117,7 +134,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Send (or resend) an SMS code to verify a phone number',
     description:
-      'The number is held as pending until the code is confirmed, so requesting a code for a new number never costs you the one you already verified.',
+      'Omit `phone` to verify the pending number — the one given at registration or via PATCH /users/me. The number is held as pending until the code is confirmed, so requesting a code for a new number never costs you the one you already verified.',
   })
   @ApiResponse(R400)
   @ApiResponse(R401)

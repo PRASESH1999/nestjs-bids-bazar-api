@@ -117,8 +117,8 @@ export class Product extends BaseEntity {
 
   // ─── Pickup location ───────────────────────────────────────────────────────
   // Independent per product — never shared/reused across listings, even
-  // across multiple products from the same seller. Nullable because existing
-  // live rows predate this field; every new/updated product always sets all five.
+  // across multiple products from the same seller. Nullable because a draft may
+  // not have them yet; all five are required before it can be submitted.
 
   @Column({ type: 'varchar', nullable: true })
   province: string | null;

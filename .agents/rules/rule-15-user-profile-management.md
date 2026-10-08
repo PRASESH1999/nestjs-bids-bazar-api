@@ -3,7 +3,7 @@
 > Cross-references: Rule 5 (Auth & Authorization), Rule 12 (Database Schema Maintenance)
 
 This rule governs the three self-service profile features available to authenticated users:
-viewing their own profile, changing their display name (one-time), and changing their email address (with re-verification).
+viewing their own profile, setting/correcting their full name and phone, and changing their email address (with re-verification).
 
 ---
 
@@ -17,11 +17,14 @@ Returns an `OwnProfileResponse` object containing:
 
 | Field | Source |
 |---|---|
-| `id`, `name`, `username`, `email`, `role`, `isActive`, `isEmailVerified` | `users` table |
-| `nameChangedAt` | `users.nameChangedAt` — `null` = quota available |
+| `id`, `fullName`, `username`, `email`, `role`, `isActive`, `isEmailVerified` | `users` table |
+| `isNameVerified` | KYC status is `APPROVED` |
+| `canEditName` | KYC is neither `PENDING` nor `APPROVED` |
+| `missingProfileFields` | `computeMissingProfileFields()` (`modules/users/profile-completion.ts`) |
+| `phone`, `isPhoneVerified`, `phoneVerifiedAt`, `pendingPhone` | `users` table |
 | `createdAt`, `updatedAt` | `users` table |
 
-> The owner sees BOTH their `name` (private) and `username` (public handle) on their
+> The owner sees BOTH their `fullName` (private) and `username` (public handle) on their
 > own profile — no privacy concern, it is their own record.
 | `kyc` | Fetched via `dataSource.getRepository(KycVerification)` — `null` if no KYC record |
 | `pendingEmailChange` | Fetched via `dataSource.getRepository(PendingEmailChange)` — `null` if none |
@@ -31,35 +34,37 @@ Returns an `OwnProfileResponse` object containing:
 
 ---
 
-## 2. PATCH /users/me — One-Time Display Name Change
+## 2. PATCH /users/me — Full Name & Phone
 
 **Controller:** `UsersController.updateProfile`
-**Service:** `UsersService.updateSelfName`
-**DTO:** `UpdateSelfDto` — `name` only (`@IsString @IsNotEmpty @MaxLength(255)`)
+**Service:** `UsersService.updateOwnProfile`
+**DTO:** `UpdateSelfDto` — `fullName?` (2–150, trimmed), `phone?` (`^\+?\d{7,15}$`)
 **Permission:** `PROFILE_EDIT`
 
-### Quota logic
-- `user.nameChangedAt === null` — quota available; proceed.
-- `user.nameChangedAt !== null` — quota consumed; throw `403 ForbiddenException`.
-- On success: set `nameChangedAt = now` alongside the name update.
+Name and phone are collected at registration (`POST /auth/register`). This endpoint is the
+"complete your profile" step for social signups (login returns `missingProfileFields`), and
+how a KYC-rejected name is corrected before resubmitting.
 
-### Side effects
-- Confirmation email sent to the user's current address (`sendNameChangedConfirmation`).
-- Email failure is caught, logged, and **never re-thrown**.
+### Name
+- Free to change while there is no KYC, or after a REJECTED one.
+- `409` while KYC is `PENDING` (the reviewer is checking the snapshot) or `APPROVED` (verified).
 
-### Admin override
-- `POST /admin/users/:id/reset-name-change` calls `UsersService.resetNameChangeQuota`, which sets `nameChangedAt = null`.
-- Requires `Permission.NAME_CHANGE_RESET` (SUPERADMIN-only).
+### Phone
+- Never written to `users.phone` (verified numbers only) — it becomes `pendingPhone`, and the
+  outstanding OTP state is cleared, because that code went to a different number.
+- Sending the account's own verified number cancels a pending change.
+- `409` if the number is another account's verified `phone` (`UsersService.assertPhoneNotTaken`).
+
+There is no name-change quota, confirmation email, or admin reset any more.
 
 ---
 
 ## 2a. Username — Public Handle (system-generated, never typed)
 
-`username` is the **only** user-identifying field shown to OTHER users. `name` is
-**private** — it appears solely in emails, admin views, and the user's own profile.
+`username` is the **only** user-identifying field shown to OTHER users. `fullName` is
+**private** — it appears solely in KYC review, admin views, and the user's own profile.
 Every public-facing surface (product detail top-bidders, the live SSE auction feed,
-the non-admin bids list) exposes `username`, never `name`. Admin/moderation surfaces
-keep `name` (and email) because real identity is required for moderation.
+the non-admin bids list) exposes `username`, never `fullName`.
 
 ### Generation (single source of truth)
 
@@ -154,7 +159,6 @@ change path (self-service or admin) — the value is permanent from creation.
 | `PATCH /users/me/email` | JWT | `PROFILE_EDIT` | USER |
 | `PATCH /users/me/password` | JWT | `PROFILE_EDIT` | USER |
 | `GET /auth/verify-email-change` | Public | — | Anyone with the link |
-| `POST /admin/users/:id/reset-name-change` | JWT | `NAME_CHANGE_RESET` | SUPERADMIN only |
 
 ---
 
