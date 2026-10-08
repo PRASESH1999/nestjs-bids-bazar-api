@@ -13,6 +13,15 @@ export class Product extends BaseEntity {
   @Column({ type: 'uuid' })
   ownerId: string;
 
+  // Human-facing reference (e.g. BB-SKU-42) from the `product_code_seq`
+  // Postgres sequence, assigned the moment a lot first goes public — on admin
+  // approval, or on relist (a relist is a new lot and gets its own code). Null
+  // before that, so drafts and rejected submissions never consume a number.
+  // Never reassigned or reused; the unique constraint covers soft-deleted rows
+  // too, so a code stays retired forever. See formatProductCode.
+  @Column({ type: 'varchar', length: 30, nullable: true, unique: true })
+  productCode: string | null;
+
   // Nullable — a DRAFT product can be created and saved incrementally before
   // every field is filled in. All required-for-submission fields are
   // enforced at POST /products/:id/submit time instead (see

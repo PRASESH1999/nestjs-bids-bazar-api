@@ -130,6 +130,30 @@ export class ProductsRepository {
     await this.productRepo.softRemove(product);
   }
 
+  /** Atomically claims the next value from the `product_code_seq` Postgres sequence. */
+  async nextProductCodeSequenceValue(): Promise<number> {
+    const [{ seq }] = await this.dataSource.query<{ seq: string }[]>(
+      "SELECT nextval('product_code_seq') AS seq",
+    );
+    return Number(seq);
+  }
+
+  // Soft-deleted products only, most recently deleted first. Images are not
+  // joined: deleteProduct removes the files from disk, so their URLs would 404.
+  async findDeletedPaginated(
+    page: number,
+    limit: number,
+    filters: ProductFilters,
+  ): Promise<[Product[], number]> {
+    return this.buildFilterQuery(filters)
+      .withDeleted()
+      .andWhere('product.deletedAt IS NOT NULL')
+      .orderBy('product.deletedAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+  }
+
   // ─── Home page ────────────────────────────────────────────────────────────
 
   // The single hottest ACTIVE product: most bids first, ties broken by
@@ -518,7 +542,7 @@ export class ProductsRepository {
 
     if (filters.keyword) {
       qb.andWhere(
-        '(LOWER(product.title) LIKE :kw OR LOWER(product.description) LIKE :kw)',
+        '(LOWER(product.title) LIKE :kw OR LOWER(product.description) LIKE :kw OR LOWER(product.productCode) LIKE :kw)',
         { kw: `%${filters.keyword.toLowerCase()}%` },
       );
     }

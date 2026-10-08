@@ -17,7 +17,7 @@ is generated from the entities, plus two hand-added statements that generation c
 
 ```bash
 npm run migration:run   # creates the whole schema
-npm run seed:run        # staff/test users, categories, specifications; advances username_seq
+npm run seed:run        # superadmin user, specifications; advances username_seq
 ```
 
 A database that still has tables from the old chain **cannot** take `InitialSchema` — it will fail

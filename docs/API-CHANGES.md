@@ -14,6 +14,34 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-10-08 — product codes; admin view of deleted products
+
+Every listing gets a short, human-facing reference to quote in support,
+receipts and courier labels: **`productCode`**, e.g. `BB-SKU-42`. One counter
+across all categories, so a code never encodes anything (like a category) that
+an admin edit could later make wrong. Additive — nothing breaks.
+
+### New
+
+| Endpoint | Why |
+|---|---|
+| `GET /admin/products/deleted` → `{ data: Product[], meta }` | Owners can delete DRAFT/REJECTED products; that is a soft delete, but until now no endpoint could show those rows to anyone. Same query params as `GET /admin/products` (`page`, `limit`, `status`, `ownerId`, `categoryId`, `keyword`, …), newest deletion first. `PRODUCT_VIEW_ALL`. `images` is always `[]` and `previewImage` `null` — the files are removed on delete. |
+
+### Changed — check your client
+
+- **Every product response** has a new `productCode: string | null`. It is
+  **null until the lot goes public** — set on admin approval and on relist (a
+  relisted lot gets its own new code; the abandoned original keeps its old one).
+  Drafts, submissions under review and rejected lots show `null`, so render it
+  only when present. Once set it never changes.
+- **`keyword` search** (`GET /products`, `GET /admin/products`,
+  `GET /admin/products/deleted`) also matches `productCode`, so pasting
+  `BB-SKU-42` finds the lot. It is a substring match: `BB-SKU-4` also finds 40–49, 400…
+- Existing approved lots were numbered by the migration in the order they went
+  public.
+
+---
+
 ## 2026-10-08 — name and phone move to registration; database reset
 
 Every database was wiped and all 26 migrations squashed into one `InitialSchema`

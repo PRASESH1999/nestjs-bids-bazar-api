@@ -38,6 +38,7 @@ import { RejectProductDto } from './dto/reject-product.dto';
 import { ApproveProductDto } from './dto/approve-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
+import { formatProductCode } from './product-code';
 import { ProductStorageService } from './product-storage.service';
 import { ProductsRepository } from './products.repository';
 import {
@@ -573,6 +574,10 @@ export class ProductsService {
       throw new ConflictException('This product has already been relisted');
     }
 
+    // Only once the claim is won, so a losing double-click never burns a code.
+    saved.productCode = await this.nextProductCode();
+    await this.productsRepository.saveProduct(saved);
+
     const originalImages = await this.productsRepository.findImagesByProductId(
       original.id,
     );
@@ -859,11 +864,11 @@ export class ProductsService {
     }));
   }
 
-  // 10 most recently listed PENDING products (bidding hasn't started yet).
+  // 12 most recently listed PENDING products (bidding hasn't started yet).
   async getNewArrivals(
     requesterId: string | null = null,
   ): Promise<HomeProductResponse[]> {
-    const results = await this.productsRepository.findNewestProducts(10);
+    const results = await this.productsRepository.findNewestProducts(12);
     const { favoritedSet, sellerSummaries, boostedUntil } =
       await this.responseContextFor(
         requesterId,
@@ -1192,6 +1197,37 @@ export class ProductsService {
     };
   }
 
+  // Soft-deleted products, which every other query hides. Only DRAFT and
+  // REJECTED products can be deleted, so none of these ever went public or
+  // carry a product code. Images are absent: their files were removed on delete.
+  async listDeletedProducts(
+    query: AdminListProductsQueryDto,
+    requesterId: string | null = null,
+  ): Promise<{
+    data: ProductResponse[];
+    meta: { page: number; limit: number; total: number };
+  }> {
+    const { page = 1, limit = 20, status, ownerId, ...filters } = query;
+    const [data, total] = await this.productsRepository.findDeletedPaginated(
+      page,
+      limit,
+      { ...filters, status, ownerId },
+    );
+    const { favoritedSet, sellerSummaries, boostedUntil } =
+      await this.responseContextFor(requesterId, data);
+    return {
+      data: data.map((p) =>
+        mapProduct(
+          p,
+          favoritedSet.has(p.id),
+          sellerSummaries.get(p.ownerId) ?? null,
+          boostedUntil.get(p.id) ?? null,
+        ),
+      ),
+      meta: { page, limit, total },
+    };
+  }
+
   async approveProduct(
     adminId: string,
     productId: string,
@@ -1210,6 +1246,8 @@ export class ProductsService {
     product.status = ProductStatus.AWAITING_FIRST_BID;
     product.reviewedById = adminId;
     product.reviewedAt = new Date();
+    if (!product.productCode)
+      product.productCode = await this.nextProductCode();
     if (dto.isRare !== undefined) product.isRare = dto.isRare;
 
     const saved = await this.productsRepository.saveProduct(product);
@@ -1348,6 +1386,14 @@ export class ProductsService {
         'Subcategory does not belong to the selected category',
       );
     }
+  }
+
+  // `nextval()` is atomic across sessions, so concurrent approvals never share
+  // a code. A failed save after this leaves a gap, which is harmless.
+  private async nextProductCode(): Promise<string> {
+    return formatProductCode(
+      await this.productsRepository.nextProductCodeSequenceValue(),
+    );
   }
 
   private async findOwnedProduct(

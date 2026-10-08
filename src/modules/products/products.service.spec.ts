@@ -106,6 +106,7 @@ describe('ProductsService.updateProduct — pickup location', () => {
     return {
       id: 'product-1',
       ownerId: 'user-1',
+      productCode: null,
       title: 'Original title',
       description: 'Original description text that is long enough.',
       specifications: null,
@@ -238,6 +239,7 @@ describe('ProductsService — isFavorited flag', () => {
     return {
       id,
       ownerId: 'seller-1',
+      productCode: null,
       title: `Product ${id}`,
       description: 'A product long enough to pass validation.',
       specifications: null,
@@ -404,6 +406,7 @@ describe('ProductsService — seller rating summary', () => {
     return {
       id,
       ownerId,
+      productCode: null,
       title: `Product ${id}`,
       description: 'A product long enough to pass validation.',
       specifications: null,
@@ -509,6 +512,7 @@ describe('ProductsService.relistProduct', () => {
     return {
       id: 'abandoned-1',
       ownerId: 'user-1',
+      productCode: null,
       title: 'Abandoned lot',
       description: 'A lot whose winner and fallbacks all failed to pay.',
       specifications: null,
@@ -566,6 +570,7 @@ describe('ProductsService.relistProduct', () => {
         return Promise.resolve(withId);
       }),
       claimRelist: jest.fn().mockResolvedValue(claimWins),
+      nextProductCodeSequenceValue: jest.fn().mockResolvedValue(7),
       deleteProduct: jest.fn().mockResolvedValue(undefined),
       findImagesByProductId: jest.fn().mockResolvedValue([
         {
@@ -643,6 +648,16 @@ describe('ProductsService.relistProduct', () => {
     expect(productsRepository.saveImages).toHaveBeenCalled();
   });
 
+  it('gives the relisted lot its own new product code', async () => {
+    const { service } = buildService(
+      buildAbandonedProduct({ productCode: 'BB-SKU-3' }),
+    );
+
+    const result = await service.relistProduct('user-1', 'abandoned-1');
+
+    expect(result.productCode).toBe('BB-SKU-7');
+  });
+
   it('refuses a product that is not ABANDONED', async () => {
     const { service } = buildService(
       buildAbandonedProduct({ status: ProductStatus.SETTLED }),
@@ -679,5 +694,140 @@ describe('ProductsService.relistProduct', () => {
     ).rejects.toThrow('already been relisted');
     expect(productsRepository.deleteProduct).toHaveBeenCalled();
     expect(productStorage.copyProductImages).not.toHaveBeenCalled();
+    // The losing copy never goes public, so it must not burn a code.
+    expect(
+      productsRepository.nextProductCodeSequenceValue,
+    ).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProductsService — product code', () => {
+  function buildSubmitted(overrides: Partial<Product> = {}): Product {
+    return {
+      id: 'product-1',
+      ownerId: 'user-1',
+      productCode: null,
+      title: 'Submitted lot',
+      description: 'A lot waiting for an admin to review it.',
+      specifications: null,
+      categoryId: 'cat-1',
+      subcategoryId: 'sub-1',
+      condition: ItemCondition.NEW,
+      status: ProductStatus.AWAITING_APPROVAL,
+      basePrice: 1000,
+      biddingStartPrice: 1000,
+      instantBuyPrice: 1400,
+      biddingEndPrice: 1600,
+      currency: 'NPR',
+      biddingDurationHours: 72,
+      currentHighestBid: null,
+      currentHighestBidderId: null,
+      biddingStartedAt: null,
+      biddingEndsAt: null,
+      viewCount: 0,
+      isRare: false,
+      submittedAt: new Date(),
+      reviewedById: null,
+      reviewedAt: null,
+      rejectionReason: null,
+      province: 'Bagmati',
+      district: 'Kathmandu',
+      city: 'Kathmandu',
+      street: 'New Road',
+      wardNumber: 1,
+      winningBidId: null,
+      closedAt: null,
+      settledAt: null,
+      settledAmount: null,
+      abandonedAt: null,
+      relistedProductId: null,
+      withdrawnAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+      images: [],
+      ...overrides,
+    };
+  }
+
+  function buildService(product: Product) {
+    const productsRepository = {
+      findByIdWithoutImages: jest.fn().mockResolvedValue(product),
+      saveProduct: jest.fn((p: Product) => Promise.resolve(p)),
+      nextProductCodeSequenceValue: jest.fn().mockResolvedValue(42),
+      findDeletedPaginated: jest.fn().mockResolvedValue([[product], 1]),
+    };
+    const service = new ProductsService(
+      productsRepository as unknown as ProductsRepository,
+      {} as never,
+      {} as never,
+      {
+        ...mockUsersService,
+        findById: jest.fn().mockResolvedValue(null),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      mockFavoritesService as never,
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
+    );
+    return { service, productsRepository };
+  }
+
+  it('is assigned when an admin approves the lot', async () => {
+    const { service } = buildService(buildSubmitted());
+
+    const result = await service.approveProduct('admin-1', 'product-1');
+
+    expect(result.status).toBe(ProductStatus.AWAITING_FIRST_BID);
+    expect(result.productCode).toBe('BB-SKU-42');
+  });
+
+  it('is never replaced once assigned', async () => {
+    const { service, productsRepository } = buildService(
+      buildSubmitted({ productCode: 'BB-SKU-5' }),
+    );
+
+    const result = await service.approveProduct('admin-1', 'product-1');
+
+    expect(result.productCode).toBe('BB-SKU-5');
+    expect(
+      productsRepository.nextProductCodeSequenceValue,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('is not drawn when approval is refused', async () => {
+    const { service, productsRepository } = buildService(
+      buildSubmitted({ status: ProductStatus.DRAFT }),
+    );
+
+    await expect(
+      service.approveProduct('admin-1', 'product-1'),
+    ).rejects.toThrow('Only products in AWAITING_APPROVAL status');
+    expect(
+      productsRepository.nextProductCodeSequenceValue,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('lists soft-deleted products for admins with the admin filters', async () => {
+    const deleted = buildSubmitted({
+      status: ProductStatus.DRAFT,
+      deletedAt: new Date('2026-10-01'),
+    });
+    const { service, productsRepository } = buildService(deleted);
+
+    const result = await service.listDeletedProducts(
+      { page: 2, limit: 5, ownerId: 'user-1' },
+      'admin-1',
+    );
+
+    expect(productsRepository.findDeletedPaginated).toHaveBeenCalledWith(
+      2,
+      5,
+      expect.objectContaining({ ownerId: 'user-1' }),
+    );
+    expect(result.meta).toEqual({ page: 2, limit: 5, total: 1 });
+    expect(result.data[0].deletedAt).toEqual(new Date('2026-10-01'));
   });
 });

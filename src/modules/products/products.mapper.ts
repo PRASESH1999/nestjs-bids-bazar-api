@@ -111,6 +111,7 @@ export function mapProduct(
     product.currentHighestBid ?? product.biddingStartPrice ?? 0;
   return {
     id: product.id,
+    productCode: product.productCode,
     ownerId: product.ownerId,
     title: product.title,
     description: product.description,

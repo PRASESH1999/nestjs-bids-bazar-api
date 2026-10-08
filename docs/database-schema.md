@@ -166,6 +166,7 @@ erDiagram
     PRODUCT {
         uuid id PK
         uuid ownerId FK
+        string productCode UK
         string title
         text description
         uuid categoryId FK
@@ -478,6 +479,7 @@ erDiagram
 
 ### PRODUCT
 - `ownerId` references `users.id` — stored as a plain UUID column (no TypeORM `@ManyToOne` relation defined to avoid joins on every load).
+- `productCode` — human-facing reference, format `BB-SKU-<n>` (unpadded; one counter across all categories) from the `product_code_seq` Postgres sequence. Assigned when a lot first goes public: on admin approval, or on relist (a relist is a new lot and gets its own code). Null for drafts, submissions awaiting review and rejected lots, so they never consume a number. Never reassigned or reused; the unique constraint also covers soft-deleted rows. Gaps are possible (a failed save after `nextval()`) and harmless.
 - `condition` enum values: `NEW`, `LIKE_NEW`, `USED_GOOD`, `USED_FAIR`, `FOR_PARTS`.
 - `status` enum values: `DRAFT`, `SUBMITTED`, `REJECTED`, `APPROVED`, `PENDING`, `ACTIVE`, `CLOSED`, `AWAITING_PAYMENT`, `SETTLED`, `PAYMENT_FAILED`, `ABANDONED`, `WITHDRAWN`. Default: `DRAFT`. See Rule 13 for full state machine.
 - `basePrice` is the user-entered desired price — a whole number, no decimals. `biddingStartPrice` is auto-computed by applying a **tiered margin** to `basePrice` (20% ≤10k, 18% ≤20k, 16% ≤30k, 14% ≤40k, 12% ≤50k, 10% >50k — see Rule 13), rounded **up** to the nearest multiple of Rs. 5, and stored so the bidding module never recomputes it.
@@ -493,7 +495,7 @@ erDiagram
 - `reviewedById` references `users.id` (the admin who reviewed) — plain UUID column, no TypeORM relation.
 - `province`, `district`, `city`, `street`, `wardNumber` — the seller's pickup location for this listing, independent per product (never shared/reused, even across multiple listings from the same seller). Nullable at the DB level only because pre-existing rows predate this field (it superseded the old, never-wired-up `locationProvince`/`locationDistrict`/`locationArea` stub columns); `CreateProductDto` requires all five for every new product.
 - Composite indexes: `(status, createdAt)` for public listing, `(ownerId, status)` for "my products" queries, `(categoryId, subcategoryId)` for filters.
-- `deletedAt` soft-delete inherited from `BaseEntity`.
+- `deletedAt` soft-delete inherited from `BaseEntity`. Only DRAFT/REJECTED products can be deleted (by their owner); the row stays, image files are removed from disk. Hidden from every query except `GET /admin/products/deleted`.
 
 ### BID
 - `productId` and `bidderId` are foreign keys stored as plain UUID columns with individual `@Index` decorators; TypeORM `@ManyToOne` relations are declared for `product` and `bidder` to enable JOIN-based queries.

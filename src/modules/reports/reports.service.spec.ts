@@ -31,6 +31,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: 'product-1',
     ownerId: 'seller-1',
+    productCode: null,
     title: 'Test product',
     description: 'A product long enough to pass validation.',
     specifications: null,

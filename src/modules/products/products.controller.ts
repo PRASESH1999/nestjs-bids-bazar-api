@@ -152,7 +152,7 @@ export class ProductsController {
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary:
-      'Home page: 10 most recently listed products awaiting their first bid',
+      'Home page: 12 most recently listed products awaiting their first bid',
   })
   async getNewArrivals(@Request() req: RequestWithUser) {
     return {
@@ -468,7 +468,10 @@ export class ProductsController {
 
   @Delete('products/:id')
   @RequirePermissions(Permission.PRODUCT_MANAGE_OWN)
-  @ApiOperation({ summary: 'Hard-delete own product (DRAFT or REJECTED only)' })
+  @ApiOperation({
+    summary:
+      'Delete own product (DRAFT or REJECTED only). Soft delete: the row is kept and visible to admins via GET /admin/products/deleted; image files are removed.',
+  })
   async deleteProduct(
     @Request() req: RequestWithUser,
     @Param('id') id: string,
@@ -525,6 +528,20 @@ export class ProductsController {
     @Query() query: AdminListProductsQueryDto,
   ) {
     return this.productsService.listAllProducts(query, req.user.sub);
+  }
+
+  // Declared before `admin/products/:id` so "deleted" is not taken as an id.
+  @Get('admin/products/deleted')
+  @RequirePermissions(Permission.PRODUCT_VIEW_ALL)
+  @ApiOperation({
+    summary:
+      'Admin: list soft-deleted products, most recently deleted first. Same filters as GET /admin/products; images are not included (their files are removed on delete).',
+  })
+  async listDeletedProducts(
+    @Request() req: RequestWithUser,
+    @Query() query: AdminListProductsQueryDto,
+  ) {
+    return this.productsService.listDeletedProducts(query, req.user.sub);
   }
 
   @Get('admin/products/:id')
