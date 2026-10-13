@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '@common/entities/base.entity';
+import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
@@ -135,7 +136,17 @@ export class ProductPayment extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   websocketUrl: string | null;
 
-  // ─── Status ───────────────────────────────────────────────────────────────
+  // ─── Method & status ──────────────────────────────────────────────────────
+
+  // COD rows carry no QR/socket data (terminalId 'COD') and go
+  // COD_PENDING -> SUCCESS when Pathao reports the parcel delivered, or
+  // COD_PENDING -> FAILED when it comes back refused.
+  @Column({
+    type: 'enum',
+    enum: PaymentMethod,
+    default: PaymentMethod.FONEPAY,
+  })
+  method: PaymentMethod;
 
   @Column({ type: 'enum', enum: PaymentStatus, default: PaymentStatus.PENDING })
   status: PaymentStatus;

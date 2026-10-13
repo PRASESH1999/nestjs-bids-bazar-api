@@ -134,4 +134,12 @@ export class User extends BaseEntity {
 
   @Column({ type: 'int', default: 0 })
   ratingCount: number;
+
+  // ─── Cash on delivery ────────────────────────────────────────────────────
+
+  // COD parcels this user refused (or never received) at the door, counted
+  // by AuctionLifecycleService.abandonAfterCodRefusal. At COD_MAX_REFUSALS
+  // the COD option is withdrawn for them — they can still pay by Fonepay.
+  @Column({ type: 'int', default: 0 })
+  codRefusalCount: number;
 }

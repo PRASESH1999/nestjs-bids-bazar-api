@@ -63,6 +63,9 @@ export interface AuctionSettledPayload {
   // Added for NotificationsModule handlers.
   sellerId: string;
   productTitle: string;
+  // True when the winner chose cash on delivery: the sale is settled but
+  // `buyerTotalAmount` is still owed, collected by the rider at the door.
+  cashOnDelivery: boolean;
 }
 
 // ─── Fonepay payment lifecycle ─────────────────────────────────────────────
@@ -90,6 +93,27 @@ export interface PaymentSucceededPayload {
   // Which saved address to freeze onto ProductDelivery. Null is defensive
   // only — checkout requires this by the time a payment can succeed.
   shippingAddressId: string | null;
+}
+
+// The winner chose cash on delivery. Same shape as PaymentSucceededPayload
+// minus the gateway trace — ProductDeliveriesService creates the delivery
+// from it, with item + delivery as the rider's amount to collect.
+export interface PaymentCodConfirmedPayload {
+  productId: string;
+  paymentId: string;
+  referenceLabel: string;
+  winnerUserId: string;
+  // Item price only (mirrors ProductPayment.amount).
+  amount: number;
+  deliveryCharge: number;
+  shippingAddressId: string;
+}
+
+// Pathao reported a parcel delivered. Emitted for every delivery, prepaid or
+// not — PaymentsService only acts on it for a COD payment.
+export interface DeliveryCompletedPayload {
+  deliveryId: string;
+  productPaymentId: string;
 }
 
 export interface PaymentFailedPayload {

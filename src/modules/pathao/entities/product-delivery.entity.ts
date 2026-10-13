@@ -3,12 +3,13 @@ import { BaseEntity } from '@common/entities/base.entity';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 
 /**
- * Everything about actually getting a **paid-for** sale to the buyer:
+ * Everything about actually getting a sold item to the buyer:
  * the frozen recipient/address snapshot, what the buyer was charged for
  * delivery, warehouse receipt, the Pathao courier order, and its live status.
  *
- * One row per successful sale — created the moment `PAYMENT_SUCCEEDED` fires
- * (see ProductDeliveriesService), never before. Deliberately separate from
+ * One row per successful sale — created the moment `PAYMENT_SUCCEEDED`
+ * (prepaid) or `PAYMENT_COD_CONFIRMED` (cash on delivery) fires (see
+ * ProductDeliveriesService), never before. Deliberately separate from
  * `ProductPayment`, which stays purely about the gateway transaction: every
  * payment *attempt* (including failed/expired retries) would otherwise carry
  * a full address snapshot even though only a successful one ever ships.
@@ -82,8 +83,8 @@ export class ProductDelivery extends BaseEntity {
 
   // Snapshotted from DELIVERY_CHARGE_FLAT at the moment payment succeeded —
   // immune to a later config change, same reasoning as ProductPayment's
-  // paymentDeadline. Bundled into the Fonepay QR amount at checkout, not
-  // collected separately.
+  // paymentDeadline. Bundled into the Fonepay QR amount at checkout, or into
+  // `amountToCollect` for cash on delivery — never collected separately.
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   deliveryCharge: number;
 
@@ -116,8 +117,9 @@ export class ProductDelivery extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   itemDescription: string | null;
 
-  // Always 0 — everything is prepaid via Fonepay now, nothing left for the
-  // rider to collect on delivery.
+  // What the Pathao rider collects at the door, set when the row is created:
+  // 0 for a prepaid (Fonepay) sale, item + delivery for cash on delivery.
+  // Sent as Pathao's `amount_to_collect` on every (re)dispatch.
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   amountToCollect: number;
 
@@ -151,6 +153,15 @@ export class ProductDelivery extends BaseEntity {
   // until a redispatch replaces it.
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
+
+  // Set by an admin when a cash-on-delivery parcel came back refused or
+  // undeliverable (PaymentsService.markCodRefused). Terminal: the sale is
+  // abandoned and the status sync stops polling this consignment.
+  @Column({ type: 'timestamptz', nullable: true })
+  returnedAt: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  returnedById: string | null;
 
   // Consignments superseded by a redispatch, oldest first. `consignmentId` is
   // unique, so the cancelled one has to move out before a new order can take

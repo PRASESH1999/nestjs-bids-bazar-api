@@ -1,5 +1,6 @@
 import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import type { PaymentMethod } from '@common/enums/payment-method.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import type { BuyerDeliveryView } from '@modules/pathao/dto/delivery-view.dto';
 
@@ -72,6 +73,9 @@ export interface InitiatePaymentResponseDto {
 export interface PaymentStatusResponseDto {
   paymentId: string;
   referenceLabel: string;
+  /** FONEPAY (prepaid) or COD (status COD_PENDING until the rider collects). */
+  method: PaymentMethod;
+  /** Item + delivery — paid via the QR, or owed to the rider for COD. */
   amount: number;
   itemAmount: number;
   deliveryCharge: number;
@@ -81,9 +85,23 @@ export interface PaymentStatusResponseDto {
   fonepayTraceId: string | null;
   paymentMessage: string | null;
   /**
-   * Where the parcel is. Null until the payment succeeds (the delivery record
-   * is created by the PAYMENT_SUCCEEDED listener, so it can also lag a
-   * just-confirmed payment by a moment).
+   * Where the parcel is. Null until the payment succeeds or cash on delivery
+   * is chosen (the delivery record is created by an event listener, so it can
+   * also lag a just-confirmed payment by a moment).
    */
   delivery: BuyerDeliveryView | null;
+}
+
+/** `GET /payments/:productId/cod/eligibility` — whether to offer the COD option. */
+export interface CodEligibilityResponseDto {
+  available: boolean;
+  /** Why COD is unavailable, for display. Null when available. */
+  reason: string | null;
+  /** Null when the product is not awaiting the caller's payment at all. */
+  itemAmount: number | null;
+  deliveryCharge: number | null;
+  /** Item + delivery — what the rider would collect. */
+  amount: number | null;
+  /** COD_MAX_AMOUNT — orders above this must be prepaid. */
+  maxAmount: number;
 }

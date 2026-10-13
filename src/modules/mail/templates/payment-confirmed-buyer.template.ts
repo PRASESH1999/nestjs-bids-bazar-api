@@ -4,14 +4,19 @@ export interface PaymentConfirmedBuyerTemplateParams {
   buyerName: string;
   productTitle: string;
   amount: number | string;
+  // Cash on delivery: nothing has been paid yet — `amount` is what the buyer
+  // hands the courier.
+  cashOnDelivery?: boolean;
 }
 
 export function paymentConfirmedBuyerTemplate(
   params: PaymentConfirmedBuyerTemplateParams,
 ): { subject: string; html: string } {
-  const { buyerName, productTitle, amount } = params;
+  const { buyerName, productTitle, amount, cashOnDelivery } = params;
   return {
-    subject: 'Payment confirmed — Your purchase is complete — BidsBazar',
+    subject: cashOnDelivery
+      ? 'Order confirmed — pay cash on delivery — BidsBazar'
+      : 'Payment confirmed — Your purchase is complete — BidsBazar',
     html: `
 <!DOCTYPE html>
 <html lang="en">
@@ -54,21 +59,29 @@ export function paymentConfirmedBuyerTemplate(
     <div class="header"><h1>BidsBazar</h1></div>
     <div class="body">
       <p>Thank you, ${buyerName}!</p>
-      <span class="badge">Purchase Complete ✓</span>
-      <p>Your payment has been confirmed. Here is your receipt:</p>
+      <span class="badge">${cashOnDelivery ? 'Order Confirmed ✓' : 'Purchase Complete ✓'}</span>
+      <p>${
+        cashOnDelivery
+          ? 'Your cash-on-delivery order is confirmed. Here is what you will pay:'
+          : 'Your payment has been confirmed. Here is your receipt:'
+      }</p>
       <div class="receipt-box">
         <div class="receipt-row">
           <span class="label">Item</span>
           <span class="value">${productTitle}</span>
         </div>
         <div class="receipt-row">
-          <span class="label">Amount paid</span>
+          <span class="label">${cashOnDelivery ? 'Pay on delivery (delivery included)' : 'Amount paid'}</span>
           <span class="value">${formatCurrency(amount)}</span>
         </div>
       </div>
       <div class="info-box">
-        The seller will contact you directly with delivery details. If you have any
-        questions in the meantime, please reach out to our support team.
+        ${
+          cashOnDelivery
+            ? 'We will ship it to you with Pathao once the seller hands it in at our warehouse. Please have the exact amount ready in cash for the rider.'
+            : 'We will ship it to you with Pathao once the seller hands it in at our warehouse.'
+        }
+        If you have any questions in the meantime, please reach out to our support team.
       </div>
       <p>Thank you for using BidsBazar — enjoy your purchase!</p>
     </div>

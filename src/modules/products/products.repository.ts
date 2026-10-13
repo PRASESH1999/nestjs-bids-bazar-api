@@ -175,78 +175,73 @@ export class ProductsRepository {
     return hydrated[0] ?? null;
   }
 
-  // Top `limit` ACTIVE products ranked by bid count (DESC), ties broken by newest.
-  async findTrendingProducts(limit: number): Promise<RankedProduct[]> {
-    const rows = await this.productRepo
-      .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
-      .select('product.id', 'id')
-      .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.status = :status', { status: ProductStatus.ACTIVE })
-      .groupBy('product.id')
-      .orderBy('COUNT(bid.id)', 'DESC')
-      .addOrderBy('product.createdAt', 'DESC')
-      .limit(limit)
-      .getRawMany<{ id: string; totalBids: string }>();
-
-    return this.hydrateRanked(rows);
+  // ACTIVE products ranked by bid count (DESC), ties broken by newest.
+  async findTrendingProducts(
+    page: number,
+    limit: number,
+  ): Promise<[RankedProduct[], number]> {
+    return this.findRankedPage(
+      (qb) =>
+        qb.where('product.status = :status', { status: ProductStatus.ACTIVE }),
+      (qb) =>
+        qb
+          .orderBy('COUNT(bid.id)', 'DESC')
+          .addOrderBy('product.createdAt', 'DESC'),
+      page,
+      limit,
+    );
   }
 
-  // Most recently listed `limit` PENDING products (approved and publicly
-  // listed, but bidding hasn't started yet — no bids placed).
-  async findNewestProducts(limit: number): Promise<RankedProduct[]> {
-    const rows = await this.productRepo
-      .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
-      .select('product.id', 'id')
-      .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.status = :status', {
-        status: ProductStatus.AWAITING_FIRST_BID,
-      })
-      .groupBy('product.id')
-      .orderBy('product.createdAt', 'DESC')
-      .limit(limit)
-      .getRawMany<{ id: string; totalBids: string }>();
-
-    return this.hydrateRanked(rows);
+  // AWAITING_FIRST_BID products (approved and publicly listed, but no bid
+  // placed yet), most recently listed first.
+  async findNewestProducts(
+    page: number,
+    limit: number,
+  ): Promise<[RankedProduct[], number]> {
+    return this.findRankedPage(
+      (qb) =>
+        qb.where('product.status = :status', {
+          status: ProductStatus.AWAITING_FIRST_BID,
+        }),
+      (qb) => qb.orderBy('product.createdAt', 'DESC'),
+      page,
+      limit,
+    );
   }
 
-  // Most recently listed `limit` rare products (PENDING or ACTIVE — publicly
-  // listed and still biddable, either before or after their first bid).
-  async findRareProducts(limit: number): Promise<RankedProduct[]> {
-    const rows = await this.productRepo
-      .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
-      .select('product.id', 'id')
-      .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.isRare = true')
-      .andWhere('product.status IN (:...statuses)', {
-        statuses: [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE],
-      })
-      .groupBy('product.id')
-      .orderBy('product.createdAt', 'DESC')
-      .limit(limit)
-      .getRawMany<{ id: string; totalBids: string }>();
-
-    return this.hydrateRanked(rows);
+  // Rare products still publicly listed and biddable (AWAITING_FIRST_BID or
+  // ACTIVE — before or after their first bid), most recently listed first.
+  async findRareProducts(
+    page: number,
+    limit: number,
+  ): Promise<[RankedProduct[], number]> {
+    return this.findRankedPage(
+      (qb) =>
+        qb
+          .where('product.isRare = true')
+          .andWhere('product.status IN (:...statuses)', {
+            statuses: [ProductStatus.AWAITING_FIRST_BID, ProductStatus.ACTIVE],
+          }),
+      (qb) => qb.orderBy('product.createdAt', 'DESC'),
+      page,
+      limit,
+    );
   }
 
-  // Most recently SETTLED (payment confirmed) `limit` products — a real,
-  // final sale, unlike CLOSED/AWAITING_PAYMENT which can still fall through
-  // to PAYMENT_FAILED/ABANDONED.
-  async findRecentlySoldProducts(limit: number): Promise<RankedProduct[]> {
-    const rows = await this.productRepo
-      .createQueryBuilder('product')
-      .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
-      .select('product.id', 'id')
-      .addSelect('COUNT(bid.id)', 'totalBids')
-      .where('product.status = :status', { status: ProductStatus.SETTLED })
-      .groupBy('product.id')
-      .orderBy('product.settledAt', 'DESC')
-      .limit(limit)
-      .getRawMany<{ id: string; totalBids: string }>();
-
-    return this.hydrateRanked(rows);
+  // SETTLED (payment confirmed) products, most recently settled first — a
+  // real, final sale, unlike CLOSED/AWAITING_PAYMENT which can still fall
+  // through to PAYMENT_FAILED/ABANDONED.
+  async findRecentlySoldProducts(
+    page: number,
+    limit: number,
+  ): Promise<[RankedProduct[], number]> {
+    return this.findRankedPage(
+      (qb) =>
+        qb.where('product.status = :status', { status: ProductStatus.SETTLED }),
+      (qb) => qb.orderBy('product.settledAt', 'DESC'),
+      page,
+      limit,
+    );
   }
 
   // Product ids come pre-ranked (latest-boost-first) from BoostsService —
@@ -451,6 +446,34 @@ export class ProductsRepository {
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
+
+  // One page of a home-page section plus the section's total. `where` scopes
+  // the section; `orderBy` ranks it (it may sort on COUNT(bid.id)). product.id
+  // is always the final tie-breaker: offset pagination needs a total order, or
+  // rows that tie could repeat on one page and vanish from the next.
+  private async findRankedPage(
+    where: (qb: SelectQueryBuilder<Product>) => SelectQueryBuilder<Product>,
+    orderBy: (qb: SelectQueryBuilder<Product>) => SelectQueryBuilder<Product>,
+    page: number,
+    limit: number,
+  ): Promise<[RankedProduct[], number]> {
+    const [rows, total] = await Promise.all([
+      orderBy(
+        where(this.productRepo.createQueryBuilder('product'))
+          .leftJoin(Bid, 'bid', PUBLIC_BID_JOIN)
+          .select('product.id', 'id')
+          .addSelect('COUNT(bid.id)', 'totalBids')
+          .groupBy('product.id'),
+      )
+        .addOrderBy('product.id', 'ASC')
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .getRawMany<{ id: string; totalBids: string }>(),
+      where(this.productRepo.createQueryBuilder('product')).getCount(),
+    ]);
+
+    return [await this.hydrateRanked(rows), total];
+  }
 
   // Re-fetches ranked product ids with their images, preserving the incoming
   // (already-ranked) order — the ranking itself is computed in raw SQL above.

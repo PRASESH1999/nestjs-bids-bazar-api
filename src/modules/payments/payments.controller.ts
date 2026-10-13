@@ -87,6 +87,42 @@ export class PaymentsController {
   }
 
   /**
+   * Whether to offer cash on delivery to the caller for a product they won.
+   * Auction winners only — never Instant Buy.
+   */
+  @Get(':productId/cod/eligibility')
+  @RequirePermissions(Permission.PAYMENT_INITIATE)
+  @ApiOperation({
+    summary:
+      'Check whether cash on delivery is available for a product the caller won',
+  })
+  async getCodEligibility(
+    @Param('productId') productId: string,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.paymentsService.getCodEligibility(productId, req.user.sub);
+  }
+
+  /**
+   * Cash on delivery for an auction win: settles the sale to the caller now;
+   * the Pathao rider collects item + delivery at the door. Not available for
+   * Instant Buy.
+   */
+  @Post(':productId/cod')
+  @RequirePermissions(Permission.PAYMENT_INITIATE)
+  @ApiOperation({
+    summary:
+      'Choose cash on delivery for a product the caller won at auction (not Instant Buy)',
+  })
+  async confirmCod(
+    @Param('productId') productId: string,
+    @Body() dto: InitiatePaymentDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.paymentsService.confirmCod(productId, req.user.sub, dto);
+  }
+
+  /**
    * Manual status fallback — verifies with Fonepay and reconciles the Payment row.
    * Frontend calls this if the SSE stream drops or no event arrives within a timeout.
    */
@@ -115,5 +151,23 @@ export class PaymentsController {
   })
   async listAllPayments(@Query() query: ListPaymentsAdminQueryDto) {
     return this.paymentsService.listAllPayments(query);
+  }
+
+  /**
+   * Admin: a cash-on-delivery parcel came back refused or undeliverable.
+   * Abandons the sale (the seller can relist) and counts a refusal against
+   * the buyer.
+   */
+  @Post('admin/:paymentId/cod-refused')
+  @RequirePermissions(Permission.PAYMENT_CONFIRM_MANUAL)
+  @ApiOperation({
+    summary:
+      'Admin: mark a cash-on-delivery parcel refused — abandons the sale and records a refusal against the buyer',
+  })
+  async markCodRefused(
+    @Param('paymentId') paymentId: string,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.paymentsService.markCodRefused(paymentId, req.user.sub);
   }
 }

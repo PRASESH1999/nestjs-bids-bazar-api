@@ -60,6 +60,7 @@ erDiagram
         string pendingPhone
         decimal averageRating
         int ratingCount
+        int codRefusalCount
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -265,6 +266,7 @@ erDiagram
         text qrString
         text qrMessage
         text websocketUrl
+        enum method
         enum status
         string fonepayTraceId
         string paymentMessage
@@ -337,6 +339,8 @@ erDiagram
         string orderStatus
         timestamp lastStatusCheckAt
         timestamp deliveredAt
+        timestamp returnedAt
+        uuid returnedById
         timestamp createdAt
         timestamp updatedAt
         timestamp deletedAt
@@ -398,6 +402,7 @@ erDiagram
 - `fullName` (max 150) is the person's name — the **only** place it is stored. Collected at registration (`POST /auth/register`), taken from the Google/Facebook profile on social signup, set by staff on `POST /users/admin`. Self-declared until KYC is `APPROVED`; `KycService.submitKyc` snapshots it onto `kyc_verifications.fullName` for the reviewer. Editable via `PATCH /users/me` except while KYC is `PENDING` or `APPROVED`. Nullable only because a social provider may not share a name.
 - `phone` holds the **verified** number only (partial unique index `WHERE phone IS NOT NULL`, so a verified number identifies one account). `pendingPhone` holds a number awaiting verification — the one given at registration or via `PATCH /users/me`, or one an OTP was sent to. `pendingPhone` is not unique: the first account to verify a number keeps it. `phoneVerifiedAt` is set when the OTP is confirmed; KYC submission and approval both require it. `phoneOtpHash`/`phoneOtpExpiresAt`/`phoneOtpAttempts` are the outstanding code's state (excluded from serialization).
 - `username` is the public-facing handle. It is **system-generated** at account creation (both public registration and admin creation) — format `BB000001-2026` (`BB` + a 6-digit, never-resetting sequence number from the `username_seq` Postgres sequence + the creation year). Nobody types a username; there is no self-service or admin change path. `nextval('username_seq')` is atomic across concurrent sessions, so simultaneous account creations never collide. Backed by a column-level `unique` constraint as a safety net. `fullName` is private (own profile, KYC review, admin views) — public surfaces show `username`.
+- `codRefusalCount` — cash-on-delivery parcels this user refused at the door, incremented by `AuctionLifecycleService.abandonAfterCodRefusal`. At `COD_MAX_REFUSALS` the COD option is withdrawn for them (`PaymentsService.getCodEligibility`); Fonepay checkout is unaffected.
 - `deletedAt` enables TypeORM soft-delete via `@DeleteDateColumn`. Queries exclude soft-deleted rows by default.
 
 ### EMAILVERIFICATIONTOKEN
@@ -510,7 +515,7 @@ erDiagram
 - `paymentDeadline` — only meaningful when `isCurrentlyPaymentResponsible = true`. Set to `now + PAYMENT_WINDOW_HOURS` when a bid becomes responsible.
 - `paymentWarningSentAt` — set once when the ~2-hour warning email is dispatched. Prevents duplicate warning emails on subsequent cron runs; never reset once set.
 - `paymentConfirmedById` — UUID of the admin who manually confirmed payment (plain column, no TypeORM relation).
-- `paymentConfirmationMethod` enum values: `ADMIN_MANUAL`, `BANK_API`.
+- `paymentConfirmationMethod` enum values: `ADMIN_MANUAL`, `BANK_API`, `COD`. `COD` means the winner chose cash on delivery: `paymentStatus` is `CONFIRMED` (the win is locked in) while the cash is still to be collected by the courier — the matching `PAYMENT` row stays `COD_PENDING` until delivery.
 - Composite indexes: `(productId, amount)` for highest-bid lookup, `(bidderId, placedAt)` for "my bids" queries, `(paymentStatus, paymentDeadline)` for overdue payment cron, `(productId, fallbackRank)` for fallback chain promotion.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
@@ -529,13 +534,15 @@ erDiagram
 - `qrString` — full QR payload returned by Fonepay `generate-intent-qr`; used by the frontend to render a scannable desktop QR image.
 - `qrMessage` — short payload used by the frontend to construct the mobile deep link: `${intentScheme}/?qrPayload=${encodeURIComponent(qrMessage)}`.
 - `websocketUrl` — `thirdpartyQRWebSocketUrl` from the Fonepay response. The **backend** holds this WebSocket connection and relays verified payment events to the browser via SSE; the frontend never connects to Fonepay directly.
-- `status` enum values: `PENDING` (QR generated, awaiting payment), `SUCCESS` (Fonepay confirmed), `FAILED` (Fonepay rejected), `EXPIRED` (payment window elapsed before confirmation). Default: `PENDING`.
+- `method` enum values: `FONEPAY` (default — the QR, or an admin's manual confirmation of an offline payment) and `COD` (cash on delivery, auction winners only — never Instant Buy).
+- `status` enum values: `PENDING` (QR generated, awaiting payment), `COD_PENDING` (cash on delivery chosen — sale settled, cash not yet collected), `SUCCESS` (Fonepay confirmed, or COD cash collected), `FAILED` (Fonepay rejected, or COD parcel refused), `EXPIRED` (payment window elapsed before confirmation). Default: `PENDING`. `boost_payments.status` shares this Postgres enum type; boosts never use `COD_PENDING`.
 - `fonepayTraceId` and `paymentMessage` — populated after a successful `getPaymentStatus` call to Fonepay; `null` while PENDING.
 - `paymentDeadline` — copied from `Bid.paymentDeadline` at initiation time so the deadline is stable even if `PAYMENT_WINDOW_HOURS` changes between config reloads.
 - At-most-one active attempt: a **partial unique index** on `(productId) WHERE status = 'PENDING'` prevents two in-flight QR attempts for the same product. Service layer additionally guards against creating a new attempt when a SUCCESS row already exists.
-- `amount` is the **item price only** — `RewardsService` reads this column directly for commission/points math (Rule 16), so its meaning must never change to include delivery. `deliveryCharge` is a separate column, snapshotted from `DELIVERY_CHARGE_FLAT` at initiation time (same immutable-snapshot reasoning as `paymentDeadline`) — together they're what the Fonepay QR was actually generated for (Pathao integration bundles delivery into the gateway charge; there is no cash-on-delivery collection). Never counted toward points. See Rule 14/16.
+- `amount` is the **item price only** — `RewardsService` reads this column directly for commission/points math (Rule 16), so its meaning must never change to include delivery. `deliveryCharge` is a separate column, snapshotted from `DELIVERY_CHARGE_FLAT` at initiation time (same immutable-snapshot reasoning as `paymentDeadline`) — together they're what the Fonepay QR was actually generated for (Pathao integration bundles delivery into the gateway charge; for a `COD` row the same total is what the rider collects instead). Never counted toward points. See Rule 14/16.
 - `shippingAddressId` (nullable FK → `SHIPPINGADDRESS`, `ON DELETE SET NULL`) — which saved address this attempt was for. Just the id, not a snapshot: needed because `confirmSuccess`/`confirmPaymentManual` run later (sometimes much later, in a separate request) and have to know which address to hand to `ProductDeliveriesService`. The frozen recipient/address detail itself lives on `PRODUCTDELIVERY`, created only for the attempt that actually succeeds.
 - `sellerPaidAt`/`sellerPaidById`/`sellerPayoutAmount`/`sellerCommissionPercent` — populated only by `RewardsService.markSellerPaid`, a separate and later admin action from the buyer-payment fields above. `sellerPaidAt IS NULL` on a `SUCCESS` row means the sale is pending seller settlement. See Rule 16.
+- Cash on delivery (`AuctionLifecycleService.confirmCod`, via `POST /payments/:productId/cod`) creates a row with `method = COD`, `status = COD_PENDING`, `terminalId = 'COD'` and no QR fields, settles the product, and emits `PAYMENT_COD_CONFIRMED` (which creates the `PRODUCTDELIVERY` row). When Pathao reports the parcel delivered, `PaymentsService.markCodCollected` flips it to `SUCCESS` and emits `PAYMENT_SUCCEEDED` — only then does `RewardsService.markSellerPaid` (which requires `SUCCESS`) allow the seller payout. A refused parcel goes to `FAILED` via `abandonAfterCodRefusal`, which also moves the product to `ABANDONED`.
 - The admin-manual confirmation path (`confirmPaymentManual`) also creates a Payment row (`status = SUCCESS`, `terminalId = 'ADMIN-MANUAL'`) so every settled sale — gateway or manual — flows through the same seller-settlement pipeline. Both paths emit `PAYMENT_SUCCEEDED` so a single listener (`ProductDeliveriesService`) creates the `PRODUCTDELIVERY` row regardless of confirmation method.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
@@ -547,13 +554,15 @@ erDiagram
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
 ### PRODUCTDELIVERY
-- Everything about actually getting a **paid-for** sale to the buyer: the frozen recipient/address snapshot (from `SHIPPINGADDRESS`, at the moment payment succeeded), what the buyer was charged for delivery, warehouse receipt, the Pathao courier order, and its live status. One row per successful sale (`productPaymentId` unique FK, `ON DELETE RESTRICT`) — created by `ProductDeliveriesService.onPaymentSucceeded` (`@OnEvent(PAYMENT_SUCCEEDED)`), never before a payment actually succeeds (payment *attempts* that fail/expire never get one).
+- Everything about actually getting a sold item to the buyer: the frozen recipient/address snapshot (from `SHIPPINGADDRESS`, at the moment the sale settled), what the buyer was charged for delivery, warehouse receipt, the Pathao courier order, and its live status. One row per successful sale (`productPaymentId` unique FK, `ON DELETE RESTRICT`) — created by `ProductDeliveriesService` on `PAYMENT_SUCCEEDED` (prepaid) or `PAYMENT_COD_CONFIRMED` (cash on delivery), never before the sale settles (payment *attempts* that fail/expire never get one).
 - Recipient/address fields mirror `SHIPPINGADDRESS` at the time of freezing — a buyer editing or deleting the saved address afterward must never rewrite where an already-paid parcel is going.
 - `deliveryCharge` — what the buyer was actually charged, copied from `ProductPayment.deliveryCharge` (not re-read from config), so it can never drift from what the Fonepay QR was really generated for.
 - Lifecycle is expressed as nullable timestamp/field checkpoints, not a status enum (mirrors `ProductPayment.sellerPaidAt`'s idiom): `receivedAtWarehouseAt`/`receivedAtWarehouseById` (admin confirms the item physically arrived — gates dispatch; seller→warehouse itself is out of scope, sellers get their own item there) → `consignmentId`/`storeId`/`dispatchedAt`/`dispatchedById` (admin creates the real Pathao order, warehouse→buyer; `storeId` is the warehouse's single pre-registered Pathao Store, snapshotted from `PATHAO_STORE_ID`) → `deliveredAt` (set once Pathao reports delivery).
 - `pathaoDeliveryFee` — Pathao's own quoted/actual delivery cost, separate from `deliveryCharge` (what the buyer paid) — comparing the two gives cost-vs-charge tracking per delivery for free.
 - `orderStatus` — raw status string from Pathao, refreshed by `ProductDeliveriesCron` every 15 minutes for any dispatched-but-not-delivered row (or on-demand via the admin `sync` endpoint). Kept untyped (not an enum) since Pathao's full status vocabulary isn't confirmed; only the latest status is kept, not a history of every change.
-- `amountToCollect` is always `0` — everything is prepaid via the bundled Fonepay charge (see `PAYMENT` above), nothing left for the rider to collect.
+- `amountToCollect` — what the Pathao rider collects at the door, sent as Pathao's `amount_to_collect` on every (re)dispatch. `0` for prepaid sales; item + delivery for a `COD` payment.
+- `returnedAt`/`returnedById` — set when an admin marks a COD parcel refused (`POST /payments/admin/:paymentId/cod-refused`). Terminal: delivery stage `RETURNED`, no further dispatch, and the status cron stops polling it.
+- `ProductDeliveriesService.refreshStatus` emits `DELIVERY_COMPLETED` the first time it records `deliveredAt`; `PaymentsService` uses it to mark a COD payment collected.
 - `deletedAt` soft-delete inherited from `BaseEntity`.
 
 ### USERREWARDS

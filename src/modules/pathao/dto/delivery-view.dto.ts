@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional } from 'class-validator';
 import { PaginationDto } from '@common/dto/pagination.dto';
+import type { PaymentMethod } from '@common/enums/payment-method.enum';
 import type { PaginationMeta } from '@common/types/paginated-result.type';
 
 /**
@@ -13,6 +14,7 @@ import type { PaginationMeta } from '@common/types/paginated-result.type';
  *   IN_TRANSIT          Pathao order created, not yet delivered
  *   DELIVERED           Pathao reported delivery
  *   CANCELLED           Pathao order was cancelled; awaiting an admin redispatch
+ *   RETURNED            cash-on-delivery parcel refused at the door; sale abandoned
  */
 export enum DeliveryStage {
   AWAITING_WAREHOUSE = 'AWAITING_WAREHOUSE',
@@ -20,6 +22,7 @@ export enum DeliveryStage {
   IN_TRANSIT = 'IN_TRANSIT',
   DELIVERED = 'DELIVERED',
   CANCELLED = 'CANCELLED',
+  RETURNED = 'RETURNED',
 }
 
 export class ListDeliveriesQueryDto extends PaginationDto {
@@ -53,7 +56,10 @@ export interface BuyerDeliveryView {
   dispatchedAt: string | null;
   deliveredAt: string | null;
   cancelledAt: string | null;
+  returnedAt: string | null;
   lastStatusCheckAt: string | null;
+  /** Cash the rider collects at the door — 0 unless the sale is cash on delivery. */
+  amountToCollect: number;
 }
 
 /** One row of `GET /admin/deliveries`, and the body of every admin action. */
@@ -62,6 +68,7 @@ export interface AdminDeliveryView extends BuyerDeliveryView {
   product: { id: string; title: string | null } | null;
   buyer: { id: string; username: string; email: string } | null;
   referenceLabel: string | null;
+  paymentMethod: PaymentMethod | null;
   itemAmount: number | null;
   deliveryCharge: number;
   recipientName: string;

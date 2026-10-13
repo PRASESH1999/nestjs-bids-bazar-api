@@ -14,6 +14,98 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-10-13 — home-page sections are paginated
+
+Trending, new arrivals, rare items and recently sold used to return a fixed
+top 10 / 12 / 10 / 10. They now page through **every** matching product, so the
+same endpoint backs both the home-page row and its "view all" page.
+
+### Changed — check your client
+
+| Endpoint | Order | Was |
+|---|---|---|
+| `GET /products/home/trending-bids` | `ACTIVE` products, most bids first (ties: newest) | top 10 |
+| `GET /products/home/new-arrivals` | `AWAITING_FIRST_BID` products, newest first | 12 newest |
+| `GET /products/home/rare-items` | rare `AWAITING_FIRST_BID` / `ACTIVE` products, newest first | 10 newest |
+| `GET /products/home/recently-sold` | `SETTLED` products, most recently sold first | 10 newest |
+| `GET /products/home/featured` | boosted products, latest boost first | already paginated, default 20 |
+
+- All five take `?page=` (default 1) and `?limit=` (default **10**, max 100;
+  above 100 is a 400).
+- **Response shape changed** for the first four: `data` was the card array,
+  now it is `{ data: HomeProductResponse[], meta: { page, limit, total } }` —
+  the same shape `/featured` already had. The cards themselves are unchanged.
+- **`/featured` default page size dropped from 20 to 10**, so all five
+  sections behave the same. Pass `limit=20` to keep the old size.
+- The home page can keep calling the endpoints with no query string and gets
+  10 cards per section (new arrivals was 12 — pass `limit=12` to keep it).
+- Rankings are live (a bid can move a product up trending between two page
+  requests), so a "view all" page may occasionally show a card twice or skip
+  one across pages. Within a single request the order is stable.
+
+`GET /products/home/hot-product` is unchanged (a single product).
+
+---
+
+## 2026-10-13 — cash on delivery for auction winners
+
+An auction winner can now choose **cash on delivery** instead of paying the
+Fonepay QR: the Pathao rider collects item + delivery at the door. **Instant
+Buy is always prepaid** — the option is never offered there, and the server
+refuses it.
+
+This partly reverses the Pathao-era decision recorded under `A28` below
+("delivery is no longer cash on arrival"). Prepaid checkout is unchanged; COD
+is an alternative, not a replacement.
+
+### How it works
+
+- Choosing COD **settles the sale right away**: product → `SETTLED`, the
+  payment window and fallback cascade stop, the delivery record is created.
+  Nothing has been collected yet, so the payment row is `COD_PENDING`.
+- When Pathao reports the parcel delivered, the payment becomes `SUCCESS`
+  (`payment.succeeded` on the product's SSE stream). The seller payout is
+  released only then.
+- If the parcel comes back refused, an admin marks it so: the payment becomes
+  `FAILED`, the product `ABANDONED` (the seller can relist it), and the buyer
+  gets a refusal strike. There is no fallback to the next bidder.
+- Limits (env, with defaults): `COD_MAX_AMOUNT` (50000 — orders above it must be
+  prepaid; `0` turns COD off) and `COD_MAX_REFUSALS` (2 — a buyer with that many
+  refused parcels loses the option).
+
+### New
+
+| Endpoint | Why |
+|---|---|
+| `GET /payments/:productId/cod/eligibility` → `{ available, reason, itemAmount, deliveryCharge, amount, maxAmount }` | Whether to show or enable the COD option on checkout. `reason` is user-presentable text when `available` is false (Instant Buy, window expired, above the cap, too many refusals). 403 if the caller is not the current winner. `PAYMENT_INITIATE`. |
+| `POST /payments/:productId/cod` `{ shippingAddressId }` → same body as `GET /payments/:productId/status` | Choose COD. Same address rules as `/initiate` (yours, Pathao city/zone set, inside the valley). 400 with the eligibility `reason` when not allowed. If you already have a Fonepay QR open, it is checked first: if it was paid, **409** (the online payment settled the sale) — otherwise it is retired and can no longer be paid. `PAYMENT_INITIATE`. |
+| `POST /payments/admin/:paymentId/cod-refused` → the payment row | Admin: the COD parcel came back refused or undeliverable. Abandons the sale, marks the delivery `RETURNED`, adds a refusal strike to the buyer. 400 unless the payment is an uncollected COD (or once Pathao reported it delivered). `PAYMENT_CONFIRM_MANUAL`. |
+
+### Changed — check your client
+
+- **`PaymentStatus`** has a new value, `COD_PENDING`. Anything that switches on
+  payment status (buyer status page, admin payment records) must handle it:
+  "order confirmed, pay cash on delivery".
+- **`GET /payments/:productId/status`** has a new `method: 'FONEPAY' | 'COD'`.
+  For COD, `amount` is what the buyer hands the rider, and `delivery` is
+  present from the moment COD is chosen (it may lag by a moment).
+- **Delivery views** (`delivery` in the status response, `GET /admin/deliveries`,
+  every admin delivery action) have `amountToCollect` (0 unless COD) and
+  `returnedAt`; admin views also have `paymentMethod`.
+- **`DeliveryStage`** has a new value, `RETURNED` (refused COD parcel). The admin
+  queue `counts` include it; `?stage=RETURNED` filters to it. Dispatch and
+  redispatch refuse a returned delivery.
+- **`GET /payments/admin/all`** accepts `?method=FONEPAY|COD`.
+- **`paymentConfirmationMethod`** on bids can now be `COD`.
+- **Settlement notifications and emails** to buyer and seller have COD wording
+  (`data.cashOnDelivery: true` on the in-app ones). The prepaid buyer email no
+  longer says the seller will contact them — delivery is by Pathao from the
+  warehouse.
+- Pending seller settlements (`RewardsService`) only list a COD sale once the
+  cash is collected.
+
+---
+
 ## 2026-10-08 — product codes; admin view of deleted products
 
 Every listing gets a short, human-facing reference to quote in support,

@@ -1,8 +1,14 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { DataSource, Repository } from 'typeorm';
+import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
+import { ProductStatus } from '@common/enums/product-status.enum';
 import { EventNames } from '@common/events/event-names';
 import type { AuctionLifecycleService } from '@modules/bidding/services/auction-lifecycle.service';
 import type { Bid } from '@modules/bidding/entities/bid.entity';
@@ -323,5 +329,235 @@ describe('PaymentsService.initiateInstantBuyPayment — idempotent while the hol
     expect(lifecycle.startInstantBuyHold).not.toHaveBeenCalled();
     expect(res.paymentId).toBe('pay-gateway');
     expect(res.qrString).toBe('QR-PAYLOAD');
+  });
+});
+
+/*
+ * Cash on delivery — auction winners only, never Instant Buy. The sale
+ * settles when COD is chosen; the payment only becomes SUCCESS (releasing the
+ * seller payout) once Pathao reports the parcel delivered.
+ */
+function setupCod(
+  opts: {
+    product?: Partial<Product>;
+    bid?: Partial<Bid> | null;
+    codRefusalCount?: number;
+    payment?: ProductPayment | null;
+    pending?: ProductPayment | null;
+    config?: Record<string, number>;
+  } = {},
+) {
+  const product = {
+    id: 'product-1',
+    status: ProductStatus.AWAITING_PAYMENT,
+    ...opts.product,
+  };
+  const bid =
+    opts.bid === null
+      ? null
+      : {
+          id: 'bid-1',
+          bidderId: 'buyer-1',
+          amount: 1200,
+          isInstantBuy: false,
+          paymentDeadline: new Date(Date.now() + 3_600_000),
+          ...opts.bid,
+        };
+  const config: Record<string, number> = {
+    DELIVERY_CHARGE_FLAT: 120,
+    COD_MAX_AMOUNT: 50000,
+    COD_MAX_REFUSALS: 2,
+    ...opts.config,
+  };
+
+  const paymentRepo = {
+    findOne: jest.fn(({ where }: { where: { status?: unknown } }) =>
+      Promise.resolve(
+        where.status === PaymentStatus.PENDING
+          ? (opts.pending ?? null)
+          : (opts.payment ?? null),
+      ),
+    ),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+  const productRepo = { findOne: jest.fn().mockResolvedValue(product) };
+  const bidRepo = { findOne: jest.fn().mockResolvedValue(bid) };
+  const userRepo = {
+    findOne: jest.fn().mockResolvedValue({
+      id: 'buyer-1',
+      codRefusalCount: opts.codRefusalCount ?? 0,
+    }),
+  };
+  const dataSource = { getRepository: jest.fn(() => userRepo) };
+  const lifecycle = {
+    confirmCod: jest.fn(),
+    abandonAfterCodRefusal: jest.fn(),
+    confirmPaymentGateway: jest.fn(),
+  };
+  const fonepay = { getPaymentStatus: jest.fn() };
+  const eventEmitter = { emit: jest.fn() };
+  const configService = {
+    getOrThrow: jest.fn((key: string) => config[key]),
+  };
+
+  const service = new PaymentsService(
+    paymentRepo as unknown as Repository<ProductPayment>,
+    bidRepo as unknown as Repository<Bid>,
+    productRepo as unknown as Repository<Product>,
+    {} as Repository<ProductSettlement>,
+    dataSource as unknown as DataSource,
+    fonepay as unknown as FonepayClientService,
+    lifecycle as unknown as AuctionLifecycleService,
+    {} as ShippingService,
+    {} as PathaoClientService,
+    {} as ProductDeliveriesService,
+    eventEmitter as unknown as EventEmitter2,
+    configService as unknown as ConfigService,
+  );
+  return { service, paymentRepo, lifecycle, fonepay, eventEmitter };
+}
+
+describe('PaymentsService.getCodEligibility', () => {
+  it('offers COD to the auction winner, quoting item + delivery', async () => {
+    const { service } = setupCod();
+
+    const res = await service.getCodEligibility('product-1', 'buyer-1');
+
+    expect(res).toEqual({
+      available: true,
+      reason: null,
+      itemAmount: 1200,
+      deliveryCharge: 120,
+      amount: 1320,
+      maxAmount: 50000,
+    });
+  });
+
+  it('never offers COD during an Instant Buy hold', async () => {
+    const { service } = setupCod({
+      product: { status: ProductStatus.AWAITING_INSTANT_BUY },
+    });
+
+    const res = await service.getCodEligibility('product-1', 'buyer-1');
+
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('Instant Buy');
+  });
+
+  it('never offers COD on an Instant Buy bid', async () => {
+    const { service } = setupCod({ bid: { isInstantBuy: true } });
+
+    const res = await service.getCodEligibility('product-1', 'buyer-1');
+
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('Instant Buy');
+  });
+
+  it('refuses orders above COD_MAX_AMOUNT', async () => {
+    const { service } = setupCod({ config: { COD_MAX_AMOUNT: 1000 } });
+
+    const res = await service.getCodEligibility('product-1', 'buyer-1');
+
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('up to 1000');
+  });
+
+  it('withdraws COD from a buyer at COD_MAX_REFUSALS refused parcels', async () => {
+    const { service } = setupCod({ codRefusalCount: 2 });
+
+    const res = await service.getCodEligibility('product-1', 'buyer-1');
+
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('refused deliveries');
+  });
+
+  it('rejects a caller who is not the current winner', async () => {
+    const { service } = setupCod({ bid: { bidderId: 'someone-else' } });
+
+    await expect(
+      service.getCodEligibility('product-1', 'buyer-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('PaymentsService.confirmCod', () => {
+  it('does not settle anything when COD is unavailable', async () => {
+    const { service, lifecycle } = setupCod({ bid: { isInstantBuy: true } });
+
+    await expect(
+      service.confirmCod('product-1', 'buyer-1', {
+        shippingAddressId: 'addr-1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(lifecycle.confirmCod).not.toHaveBeenCalled();
+  });
+
+  it('settles via the paid Fonepay attempt instead, and refuses COD', async () => {
+    const pending = makePayment();
+    const { service, lifecycle, fonepay } = setupCod({ pending });
+    fonepay.getPaymentStatus.mockResolvedValue({ paymentStatus: 'success' });
+    const confirmSuccess = jest
+      .spyOn(service, 'confirmSuccess')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.confirmCod('product-1', 'buyer-1', {
+        shippingAddressId: 'addr-1',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(confirmSuccess).toHaveBeenCalledWith(
+      'pay-gateway',
+      expect.anything(),
+    );
+    expect(lifecycle.confirmCod).not.toHaveBeenCalled();
+  });
+});
+
+describe('PaymentsService.markCodCollected', () => {
+  const codPayment = (overrides: Partial<ProductPayment> = {}) =>
+    makePayment({
+      id: 'pay-cod',
+      method: PaymentMethod.COD,
+      status: PaymentStatus.COD_PENDING,
+      ...overrides,
+    });
+
+  it('turns a delivered COD payment into SUCCESS and announces it', async () => {
+    const { service, paymentRepo, eventEmitter } = setupCod({
+      payment: codPayment(),
+    });
+
+    await service.markCodCollected('pay-cod');
+
+    expect(paymentRepo.update).toHaveBeenCalledWith(
+      { id: 'pay-cod', status: PaymentStatus.COD_PENDING },
+      expect.objectContaining({ status: PaymentStatus.SUCCESS }),
+    );
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EventNames.PAYMENT_SUCCEEDED,
+      expect.objectContaining({ paymentId: 'pay-cod', amount: 1000 }),
+    );
+  });
+
+  it('ignores a prepaid delivery', async () => {
+    const { service, paymentRepo, eventEmitter } = setupCod({
+      payment: makePayment({ status: PaymentStatus.SUCCESS }),
+    });
+
+    await service.markCodCollected('pay-gateway');
+
+    expect(paymentRepo.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when a refusal won the race', async () => {
+    const { service, paymentRepo, eventEmitter } = setupCod({
+      payment: codPayment(),
+    });
+    paymentRepo.update.mockResolvedValue({ affected: 0 });
+
+    await service.markCodCollected('pay-cod');
+
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 });

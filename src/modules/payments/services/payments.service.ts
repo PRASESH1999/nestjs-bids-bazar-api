@@ -1,3 +1,4 @@
+import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { EventNames } from '@common/events/event-names';
@@ -15,6 +16,7 @@ import { FonepayClientService } from '@modules/fonepay/services/fonepay-client.s
 import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
 import { ProductDeliveriesService } from '@modules/pathao/services/product-deliveries.service';
 import { Product } from '@modules/products/entities/product.entity';
+import { User } from '@modules/users/entities/user.entity';
 import {
   BadRequestException,
   ConflictException,
@@ -28,10 +30,11 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
-import { DataSource, Not, Repository } from 'typeorm';
+import { DataSource, In, Not, Repository } from 'typeorm';
 import { WebSocket } from 'ws';
 import { PaginatedResult } from '@common/types/paginated-result.type';
 import type {
+  CodEligibilityResponseDto,
   InitiatePaymentDto,
   InitiatePaymentResponseDto,
   PaymentShippingAddressView,
@@ -58,6 +61,13 @@ const REFUND_ROUND_SUPERSEDED =
 // buyer's banking app after we stop listening, so a late payment is only
 // discovered by asking. See getStatus and OPEN-ITEMS A55.
 const LATE_PAYMENT_RECONCILE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// A sale is spoken for once a payment row reaches either of these — prepaid
+// and collected, or cash on delivery chosen and still to be collected.
+const SALE_COMMITTED_STATUSES = [
+  PaymentStatus.SUCCESS,
+  PaymentStatus.COD_PENDING,
+];
 
 @Injectable()
 export class PaymentsService implements OnModuleInit {
@@ -294,7 +304,7 @@ export class PaymentsService implements OnModuleInit {
   ): Promise<InitiatePaymentResponseDto> {
     // Guard: reject if this product already has a SUCCESS payment
     const successPayment = await this.paymentRepo.findOne({
-      where: { productId: product.id, status: PaymentStatus.SUCCESS },
+      where: { productId: product.id, status: In(SALE_COMMITTED_STATUSES) },
     });
     if (successPayment) {
       throw new ConflictException('This product has already been paid for');
@@ -485,13 +495,235 @@ export class PaymentsService implements OnModuleInit {
     this.eventEmitter.emit(EventNames.PAYMENT_SUCCEEDED, succeededPayload);
   }
 
+  // ─── Cash on delivery (auction winners only) ──────────────────────────────
+
+  /**
+   * Whether the caller may choose cash on delivery for a product they won.
+   * Structural problems (no such product, not the caller's win) throw;
+   * policy reasons come back as `available: false` with a reason the client
+   * can show next to a disabled COD option.
+   */
+  async getCodEligibility(
+    productId: string,
+    requestingUserId: string,
+  ): Promise<CodEligibilityResponseDto> {
+    const maxAmount = this.resolveCodMaxAmount();
+    const unavailable = (reason: string): CodEligibilityResponseDto => ({
+      available: false,
+      reason,
+      itemAmount: null,
+      deliveryCharge: null,
+      amount: null,
+      maxAmount,
+    });
+
+    const product = await this.productRepo.findOne({
+      where: { id: productId },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    // An Instant Buy hold is AWAITING_INSTANT_BUY — always prepaid.
+    if (product.status === ProductStatus.AWAITING_INSTANT_BUY) {
+      return unavailable('Cash on delivery is not available for Instant Buy');
+    }
+    if (product.status !== ProductStatus.AWAITING_PAYMENT) {
+      return unavailable(
+        `Product is not awaiting payment (status: ${product.status})`,
+      );
+    }
+
+    const responsibleBid = await this.bidRepo.findOne({
+      where: { productId, isCurrentlyPaymentResponsible: true },
+    });
+    if (!responsibleBid || responsibleBid.bidderId !== requestingUserId) {
+      throw new ForbiddenException(
+        'You are not the current winner for this product',
+      );
+    }
+
+    const itemAmount = Number(responsibleBid.amount);
+    const deliveryCharge = Number(this.resolveDeliveryCharge());
+    const amount = itemAmount + deliveryCharge;
+    const result = (reason: string | null): CodEligibilityResponseDto => ({
+      available: reason === null,
+      reason,
+      itemAmount,
+      deliveryCharge,
+      amount,
+      maxAmount,
+    });
+
+    if (responsibleBid.isInstantBuy) {
+      return result('Cash on delivery is not available for Instant Buy');
+    }
+    if (
+      !responsibleBid.paymentDeadline ||
+      responsibleBid.paymentDeadline <= new Date()
+    ) {
+      return result('Your payment window has expired');
+    }
+    if (amount > maxAmount) {
+      return result(
+        `Cash on delivery is only available for orders up to ${maxAmount} — please pay online`,
+      );
+    }
+
+    const user = await this.dataSource
+      .getRepository(User)
+      .findOne({ where: { id: requestingUserId } });
+    if ((user?.codRefusalCount ?? 0) >= this.resolveCodMaxRefusals()) {
+      return result(
+        'Cash on delivery is no longer available on your account because of earlier refused deliveries — please pay online',
+      );
+    }
+
+    return result(null);
+  }
+
+  /**
+   * Settles the caller's win as cash on delivery (see
+   * AuctionLifecycleService.confirmCod). A Fonepay attempt still in flight is
+   * checked with Fonepay first: if it was in fact paid, that payment settles
+   * the sale and COD is refused, rather than settling as COD and leaving the
+   * prepaid money to be refunded.
+   */
+  async confirmCod(
+    productId: string,
+    requestingUserId: string,
+    dto: InitiatePaymentDto,
+  ): Promise<PaymentStatusResponseDto> {
+    const eligibility = await this.getCodEligibility(
+      productId,
+      requestingUserId,
+    );
+    if (!eligibility.available) {
+      throw new BadRequestException(eligibility.reason);
+    }
+
+    const pending = await this.paymentRepo.findOne({
+      where: {
+        productId,
+        winnerUserId: requestingUserId,
+        status: PaymentStatus.PENDING,
+      },
+    });
+    if (pending) {
+      let paid = false;
+      try {
+        const fonepayStatus = await this.fonepayClientService.getPaymentStatus({
+          referenceLabel: pending.referenceLabel,
+        });
+        if (fonepayStatus.paymentStatus === 'success') {
+          await this.confirmSuccess(pending.id, fonepayStatus);
+          paid = true;
+        }
+      } catch (err: unknown) {
+        // Fonepay unreachable — go ahead. confirmCod expires the attempt, and
+        // a payment that did land is flagged for a refund by confirmSuccess.
+        this.logger.warn(
+          `confirmCod: Fonepay status check failed for payment ${pending.id}, continuing with COD`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+      if (paid) {
+        throw new ConflictException(
+          'Your online payment for this product already went through — cash on delivery is not needed',
+        );
+      }
+    }
+
+    const { payment } = await this.auctionLifecycleService.confirmCod(
+      requestingUserId,
+      productId,
+      dto.shippingAddressId,
+    );
+    if (pending) this.closeSocket(pending.id);
+
+    return this.toStatusResponse(payment);
+  }
+
+  /**
+   * Pathao reported a parcel delivered (DELIVERY_COMPLETED). For a COD sale
+   * that is the rider collecting the cash: COD_PENDING -> SUCCESS, which is
+   * what releases the seller payout (RewardsService.markSellerPaid requires
+   * SUCCESS). A no-op for prepaid sales. The status condition on the update
+   * makes this race-safe against an admin marking the parcel refused.
+   */
+  async markCodCollected(productPaymentId: string): Promise<void> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: productPaymentId },
+    });
+    if (
+      !payment ||
+      payment.method !== PaymentMethod.COD ||
+      payment.status !== PaymentStatus.COD_PENDING
+    ) {
+      return;
+    }
+
+    const result = await this.paymentRepo.update(
+      { id: payment.id, status: PaymentStatus.COD_PENDING },
+      {
+        status: PaymentStatus.SUCCESS,
+        paymentMessage: 'Cash collected on delivery',
+      },
+    );
+    if (!result.affected) return;
+
+    const succeededPayload: PaymentSucceededPayload = {
+      productId: payment.productId,
+      paymentId: payment.id,
+      referenceLabel: payment.referenceLabel,
+      winnerUserId: payment.winnerUserId,
+      fonepayTraceId: null,
+      amount: Number(payment.amount),
+      deliveryCharge: Number(payment.deliveryCharge),
+      shippingAddressId: payment.shippingAddressId,
+    };
+    this.eventEmitter.emit(EventNames.PAYMENT_SUCCEEDED, succeededPayload);
+  }
+
+  /**
+   * Admin: a COD parcel came back refused. Unwinds the sale to ABANDONED and
+   * gives the buyer a refusal strike — see
+   * AuctionLifecycleService.abandonAfterCodRefusal.
+   */
+  async markCodRefused(
+    paymentId: string,
+    adminId: string,
+  ): Promise<ProductPayment> {
+    const payment = await this.auctionLifecycleService.abandonAfterCodRefusal(
+      adminId,
+      paymentId,
+    );
+
+    const failedPayload: PaymentFailedPayload = {
+      productId: payment.productId,
+      paymentId: payment.id,
+      referenceLabel: payment.referenceLabel,
+      winnerUserId: payment.winnerUserId,
+      message: payment.paymentMessage ?? 'Cash on delivery refused',
+    };
+    this.eventEmitter.emit(EventNames.PAYMENT_FAILED, failedPayload);
+
+    return payment;
+  }
+
+  private resolveCodMaxAmount(): number {
+    return Number(this.configService.getOrThrow<number>('COD_MAX_AMOUNT'));
+  }
+
+  private resolveCodMaxRefusals(): number {
+    return Number(this.configService.getOrThrow<number>('COD_MAX_REFUSALS'));
+  }
+
   private async isSettledByAnotherPayment(
     payment: ProductPayment,
   ): Promise<boolean> {
     const other = await this.paymentRepo.findOne({
       where: {
         productId: payment.productId,
-        status: PaymentStatus.SUCCESS,
+        status: In(SALE_COMMITTED_STATUSES),
         id: Not(payment.id),
       },
     });
@@ -704,6 +936,9 @@ export class PaymentsService implements OnModuleInit {
     if (query.status) {
       qb.andWhere('payment.status = :status', { status: query.status });
     }
+    if (query.method) {
+      qb.andWhere('payment.method = :method', { method: query.method });
+    }
 
     qb.orderBy(`payment.${sortBy}`, sortOrder)
       .skip((page - 1) * limit)
@@ -843,11 +1078,12 @@ export class PaymentsService implements OnModuleInit {
   private async buildShippingAddressView(
     p: ProductPayment,
   ): Promise<PaymentShippingAddressView | null> {
-    if (p.status === PaymentStatus.SUCCESS) {
-      const delivery = await this.productDeliveriesService.findByPaymentId(
-        p.id,
-      );
-      if (!delivery) return null;
+    // The delivery row is created by an event listener, so it can lag a
+    // just-chosen COD by a moment — fall through to the live address then.
+    const delivery = this.hasDelivery(p)
+      ? await this.productDeliveriesService.findByPaymentId(p.id)
+      : null;
+    if (delivery) {
       return {
         recipientName: delivery.recipientName,
         recipientPhone: delivery.recipientPhone,
@@ -889,6 +1125,11 @@ export class PaymentsService implements OnModuleInit {
     }
   }
 
+  /** Prepaid and succeeded, or COD (whose delivery exists from the start). */
+  private hasDelivery(p: ProductPayment): boolean {
+    return p.status === PaymentStatus.SUCCESS || p.method === PaymentMethod.COD;
+  }
+
   private async toInitiateResponse(
     p: ProductPayment,
   ): Promise<InitiatePaymentResponseDto> {
@@ -912,13 +1153,14 @@ export class PaymentsService implements OnModuleInit {
   ): Promise<PaymentStatusResponseDto> {
     const [shippingAddress, delivery] = await Promise.all([
       this.buildShippingAddressView(p),
-      p.status === PaymentStatus.SUCCESS
+      this.hasDelivery(p)
         ? this.productDeliveriesService.findBuyerViewByPaymentId(p.id)
         : Promise.resolve(null),
     ]);
     return {
       paymentId: p.id,
       referenceLabel: p.referenceLabel,
+      method: p.method,
       amount: Number(p.amount) + Number(p.deliveryCharge),
       itemAmount: Number(p.amount),
       deliveryCharge: Number(p.deliveryCharge),

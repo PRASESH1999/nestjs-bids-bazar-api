@@ -25,6 +25,11 @@ export const EventNames = {
   PAYMENT_FAILED: 'payment.failed',
   WIN_TRANSFERRED: 'win.transferred',
 
+  // Cash on delivery: the winner chose COD (sale settled, nothing collected
+  // yet), and a Pathao parcel was reported delivered (cash collected).
+  PAYMENT_COD_CONFIRMED: 'payment.cod_confirmed',
+  DELIVERY_COMPLETED: 'delivery.completed',
+
   // Rewards (Rule 16) — fired once per sale, when an admin flags the seller
   // as paid. The sole points/commission trigger.
   SELLER_MARKED_PAID: 'seller.marked_paid',

@@ -1,6 +1,8 @@
 import type { ConfigService } from '@nestjs/config';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Repository } from 'typeorm';
 import { NotificationType } from '@common/enums/notification-type.enum';
+import { EventNames } from '@common/events/event-names';
 import type { MailService } from '@modules/mail/mail.service';
 import type { NotificationsService } from '@modules/notifications/notifications.service';
 import type { ProductPayment } from '@modules/payments/entities/product-payment.entity';
@@ -33,6 +35,8 @@ function makeDelivery(
     recipientName: 'Buyer',
     recipientPhone: '9800000000',
     deliveryCharge: 150,
+    amountToCollect: 0,
+    returnedAt: null,
     createdAt: new Date('2026-09-30T00:00:00Z'),
     ...overrides,
   } as ProductDelivery;
@@ -42,6 +46,7 @@ function setup(delivery: ProductDelivery, pathaoStatus: string) {
   const deliveryRepo = {
     findOne: jest.fn().mockResolvedValue(delivery),
     save: jest.fn((d: ProductDelivery) => Promise.resolve(d)),
+    create: jest.fn((d: Partial<ProductDelivery>) => d),
     // toAdminViewById — the view itself is not under test here.
     createQueryBuilder: jest.fn(() => {
       const qb: Record<string, jest.Mock> = {};
@@ -79,10 +84,30 @@ function setup(delivery: ProductDelivery, pathaoStatus: string) {
   const config = { getOrThrow: jest.fn().mockReturnValue(12345) };
   const notifications = { createForUser: jest.fn() };
   const mail = { sendDeliveryCancelledAdmin: jest.fn() };
+  const addressRepo = {
+    findOne: jest.fn().mockResolvedValue({
+      id: 'addr-1',
+      recipientName: 'Buyer',
+      recipientPhone: '9800000000',
+      province: 'Bagmati',
+      district: 'Kathmandu',
+      city: 'Kathmandu',
+      street: 'New Road',
+      wardNumber: '1',
+      landmark: null,
+      pathaoCityId: 1,
+      pathaoCityName: 'Kathmandu',
+      pathaoZoneId: 2,
+      pathaoZoneName: 'New Road',
+      pathaoAreaId: null,
+      pathaoAreaName: null,
+    }),
+  };
+  const eventEmitter = { emit: jest.fn() };
 
   const service = new ProductDeliveriesService(
     deliveryRepo as unknown as Repository<ProductDelivery>,
-    {} as Repository<ShippingAddress>,
+    addressRepo as unknown as Repository<ShippingAddress>,
     paymentRepo as unknown as Repository<ProductPayment>,
     productRepo as unknown as Repository<Product>,
     userRepo as unknown as Repository<User>,
@@ -90,8 +115,9 @@ function setup(delivery: ProductDelivery, pathaoStatus: string) {
     config as unknown as ConfigService,
     notifications as unknown as NotificationsService,
     mail as unknown as MailService,
+    eventEmitter as unknown as EventEmitter2,
   );
-  return { service, deliveryRepo, notifications, mail, pathao };
+  return { service, deliveryRepo, notifications, mail, pathao, eventEmitter };
 }
 
 describe('ProductDeliveriesService.refreshStatus — cancellation is announced (A57)', () => {
@@ -172,7 +198,121 @@ describe('ProductDeliveriesService.redispatch — keeps the cancelled order fee 
   });
 });
 
+describe('ProductDeliveriesService — cash on delivery', () => {
+  it('creates a COD delivery with item + delivery as the amount to collect', async () => {
+    const { service, deliveryRepo } = setup(makeDelivery(), 'Pending');
+    deliveryRepo.findOne.mockResolvedValueOnce(null);
+
+    await service.onCodConfirmed({
+      productId: 'product-1',
+      paymentId: 'pay-cod',
+      referenceLabel: 'REFCOD',
+      winnerUserId: 'buyer-1',
+      amount: 1200,
+      deliveryCharge: 120,
+      shippingAddressId: 'addr-1',
+    });
+
+    expect(deliveryRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productPaymentId: 'pay-cod',
+        deliveryCharge: 120,
+        amountToCollect: 1320,
+      }),
+    );
+  });
+
+  it('creates a prepaid delivery with nothing to collect', async () => {
+    const { service, deliveryRepo } = setup(makeDelivery(), 'Pending');
+    deliveryRepo.findOne.mockResolvedValueOnce(null);
+
+    await service.onPaymentSucceeded({
+      productId: 'product-1',
+      paymentId: 'pay-1',
+      referenceLabel: 'REF1',
+      winnerUserId: 'buyer-1',
+      fonepayTraceId: 'TRACE',
+      amount: 1200,
+      deliveryCharge: 120,
+      shippingAddressId: 'addr-1',
+    });
+
+    expect(deliveryRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ amountToCollect: 0 }),
+    );
+  });
+
+  it('sends the stored amount to collect to Pathao on (re)dispatch', async () => {
+    const delivery = makeDelivery({
+      cancelledAt: new Date('2026-10-01T00:00:00Z'),
+      // Decimal columns arrive from the driver as strings.
+      amountToCollect: '1320.00' as unknown as number,
+    });
+    const { service, pathao } = setup(delivery, 'Pickup_Cancelled');
+
+    await service.redispatch('delivery-1', 'admin-1', {
+      itemWeightKg: 1,
+      itemDescription: 'Camera',
+    });
+
+    expect(pathao.createOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ amountToCollect: 1320 }),
+    );
+  });
+
+  it('refuses to redispatch a parcel that came back refused', async () => {
+    const delivery = makeDelivery({
+      cancelledAt: new Date('2026-10-01T00:00:00Z'),
+      returnedAt: new Date('2026-10-02T00:00:00Z'),
+    });
+    const { service, pathao } = setup(delivery, 'Pickup_Cancelled');
+
+    await expect(
+      service.redispatch('delivery-1', 'admin-1', {
+        itemWeightKg: 1,
+        itemDescription: 'Camera',
+      }),
+    ).rejects.toThrow('returned refused');
+    expect(pathao.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('announces delivery.completed the first time Pathao reports delivered', async () => {
+    const delivery = makeDelivery();
+    const { service, eventEmitter } = setup(delivery, 'Delivered');
+
+    await service.refreshStatus(delivery);
+
+    expect(delivery.deliveredAt).toBeInstanceOf(Date);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EventNames.DELIVERY_COMPLETED,
+      { deliveryId: 'delivery-1', productPaymentId: 'pay-1' },
+    );
+  });
+
+  it('does not re-announce a delivery already on record', async () => {
+    const delivery = makeDelivery({
+      deliveredAt: new Date('2026-10-01T00:00:00Z'),
+    });
+    const { service, eventEmitter } = setup(delivery, 'Delivered');
+
+    await service.refreshStatus(delivery);
+
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+});
+
 describe('deliveryStageOf / classifyPathaoStatus', () => {
+  it('reports a refused COD parcel as RETURNED, even with a cancelled order', () => {
+    expect(
+      deliveryStageOf(
+        makeDelivery({
+          cancelledAt: new Date('2026-10-01T00:00:00Z'),
+          returnedAt: new Date('2026-10-02T00:00:00Z'),
+        }),
+      ),
+    ).toBe(DeliveryStage.RETURNED);
+  });
+
   it('reports a cancelled courier order as CANCELLED, not IN_TRANSIT (A56)', () => {
     expect(
       deliveryStageOf(

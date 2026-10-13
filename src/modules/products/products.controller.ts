@@ -33,7 +33,6 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { RequirePermissions } from '@common/decorators/require-permissions.decorator';
 import { Public } from '@common/decorators/public.decorator';
-import { PaginationDto } from '@common/dto/pagination.dto';
 import { OptionalJwtGuard } from '@common/guards/optional-jwt.guard';
 import { Permission } from '@common/enums/permission.enum';
 import { Role } from '@common/enums/role.enum';
@@ -49,6 +48,7 @@ import { ReorderImagesDto } from './dto/reorder-images.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { ListMyProductsQueryDto } from './dto/list-my-products-query.dto';
 import { AdminListProductsQueryDto } from './dto/admin-list-products-query.dto';
+import { HomeSectionQueryDto } from './dto/home-section-query.dto';
 import { productImageHeaders } from '@common/utils/media-headers.util';
 
 const multerOptions = { storage: memoryStorage() };
@@ -137,14 +137,18 @@ export class ProductsController {
   @Public()
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
-    summary: 'Home page: top 10 ACTIVE products ranked by bid count',
+    summary:
+      'Home page: ACTIVE products, most bids first (paginated, default 10 per page)',
   })
-  async getTrendingBids(@Request() req: RequestWithUser) {
-    return {
-      data: await this.productsService.getTrendingProducts(
-        this.getRequesterId(req),
-      ),
-    };
+  async getTrendingBids(
+    @Query() query: HomeSectionQueryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productsService.getTrendingProducts(
+      query.page ?? 1,
+      query.limit ?? 10,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/home/new-arrivals')
@@ -152,12 +156,18 @@ export class ProductsController {
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary:
-      'Home page: 12 most recently listed products awaiting their first bid',
+      'Home page: products awaiting their first bid, most recently listed ' +
+      'first (paginated, default 10 per page)',
   })
-  async getNewArrivals(@Request() req: RequestWithUser) {
-    return {
-      data: await this.productsService.getNewArrivals(this.getRequesterId(req)),
-    };
+  async getNewArrivals(
+    @Query() query: HomeSectionQueryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productsService.getNewArrivals(
+      query.page ?? 1,
+      query.limit ?? 10,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/home/rare-items')
@@ -165,26 +175,37 @@ export class ProductsController {
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary:
-      'Home page: 10 most recently listed rare products (PENDING or ACTIVE)',
+      'Home page: rare products (AWAITING_FIRST_BID or ACTIVE), most recently ' +
+      'listed first (paginated, default 10 per page)',
   })
-  async getRareItems(@Request() req: RequestWithUser) {
-    return {
-      data: await this.productsService.getRareItems(this.getRequesterId(req)),
-    };
+  async getRareItems(
+    @Query() query: HomeSectionQueryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productsService.getRareItems(
+      query.page ?? 1,
+      query.limit ?? 10,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/home/recently-sold')
   @Public()
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
-    summary: 'Home page: 10 most recently sold (SETTLED) products',
+    summary:
+      'Home page: sold (SETTLED) products, most recently sold first ' +
+      '(paginated, default 10 per page)',
   })
-  async getRecentlySold(@Request() req: RequestWithUser) {
-    return {
-      data: await this.productsService.getRecentlySold(
-        this.getRequesterId(req),
-      ),
-    };
+  async getRecentlySold(
+    @Query() query: HomeSectionQueryDto,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.productsService.getRecentlySold(
+      query.page ?? 1,
+      query.limit ?? 10,
+      this.getRequesterId(req),
+    );
   }
 
   @Get('products/home/featured')
@@ -192,16 +213,17 @@ export class ProductsController {
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({
     summary:
-      'Home page: boosted products, latest boost first (paginated). A ' +
-      'product drops out the moment either its boost or its auction ends.',
+      'Home page: boosted products, latest boost first (paginated, default ' +
+      '10 per page). A product drops out the moment either its boost or its ' +
+      'auction ends.',
   })
   async getFeaturedProducts(
-    @Query() query: PaginationDto,
+    @Query() query: HomeSectionQueryDto,
     @Request() req: RequestWithUser,
   ) {
     return this.productsService.getFeaturedProducts(
       query.page ?? 1,
-      query.limit ?? 20,
+      query.limit ?? 10,
       this.getRequesterId(req),
     );
   }

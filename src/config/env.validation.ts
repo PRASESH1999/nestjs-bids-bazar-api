@@ -42,6 +42,12 @@ export const envValidationSchema = Joi.object({
   // Delivery (flat, prepaid via Fonepay — see Pathao block below)
   DELIVERY_CHARGE_FLAT: Joi.number().min(0).required(),
 
+  // Cash on delivery (auction winners only). Orders whose item + delivery
+  // total exceeds COD_MAX_AMOUNT must be prepaid (0 turns COD off); a buyer
+  // with COD_MAX_REFUSALS refused COD parcels loses the option.
+  COD_MAX_AMOUNT: Joi.number().min(0).default(50000),
+  COD_MAX_REFUSALS: Joi.number().integer().min(1).default(2),
+
   // Sparrow SMS (KYC phone OTP verification)
   SPARROW_SMS_TOKEN: Joi.string().required(),
   SPARROW_SMS_FROM: Joi.string().required(),

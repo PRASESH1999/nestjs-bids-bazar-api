@@ -5,14 +5,20 @@ export interface PaymentConfirmedSellerTemplateParams {
   productTitle: string;
   amount: number | string;
   buyerName: string;
+  // Winner chose cash on delivery: the sale is settled, but the money is
+  // collected by the courier and the payout waits for delivery.
+  cashOnDelivery?: boolean;
 }
 
 export function paymentConfirmedSellerTemplate(
   params: PaymentConfirmedSellerTemplateParams,
 ): { subject: string; html: string } {
-  const { sellerName, productTitle, amount, buyerName } = params;
+  const { sellerName, productTitle, amount, buyerName, cashOnDelivery } =
+    params;
   return {
-    subject: 'Payment received — BidsBazar',
+    subject: cashOnDelivery
+      ? 'Your item is sold (cash on delivery) — BidsBazar'
+      : 'Payment received — BidsBazar',
     html: `
 <!DOCTYPE html>
 <html lang="en">
@@ -53,20 +59,24 @@ export function paymentConfirmedSellerTemplate(
     <div class="header"><h1>BidsBazar</h1></div>
     <div class="body">
       <p>Hello, ${sellerName}!</p>
-      <span class="badge">Payment Confirmed ✓</span>
-      <p>Payment has been confirmed for your auction of <strong>${productTitle}</strong>.</p>
+      <span class="badge">${cashOnDelivery ? 'Sold — Cash on Delivery' : 'Payment Confirmed ✓'}</span>
+      <p>${
+        cashOnDelivery
+          ? `Your auction of <strong>${productTitle}</strong> is sold. The buyer pays in cash when the courier delivers it.`
+          : `Payment has been confirmed for your auction of <strong>${productTitle}</strong>.`
+      }</p>
       <div class="summary-row">
         <span class="label">Buyer</span>
         <span class="value">${buyerName}</span>
       </div>
       <div class="summary-row">
-        <span class="label">Amount received</span>
+        <span class="label">${cashOnDelivery ? 'Sale amount' : 'Amount received'}</span>
         <span class="value">${formatCurrency(amount)}</span>
       </div>
       <div class="info-box">
         <strong>Next step:</strong> please bring the item to the Bids Bazar warehouse.
         We ship it to the buyer from there with Pathao, and your payout follows
-        once the item has been handed in.
+        ${cashOnDelivery ? 'once the buyer has received it and paid the courier.' : 'once the item has been handed in.'}
       </div>
     </div>
     <div class="footer">&copy; ${new Date().getFullYear()} BidsBazar. All rights reserved.</div>

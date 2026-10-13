@@ -42,10 +42,15 @@ export function classifyPathaoStatus(orderStatus: string): {
 export function deliveryStageOf(
   d: Pick<
     ProductDelivery,
-    'deliveredAt' | 'cancelledAt' | 'consignmentId' | 'receivedAtWarehouseAt'
+    | 'deliveredAt'
+    | 'cancelledAt'
+    | 'returnedAt'
+    | 'consignmentId'
+    | 'receivedAtWarehouseAt'
   >,
 ): DeliveryStage {
   if (d.deliveredAt) return DeliveryStage.DELIVERED;
+  if (d.returnedAt) return DeliveryStage.RETURNED;
   if (d.cancelledAt) return DeliveryStage.CANCELLED;
   if (d.consignmentId) return DeliveryStage.IN_TRANSIT;
   if (d.receivedAtWarehouseAt) return DeliveryStage.AT_WAREHOUSE;

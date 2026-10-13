@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { IsNull, Not, Repository, SelectQueryBuilder } from 'typeorm';
 import { EventNames } from '@common/events/event-names';
 import { NotificationType } from '@common/enums/notification-type.enum';
-import type { PaymentSucceededPayload } from '@common/events/event-payloads.type';
+import type {
+  DeliveryCompletedPayload,
+  PaymentCodConfirmedPayload,
+  PaymentSucceededPayload,
+} from '@common/events/event-payloads.type';
 import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
@@ -57,12 +61,32 @@ export class ProductDeliveriesService {
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
     private readonly mailService: MailService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ─── Creation (event-driven, exactly once per successful sale) ────────────
 
   @OnEvent(EventNames.PAYMENT_SUCCEEDED, { async: true })
   async onPaymentSucceeded(payload: PaymentSucceededPayload): Promise<void> {
+    // Prepaid — nothing left for the rider to collect. For a COD sale this
+    // event fires again once the cash is collected; the row already exists
+    // by then, so the idempotency check below makes it a no-op.
+    await this.createDelivery(payload, 0);
+  }
+
+  @OnEvent(EventNames.PAYMENT_COD_CONFIRMED, { async: true })
+  async onCodConfirmed(payload: PaymentCodConfirmedPayload): Promise<void> {
+    // Cash on delivery — the rider collects item + delivery at the door.
+    await this.createDelivery(
+      payload,
+      Number(payload.amount) + Number(payload.deliveryCharge),
+    );
+  }
+
+  private async createDelivery(
+    payload: PaymentSucceededPayload | PaymentCodConfirmedPayload,
+    amountToCollect: number,
+  ): Promise<void> {
     try {
       const existing = await this.deliveryRepo.findOne({
         where: { productPaymentId: payload.paymentId },
@@ -71,7 +95,7 @@ export class ProductDeliveriesService {
 
       if (!payload.shippingAddressId) {
         this.logger.error(
-          `onPaymentSucceeded: payment ${payload.paymentId} succeeded with no shippingAddressId — cannot create a delivery record`,
+          `createDelivery: payment ${payload.paymentId} succeeded with no shippingAddressId — cannot create a delivery record`,
         );
         return;
       }
@@ -81,13 +105,13 @@ export class ProductDeliveriesService {
       });
       if (!address) {
         this.logger.error(
-          `onPaymentSucceeded: shipping address ${payload.shippingAddressId} not found for payment ${payload.paymentId}`,
+          `createDelivery: shipping address ${payload.shippingAddressId} not found for payment ${payload.paymentId}`,
         );
         return;
       }
       if (!address.pathaoCityId || !address.pathaoZoneId) {
         this.logger.error(
-          `onPaymentSucceeded: shipping address ${address.id} has no Pathao city/zone — cannot create a delivery record for payment ${payload.paymentId}`,
+          `createDelivery: shipping address ${address.id} has no Pathao city/zone — cannot create a delivery record for payment ${payload.paymentId}`,
         );
         return;
       }
@@ -109,11 +133,12 @@ export class ProductDeliveriesService {
         pathaoAreaId: address.pathaoAreaId,
         pathaoAreaName: address.pathaoAreaName,
         deliveryCharge: payload.deliveryCharge,
+        amountToCollect,
       });
       await this.deliveryRepo.save(delivery);
     } catch (err: unknown) {
       this.logger.error(
-        `onPaymentSucceeded: failed to create delivery record for payment ${payload.paymentId}`,
+        `createDelivery: failed to create delivery record for payment ${payload.paymentId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -183,6 +208,12 @@ export class ProductDeliveriesService {
     // Idempotent — already dispatched.
     if (delivery.consignmentId) return this.toAdminViewById(id);
 
+    if (delivery.returnedAt) {
+      throw new BadRequestException(
+        'This parcel was returned refused — the sale was abandoned',
+      );
+    }
+
     if (!delivery.receivedAtWarehouseAt) {
       throw new BadRequestException(
         'This item has not been marked received at the warehouse yet',
@@ -210,6 +241,11 @@ export class ProductDeliveriesService {
     dto: DispatchDeliveryDto,
   ): Promise<AdminDeliveryView> {
     const delivery = await this.findOneOrThrow(id);
+    if (delivery.returnedAt) {
+      throw new BadRequestException(
+        'This parcel was returned refused — the sale was abandoned',
+      );
+    }
     if (delivery.consignmentId && !delivery.cancelledAt) {
       await this.refreshStatus(delivery);
     }
@@ -258,7 +294,8 @@ export class ProductDeliveriesService {
       itemQuantity: 1,
       itemWeightKg: dto.itemWeightKg,
       itemDescription,
-      amountToCollect: 0,
+      // Decimal column — arrives from the driver as a string.
+      amountToCollect: Number(delivery.amountToCollect),
     });
 
     if (supersedes) {
@@ -313,9 +350,11 @@ export class ProductDeliveriesService {
       delivery.orderStatus,
     );
     let newlyCancelled = false;
+    let newlyDelivered = false;
 
     if (isDelivered && !delivery.deliveredAt) {
       delivery.deliveredAt = new Date();
+      newlyDelivered = true;
     } else if (isCancelled && !delivery.cancelledAt) {
       delivery.cancelledAt = new Date();
       newlyCancelled = true;
@@ -331,6 +370,14 @@ export class ProductDeliveriesService {
     const saved = await this.deliveryRepo.save(delivery);
     // After the save, so the cancellation is on record before anyone is told.
     if (newlyCancelled) await this.notifyCancelled(saved);
+    // Lets PaymentsService mark a cash-on-delivery payment collected.
+    if (newlyDelivered) {
+      const payload: DeliveryCompletedPayload = {
+        deliveryId: saved.id,
+        productPaymentId: saved.productPaymentId,
+      };
+      this.eventEmitter.emit(EventNames.DELIVERY_COMPLETED, payload);
+    }
     return saved;
   }
 
@@ -391,7 +438,8 @@ export class ProductDeliveriesService {
     if (
       !delivery.consignmentId ||
       delivery.deliveredAt ||
-      delivery.cancelledAt
+      delivery.cancelledAt ||
+      delivery.returnedAt
     ) {
       return delivery;
     }
@@ -414,6 +462,7 @@ export class ProductDeliveriesService {
         consignmentId: Not(IsNull()),
         deliveredAt: IsNull(),
         cancelledAt: IsNull(),
+        returnedAt: IsNull(),
       },
     });
   }
@@ -465,23 +514,31 @@ export class ProductDeliveriesService {
   ): void {
     switch (stage) {
       case DeliveryStage.AWAITING_WAREHOUSE:
-        qb.andWhere('delivery.receivedAtWarehouseAt IS NULL');
+        qb.andWhere('delivery.receivedAtWarehouseAt IS NULL').andWhere(
+          'delivery.returnedAt IS NULL',
+        );
         break;
       case DeliveryStage.AT_WAREHOUSE:
-        qb.andWhere('delivery.receivedAtWarehouseAt IS NOT NULL').andWhere(
-          'delivery.consignmentId IS NULL',
-        );
+        qb.andWhere('delivery.receivedAtWarehouseAt IS NOT NULL')
+          .andWhere('delivery.consignmentId IS NULL')
+          .andWhere('delivery.returnedAt IS NULL');
         break;
       case DeliveryStage.IN_TRANSIT:
         qb.andWhere('delivery.consignmentId IS NOT NULL')
           .andWhere('delivery.deliveredAt IS NULL')
-          .andWhere('delivery.cancelledAt IS NULL');
+          .andWhere('delivery.cancelledAt IS NULL')
+          .andWhere('delivery.returnedAt IS NULL');
         break;
       case DeliveryStage.DELIVERED:
         qb.andWhere('delivery.deliveredAt IS NOT NULL');
         break;
       case DeliveryStage.CANCELLED:
-        qb.andWhere('delivery.cancelledAt IS NOT NULL').andWhere(
+        qb.andWhere('delivery.cancelledAt IS NOT NULL')
+          .andWhere('delivery.deliveredAt IS NULL')
+          .andWhere('delivery.returnedAt IS NULL');
+        break;
+      case DeliveryStage.RETURNED:
+        qb.andWhere('delivery.returnedAt IS NOT NULL').andWhere(
           'delivery.deliveredAt IS NULL',
         );
         break;
@@ -518,7 +575,9 @@ export class ProductDeliveriesService {
       dispatchedAt: d.dispatchedAt?.toISOString() ?? null,
       deliveredAt: d.deliveredAt?.toISOString() ?? null,
       cancelledAt: d.cancelledAt?.toISOString() ?? null,
+      returnedAt: d.returnedAt?.toISOString() ?? null,
       lastStatusCheckAt: d.lastStatusCheckAt?.toISOString() ?? null,
+      amountToCollect: Number(d.amountToCollect),
     };
   }
 
@@ -536,6 +595,7 @@ export class ProductDeliveriesService {
         ? { id: buyer.id, username: buyer.username, email: buyer.email }
         : null,
       referenceLabel: payment?.referenceLabel ?? null,
+      paymentMethod: payment?.method ?? null,
       itemAmount: payment ? Number(payment.amount) : null,
       deliveryCharge: Number(d.deliveryCharge),
       recipientName: d.recipientName,

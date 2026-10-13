@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -11,6 +12,7 @@ import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 import * as crypto from 'crypto';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
 import { PaymentConfirmationMethod } from '@common/enums/payment-confirmation-method.enum';
+import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { EventNames } from '@common/events/event-names';
@@ -19,6 +21,7 @@ import type {
   AuctionPausedPayload,
   AuctionResumedPayload,
   AuctionSettledPayload,
+  PaymentCodConfirmedPayload,
   PaymentSucceededPayload,
   WinTransferredPayload,
 } from '@common/events/event-payloads.type';
@@ -32,6 +35,7 @@ import { NotificationsService } from '@modules/notifications/notifications.servi
 import { ShippingService } from '@modules/shipping/shipping.service';
 import { ShippingAddress } from '@modules/shipping/entities/shipping-address.entity';
 import { PathaoClientService } from '@modules/pathao/services/pathao-client.service';
+import { ProductDelivery } from '@modules/pathao/entities/product-delivery.entity';
 import { Bid } from '../entities/bid.entity';
 import { ProductSettlement } from '../entities/product-settlement.entity';
 import { StaleSettlementRoundException } from '../stale-settlement-round.exception';
@@ -1249,6 +1253,7 @@ export class AuctionLifecycleService {
         buyerTotalAmount,
         sellerId: sellerId,
         productTitle: capturedProductTitle,
+        cashOnDelivery: false,
       };
       this.eventEmitter.emit(EventNames.AUCTION_SETTLED, payload);
     } catch (err: unknown) {
@@ -1283,6 +1288,382 @@ export class AuctionLifecycleService {
     }
 
     return savedProduct;
+  }
+
+  // ─── Cash on delivery (auction winners only) ──────────────────────────────
+
+  /**
+   * The responsible bidder chose cash on delivery instead of paying the
+   * Fonepay QR. The sale settles to them right away — the win is locked in,
+   * the fallback cascade and payment-window expiry stop — but nothing has
+   * been collected: the ProductPayment row is created COD_PENDING and only
+   * becomes SUCCESS when Pathao reports the parcel delivered (see
+   * PaymentsService.markCodCollected), so the seller payout stays gated
+   * until the cash is actually in.
+   *
+   * Instant Buy is always prepaid: a hold is AWAITING_INSTANT_BUY, never
+   * AWAITING_PAYMENT, and the isInstantBuy check below backs that up.
+   *
+   * Eligibility that isn't about the auction itself (amount cap, the
+   * buyer's refusal history) is checked by PaymentsService before this.
+   */
+  async confirmCod(
+    buyerId: string,
+    productId: string,
+    shippingAddressId: string,
+  ): Promise<{ product: Product; payment: ProductPayment }> {
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    let savedProduct: Product;
+    let savedPayment: ProductPayment;
+    let sellerId: string;
+    let productTitle: string;
+    let winningBidId: string;
+
+    try {
+      const product = await qr.manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .setLock('pessimistic_write')
+        .where('product.id = :id', { id: productId })
+        .getOne();
+
+      if (!product) throw new NotFoundException('Product not found');
+      if (product.status !== ProductStatus.AWAITING_PAYMENT) {
+        throw new BadRequestException(
+          `Product is not awaiting payment (status: ${product.status})`,
+        );
+      }
+
+      const responsibleBid = await qr.manager.getRepository(Bid).findOne({
+        where: { productId, isCurrentlyPaymentResponsible: true },
+      });
+      if (!responsibleBid) {
+        throw new BadRequestException(
+          'No active payment window found for this product',
+        );
+      }
+      if (responsibleBid.bidderId !== buyerId) {
+        throw new ForbiddenException(
+          'You are not the current winner for this product',
+        );
+      }
+      if (responsibleBid.isInstantBuy) {
+        throw new BadRequestException(
+          'Cash on delivery is not available for Instant Buy',
+        );
+      }
+
+      const now = new Date();
+      if (
+        !responsibleBid.paymentDeadline ||
+        responsibleBid.paymentDeadline <= now
+      ) {
+        throw new BadRequestException('Your payment window has expired');
+      }
+
+      const address = await this.shippingService.getOwned(
+        buyerId,
+        shippingAddressId,
+      );
+      if (!address.pathaoCityId || !address.pathaoZoneId) {
+        throw new BadRequestException(
+          'This address has no delivery location set — pick a city/zone before checking out',
+        );
+      }
+      if (!this.pathaoClientService.isServiceable(address.pathaoCityId)) {
+        throw new BadRequestException(
+          'This delivery address is outside the area we can currently fulfil (Kathmandu Valley only)',
+        );
+      }
+
+      const currentSettlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .findOne({ where: { bidId: responsibleBid.id } });
+      if (!currentSettlement) {
+        throw new InternalServerErrorException(
+          'No settlement round found for the responsible bid — data inconsistency',
+        );
+      }
+
+      // CONFIRMED = the win is confirmed; paymentConfirmationMethod COD says
+      // the cash itself is still to be collected at the door.
+      responsibleBid.paymentStatus = BidPaymentStatus.CONFIRMED;
+      responsibleBid.paymentConfirmedAt = now;
+      responsibleBid.paymentConfirmedById = null;
+      responsibleBid.paymentConfirmationMethod = PaymentConfirmationMethod.COD;
+      await qr.manager.getRepository(Bid).save(responsibleBid);
+
+      await qr.manager
+        .createQueryBuilder()
+        .update(Bid)
+        .set({ paymentStatus: BidPaymentStatus.NOT_RESPONSIBLE })
+        .where('productId = :productId AND id != :id', {
+          productId,
+          id: responsibleBid.id,
+        })
+        .execute();
+
+      product.status = ProductStatus.SETTLED;
+      product.settledAt = now;
+      // See the gateway path and OPEN-ITEMS A26.
+      product.winningBidId = responsibleBid.id;
+      product.settledAmount = responsibleBid.amount;
+      savedProduct = await qr.manager.getRepository(Product).save(product);
+
+      currentSettlement.status = SettlementStatus.SETTLED;
+      currentSettlement.resolvedAt = now;
+      await qr.manager.getRepository(ProductSettlement).save(currentSettlement);
+
+      const payment = qr.manager.getRepository(ProductPayment).create({
+        productId,
+        productSettlementId: currentSettlement.id,
+        sellerId: product.ownerId,
+        winnerUserId: buyerId,
+        amount: Number(responsibleBid.amount),
+        deliveryCharge: this.resolveDeliveryCharge(),
+        shippingAddressId: address.id,
+        referenceLabel: await this.generateManualReferenceLabel(qr),
+        terminalId: 'COD',
+        qrString: null,
+        qrMessage: null,
+        websocketUrl: null,
+        method: PaymentMethod.COD,
+        status: PaymentStatus.COD_PENDING,
+        paymentDeadline: responsibleBid.paymentDeadline,
+      });
+      savedPayment = await qr.manager
+        .getRepository(ProductPayment)
+        .save(payment);
+
+      // Retire any Fonepay attempt still in flight — same reasoning as
+      // confirmPaymentManual: a QR paid after this would be a second charge.
+      // PaymentsService closes its socket once this commits.
+      await qr.manager
+        .getRepository(ProductPayment)
+        .createQueryBuilder()
+        .update()
+        .set({
+          status: PaymentStatus.EXPIRED,
+          paymentMessage: 'Superseded — buyer chose cash on delivery',
+        })
+        .where('productId = :productId', { productId })
+        .andWhere('status = :pending', { pending: PaymentStatus.PENDING })
+        .execute();
+
+      await qr.commitTransaction();
+
+      sellerId = product.ownerId;
+      // Non-null: only products past submission (title required) reach the auction lifecycle.
+      productTitle = product.title!;
+      winningBidId = responsibleBid.id;
+    } catch (err: unknown) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
+
+    const itemAmount = Number(savedPayment.amount);
+    const deliveryCharge = Number(savedPayment.deliveryCharge);
+    const buyerTotalAmount = itemAmount + deliveryCharge;
+
+    try {
+      const [seller, buyer] = await Promise.all([
+        this.dataSource
+          .getRepository(User)
+          .findOne({ where: { id: sellerId } }),
+        this.dataSource.getRepository(User).findOne({ where: { id: buyerId } }),
+      ]);
+      if (seller) {
+        await this.mailService.sendPaymentConfirmedSeller(seller.email, {
+          sellerName: seller.username,
+          productTitle,
+          amount: itemAmount,
+          buyerName: buyer?.username ?? 'Unknown',
+          cashOnDelivery: true,
+        });
+      }
+      if (buyer) {
+        await this.mailService.sendPaymentConfirmedBuyer(buyer.email, {
+          buyerName: buyer.username,
+          productTitle,
+          amount: buyerTotalAmount,
+          cashOnDelivery: true,
+        });
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `confirmCod: post-commit email failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    try {
+      const settledPayload: AuctionSettledPayload = {
+        productId,
+        winningBidId,
+        buyerId,
+        amount: itemAmount,
+        buyerTotalAmount,
+        sellerId,
+        productTitle,
+        cashOnDelivery: true,
+      };
+      this.eventEmitter.emit(EventNames.AUCTION_SETTLED, settledPayload);
+
+      // ProductDeliveriesService creates the delivery from this, with
+      // item + delivery as the rider's amount to collect.
+      const codPayload: PaymentCodConfirmedPayload = {
+        productId,
+        paymentId: savedPayment.id,
+        referenceLabel: savedPayment.referenceLabel,
+        winnerUserId: buyerId,
+        amount: itemAmount,
+        deliveryCharge,
+        shippingAddressId,
+      };
+      this.eventEmitter.emit(EventNames.PAYMENT_COD_CONFIRMED, codPayload);
+    } catch (err: unknown) {
+      this.logger.error(
+        `confirmCod: event emission failed for product ${productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    return { product: savedProduct, payment: savedPayment };
+  }
+
+  /**
+   * A cash-on-delivery parcel came back refused (or the buyer could not be
+   * reached). Admin-triggered: Pathao's return statuses are unverified (A43),
+   * and someone has to confirm the item is really coming back.
+   *
+   * There is no fallback to the next bidder — their payment windows closed
+   * long ago. The sale is unwound to ABANDONED, which the seller can relist
+   * (ProductsService.relistProduct), and the buyer collects a COD refusal
+   * strike (User.codRefusalCount, capped by COD_MAX_REFUSALS).
+   *
+   * The payment row is locked first, so this and PaymentsService's
+   * "delivered → collected" update can never both win.
+   */
+  async abandonAfterCodRefusal(
+    adminId: string,
+    paymentId: string,
+  ): Promise<ProductPayment> {
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    let savedPayment: ProductPayment;
+    let sellerId: string;
+    let productTitle: string;
+
+    try {
+      const payment = await qr.manager
+        .getRepository(ProductPayment)
+        .createQueryBuilder('payment')
+        .setLock('pessimistic_write')
+        .where('payment.id = :id', { id: paymentId })
+        .getOne();
+      if (!payment) throw new NotFoundException('Payment not found');
+      if (
+        payment.method !== PaymentMethod.COD ||
+        payment.status !== PaymentStatus.COD_PENDING
+      ) {
+        throw new BadRequestException(
+          `Only an uncollected cash-on-delivery payment can be marked refused (method: ${payment.method}, status: ${payment.status})`,
+        );
+      }
+
+      const product = await qr.manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .setLock('pessimistic_write')
+        .where('product.id = :id', { id: payment.productId })
+        .getOne();
+      if (!product || product.status !== ProductStatus.SETTLED) {
+        throw new InternalServerErrorException(
+          'A COD_PENDING payment whose product is not SETTLED — data inconsistency',
+        );
+      }
+
+      const delivery = await qr.manager
+        .getRepository(ProductDelivery)
+        .findOne({ where: { productPaymentId: payment.id } });
+      if (delivery?.deliveredAt) {
+        throw new BadRequestException(
+          'Pathao reported this parcel delivered — it cannot be marked refused',
+        );
+      }
+
+      const now = new Date();
+
+      payment.status = PaymentStatus.FAILED;
+      payment.paymentMessage = 'Cash on delivery refused — sale abandoned';
+      savedPayment = await qr.manager
+        .getRepository(ProductPayment)
+        .save(payment);
+
+      if (delivery) {
+        delivery.returnedAt = now;
+        delivery.returnedById = adminId;
+        await qr.manager.getRepository(ProductDelivery).save(delivery);
+      }
+
+      const settlement = await qr.manager
+        .getRepository(ProductSettlement)
+        .findOne({ where: { id: payment.productSettlementId } });
+      if (settlement) {
+        settlement.status = SettlementStatus.EXPIRED;
+        settlement.resolvedAt = now;
+        await qr.manager.getRepository(ProductSettlement).save(settlement);
+        await qr.manager.getRepository(Bid).update(settlement.bidId, {
+          paymentStatus: BidPaymentStatus.EXPIRED,
+        });
+      }
+
+      product.status = ProductStatus.ABANDONED;
+      product.abandonedAt = now;
+      product.settledAt = null;
+      product.settledAmount = null;
+      await qr.manager.getRepository(Product).save(product);
+
+      await qr.manager
+        .getRepository(User)
+        .increment({ id: payment.winnerUserId }, 'codRefusalCount', 1);
+
+      await qr.commitTransaction();
+
+      sellerId = product.ownerId;
+      // Non-null: only products past submission (title required) reach the auction lifecycle.
+      productTitle = product.title!;
+    } catch (err: unknown) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
+
+    try {
+      await this.notificationsService.createForUser({
+        userId: sellerId,
+        type: NotificationType.AUCTION_ABANDONED,
+        relatedId: savedPayment.productId,
+        title: 'The buyer refused the delivery',
+        message: `The winning buyer refused the cash-on-delivery parcel for "${productTitle}". The sale has been cancelled — you can relist the item.`,
+        data: { productId: savedPayment.productId, cashOnDelivery: true },
+      });
+    } catch (err: unknown) {
+      this.logger.error(
+        `abandonAfterCodRefusal: seller notification failed for product ${savedPayment.productId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    return savedPayment;
   }
 
   // ─── Gateway-initiated payment confirmation (Fonepay) ─────────────────────
@@ -1492,6 +1873,7 @@ export class AuctionLifecycleService {
         buyerTotalAmount,
         sellerId: sellerId,
         productTitle: capturedProductTitle,
+        cashOnDelivery: false,
       };
       this.eventEmitter.emit(EventNames.AUCTION_SETTLED, payload);
     } catch (err: unknown) {

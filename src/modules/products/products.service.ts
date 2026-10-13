@@ -40,7 +40,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
 import { formatProductCode } from './product-code';
 import { ProductStorageService } from './product-storage.service';
-import { ProductsRepository } from './products.repository';
+import { ProductsRepository, type RankedProduct } from './products.repository';
 import {
   computeMissingSubmissionFields,
   mapProduct,
@@ -56,6 +56,13 @@ export type {
 
 // Home-page cards need the bid count alongside the standard product shape.
 export type HomeProductResponse = ProductResponse & { totalBids: number };
+
+// One page of a home-page section (trending, new arrivals, rare items,
+// recently sold, featured).
+export type HomeProductPage = {
+  data: HomeProductResponse[];
+  meta: { page: number; limit: number; total: number };
+};
 
 export type TopBidder = { username: string; highestBid: number };
 
@@ -843,88 +850,54 @@ export class ProductsService {
     };
   }
 
-  // Top 10 ACTIVE products ranked by bid count.
+  // ACTIVE products, most bids first.
   async getTrendingProducts(
+    page: number,
+    limit: number,
     requesterId: string | null = null,
-  ): Promise<HomeProductResponse[]> {
-    const results = await this.productsRepository.findTrendingProducts(10);
-    const { favoritedSet, sellerSummaries, boostedUntil } =
-      await this.responseContextFor(
-        requesterId,
-        results.map((r) => r.product),
-      );
-    return results.map((r) => ({
-      ...mapProduct(
-        r.product,
-        favoritedSet.has(r.product.id),
-        sellerSummaries.get(r.product.ownerId) ?? null,
-        boostedUntil.get(r.product.id) ?? null,
-      ),
-      totalBids: r.totalBids,
-    }));
+  ): Promise<HomeProductPage> {
+    const [results, total] = await this.productsRepository.findTrendingProducts(
+      page,
+      limit,
+    );
+    return this.toHomeProductPage(results, total, page, limit, requesterId);
   }
 
-  // 12 most recently listed PENDING products (bidding hasn't started yet).
+  // AWAITING_FIRST_BID products (no bid yet), most recently listed first.
   async getNewArrivals(
+    page: number,
+    limit: number,
     requesterId: string | null = null,
-  ): Promise<HomeProductResponse[]> {
-    const results = await this.productsRepository.findNewestProducts(12);
-    const { favoritedSet, sellerSummaries, boostedUntil } =
-      await this.responseContextFor(
-        requesterId,
-        results.map((r) => r.product),
-      );
-    return results.map((r) => ({
-      ...mapProduct(
-        r.product,
-        favoritedSet.has(r.product.id),
-        sellerSummaries.get(r.product.ownerId) ?? null,
-        boostedUntil.get(r.product.id) ?? null,
-      ),
-      totalBids: r.totalBids,
-    }));
+  ): Promise<HomeProductPage> {
+    const [results, total] = await this.productsRepository.findNewestProducts(
+      page,
+      limit,
+    );
+    return this.toHomeProductPage(results, total, page, limit, requesterId);
   }
 
-  // 10 most recently listed rare products (PENDING or ACTIVE).
+  // Rare products (AWAITING_FIRST_BID or ACTIVE), most recently listed first.
   async getRareItems(
+    page: number,
+    limit: number,
     requesterId: string | null = null,
-  ): Promise<HomeProductResponse[]> {
-    const results = await this.productsRepository.findRareProducts(10);
-    const { favoritedSet, sellerSummaries, boostedUntil } =
-      await this.responseContextFor(
-        requesterId,
-        results.map((r) => r.product),
-      );
-    return results.map((r) => ({
-      ...mapProduct(
-        r.product,
-        favoritedSet.has(r.product.id),
-        sellerSummaries.get(r.product.ownerId) ?? null,
-        boostedUntil.get(r.product.id) ?? null,
-      ),
-      totalBids: r.totalBids,
-    }));
+  ): Promise<HomeProductPage> {
+    const [results, total] = await this.productsRepository.findRareProducts(
+      page,
+      limit,
+    );
+    return this.toHomeProductPage(results, total, page, limit, requesterId);
   }
 
-  // 10 most recently SETTLED (sold) products.
+  // SETTLED (sold) products, most recently settled first.
   async getRecentlySold(
+    page: number,
+    limit: number,
     requesterId: string | null = null,
-  ): Promise<HomeProductResponse[]> {
-    const results = await this.productsRepository.findRecentlySoldProducts(10);
-    const { favoritedSet, sellerSummaries, boostedUntil } =
-      await this.responseContextFor(
-        requesterId,
-        results.map((r) => r.product),
-      );
-    return results.map((r) => ({
-      ...mapProduct(
-        r.product,
-        favoritedSet.has(r.product.id),
-        sellerSummaries.get(r.product.ownerId) ?? null,
-        boostedUntil.get(r.product.id) ?? null,
-      ),
-      totalBids: r.totalBids,
-    }));
+  ): Promise<HomeProductPage> {
+    const [results, total] =
+      await this.productsRepository.findRecentlySoldProducts(page, limit);
+    return this.toHomeProductPage(results, total, page, limit, requesterId);
   }
 
   // Paginated boosted products, latest boost first — a product drops out the
@@ -934,15 +907,24 @@ export class ProductsService {
     page: number,
     limit: number,
     requesterId: string | null = null,
-  ): Promise<{
-    data: HomeProductResponse[];
-    meta: { page: number; limit: number; total: number };
-  }> {
+  ): Promise<HomeProductPage> {
     const { ids, total } = await this.boostsService.getFeaturedProductIds(
       page,
       limit,
     );
     const results = await this.productsRepository.findFeaturedRanked(ids);
+    return this.toHomeProductPage(results, total, page, limit, requesterId);
+  }
+
+  // Shared by every paginated home-page section: cards keep the repository's
+  // ranking and carry the same favorited / seller / boost context.
+  private async toHomeProductPage(
+    results: RankedProduct[],
+    total: number,
+    page: number,
+    limit: number,
+    requesterId: string | null,
+  ): Promise<HomeProductPage> {
     const { favoritedSet, sellerSummaries, boostedUntil } =
       await this.responseContextFor(
         requesterId,

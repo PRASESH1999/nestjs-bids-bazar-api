@@ -37,7 +37,9 @@ export class AuctionSettledNotificationHandler {
         relatedId: payload.winningBidId,
         title: 'Sold — hand the item in at the warehouse',
         // No warehouse address yet (OPEN-ITEMS A44) — "the warehouse" until one exists.
-        message: `Payment of ${payload.amount} for "${payload.productTitle}" has been confirmed. Please bring the item to the Bids Bazar warehouse so we can ship it to the buyer. Your payout follows once it is handed in.`,
+        message: payload.cashOnDelivery
+          ? `"${payload.productTitle}" sold for ${payload.amount} — the buyer pays cash on delivery. Please bring the item to the Bids Bazar warehouse so we can ship it. Your payout follows once the buyer has received it and paid the courier.`
+          : `Payment of ${payload.amount} for "${payload.productTitle}" has been confirmed. Please bring the item to the Bids Bazar warehouse so we can ship it to the buyer. Your payout follows once it is handed in.`,
         data: { productId: payload.productId, amount: payload.amount },
       });
 
@@ -45,11 +47,16 @@ export class AuctionSettledNotificationHandler {
         userId: payload.buyerId,
         type: NotificationType.PAYMENT_CONFIRMED_BUYER,
         relatedId: payload.winningBidId,
-        title: 'Payment confirmed',
-        message: `Your payment of ${payload.buyerTotalAmount} for "${payload.productTitle}" is confirmed, delivery included. We will ship it to you with Pathao once the seller hands it in at our warehouse.`,
+        title: payload.cashOnDelivery
+          ? 'Order confirmed — cash on delivery'
+          : 'Payment confirmed',
+        message: payload.cashOnDelivery
+          ? `Your cash-on-delivery order for "${payload.productTitle}" is confirmed. Pay ${payload.buyerTotalAmount} in cash (delivery included) to the Pathao rider. We will ship it once the seller hands it in at our warehouse.`
+          : `Your payment of ${payload.buyerTotalAmount} for "${payload.productTitle}" is confirmed, delivery included. We will ship it to you with Pathao once the seller hands it in at our warehouse.`,
         data: {
           productId: payload.productId,
           amount: payload.buyerTotalAmount,
+          cashOnDelivery: payload.cashOnDelivery,
         },
       });
 

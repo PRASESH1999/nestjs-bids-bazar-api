@@ -3,6 +3,7 @@ import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationDto } from '@common/dto/pagination.dto';
+import { PaymentMethod } from '@common/enums/payment-method.enum';
 import { PaymentStatus } from '@common/enums/payment-status.enum';
 
 export enum PaymentSortBy {
@@ -36,6 +37,14 @@ export class ListPaymentsAdminQueryDto extends PaginationDto {
   @IsOptional()
   @IsEnum(PaymentStatus)
   status?: PaymentStatus;
+
+  @ApiPropertyOptional({
+    enum: PaymentMethod,
+    description: 'Filter by payment method (FONEPAY or COD)',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
 
   @ApiPropertyOptional({
     enum: PaymentSortBy,

@@ -1,6 +1,7 @@
 import { EventNames } from '@common/events/event-names';
 import type {
   AuctionResumedPayload,
+  DeliveryCompletedPayload,
   PaymentFailedPayload,
   PaymentInitiatedPayload,
   PaymentSucceededPayload,
@@ -71,6 +72,20 @@ export class PaymentEventsHandler {
       });
     } catch (err: unknown) {
       this.logger.error('payment.failed broadcast failed', err);
+    }
+  }
+
+  // Pathao delivered a parcel — for a cash-on-delivery sale that means the
+  // rider collected the cash. A no-op for prepaid sales.
+  @OnEvent(EventNames.DELIVERY_COMPLETED, { async: true })
+  async onDeliveryCompleted(payload: DeliveryCompletedPayload): Promise<void> {
+    try {
+      await this.paymentsService.markCodCollected(payload.productPaymentId);
+    } catch (err: unknown) {
+      this.logger.error(
+        `delivery.completed: marking COD collected failed for payment ${payload.productPaymentId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
     }
   }
 

@@ -3,10 +3,15 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { BidPaymentStatus } from '@common/enums/bid-payment-status.enum';
+import { PaymentConfirmationMethod } from '@common/enums/payment-confirmation-method.enum';
+import { PaymentMethod } from '@common/enums/payment-method.enum';
+import { PaymentStatus } from '@common/enums/payment-status.enum';
 import { SettlementStatus } from '@common/enums/settlement-status.enum';
 import { EventNames } from '@common/events/event-names';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { Product } from '@modules/products/entities/product.entity';
+import { User } from '@modules/users/entities/user.entity';
+import { ProductDelivery } from '@modules/pathao/entities/product-delivery.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { NotificationsService } from '@modules/notifications/notifications.service';
 import { Bid } from '../entities/bid.entity';
@@ -425,5 +430,285 @@ describe('AuctionLifecycleService.confirmPaymentGateway — a round that is over
       .catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(StaleSettlementRoundException);
     expect((err as Error).message).toContain('SETTLED');
+  });
+});
+
+/*
+ * Cash on delivery — the win settles when COD is chosen (payment COD_PENDING),
+ * and a refused parcel unwinds the sale to ABANDONED with a buyer strike.
+ */
+function buildCodService(opts: {
+  product: Product;
+  bid?: Bid | null;
+  payment?: Partial<ProductPayment> | null;
+  delivery?: Partial<ProductDelivery> | null;
+}) {
+  const productRepo = {
+    createQueryBuilder: jest.fn(() =>
+      makeQueryBuilder({ getOne: opts.product }),
+    ),
+    save: jest.fn((p: Product) => p),
+  };
+  const bidRepo = {
+    findOne: jest.fn().mockResolvedValue(opts.bid ?? null),
+    save: jest.fn((b: Bid) => b),
+    update: jest.fn(),
+  };
+  const settlementRepo = {
+    findOne: jest.fn().mockResolvedValue({
+      id: 'round-1',
+      bidId: 'bid-1',
+      status: SettlementStatus.PENDING_PAYMENT,
+    }),
+    save: jest.fn((s: ProductSettlement) => s),
+  };
+  const updateQb: Record<string, jest.Mock> = {};
+  for (const m of ['update', 'set', 'where', 'andWhere'])
+    updateQb[m] = jest.fn(() => updateQb);
+  updateQb.execute = jest.fn();
+  const paymentRepo = {
+    // generateManualReferenceLabel uniqueness probe — always free.
+    findOne: jest.fn().mockResolvedValue(null),
+    create: jest.fn((p: Partial<ProductPayment>) => ({ id: 'pay-cod', ...p })),
+    save: jest.fn((p: ProductPayment) => p),
+    createQueryBuilder: jest.fn(() => {
+      const qb = makeQueryBuilder({ getOne: opts.payment ?? null });
+      Object.assign(qb, {
+        update: updateQb.update,
+      });
+      return qb;
+    }),
+  };
+  const deliveryRepo = {
+    findOne: jest.fn().mockResolvedValue(opts.delivery ?? null),
+    save: jest.fn((d: ProductDelivery) => d),
+  };
+  const userRepo = { increment: jest.fn() };
+
+  const qr = {
+    connect: jest.fn(),
+    startTransaction: jest.fn(),
+    commitTransaction: jest.fn(),
+    rollbackTransaction: jest.fn(),
+    release: jest.fn(),
+    manager: {
+      createQueryBuilder: jest.fn(() => updateQb),
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === Product) return productRepo;
+        if (entity === Bid) return bidRepo;
+        if (entity === ProductSettlement) return settlementRepo;
+        if (entity === ProductPayment) return paymentRepo;
+        if (entity === ProductDelivery) return deliveryRepo;
+        if (entity === User) return userRepo;
+        throw new Error('Unexpected repository requested in test');
+      }),
+    },
+  };
+  const dataSource = {
+    createQueryRunner: jest.fn(() => qr),
+    getRepository: jest.fn(() => ({
+      findOne: jest.fn().mockResolvedValue(null),
+    })),
+  } as unknown as DataSource;
+  const emitter = { emit: jest.fn() };
+  const notifications = { createForUser: jest.fn() };
+  const shipping = {
+    getOwned: jest
+      .fn()
+      .mockResolvedValue({ id: 'addr-1', pathaoCityId: 1, pathaoZoneId: 2 }),
+  };
+  const pathao = { isServiceable: jest.fn().mockReturnValue(true) };
+  const config = {
+    getOrThrow: jest.fn((key: string) => {
+      if (key === 'DELIVERY_CHARGE_FLAT') return 120;
+      throw new Error(`Unexpected config key requested in test: ${key}`);
+    }),
+  };
+
+  const service = new AuctionLifecycleService(
+    dataSource,
+    config as unknown as ConfigService,
+    mailService,
+    emitter as unknown as EventEmitter2,
+    notifications as unknown as NotificationsService,
+    shipping as unknown as ShippingService,
+    pathao as unknown as PathaoClientService,
+  );
+  return {
+    service,
+    qr,
+    productRepo,
+    bidRepo,
+    paymentRepo,
+    deliveryRepo,
+    userRepo,
+    emitter,
+  };
+}
+
+describe('AuctionLifecycleService.confirmCod', () => {
+  const awaitingPayment = () =>
+    makeProduct({ status: ProductStatus.AWAITING_PAYMENT });
+  const winningBid = (overrides: Partial<Bid> = {}) =>
+    makeBid({
+      bidderId: 'buyer-1',
+      amount: 1200,
+      isCurrentlyPaymentResponsible: true,
+      paymentStatus: BidPaymentStatus.PENDING,
+      paymentDeadline: new Date(Date.now() + 3_600_000),
+      ...overrides,
+    });
+
+  it('settles the sale with a COD_PENDING payment and hands off to delivery', async () => {
+    const product = awaitingPayment();
+    const bid = winningBid();
+    const { service, qr, paymentRepo, emitter } = buildCodService({
+      product,
+      bid,
+    });
+
+    const { payment } = await service.confirmCod(
+      'buyer-1',
+      'product-1',
+      'addr-1',
+    );
+
+    expect(qr.commitTransaction).toHaveBeenCalled();
+    expect(product.status).toBe(ProductStatus.SETTLED);
+    expect(bid.paymentConfirmationMethod).toBe(PaymentConfirmationMethod.COD);
+    expect(paymentRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: PaymentMethod.COD,
+        status: PaymentStatus.COD_PENDING,
+        amount: 1200,
+        deliveryCharge: 120,
+        shippingAddressId: 'addr-1',
+      }),
+    );
+    expect(payment.id).toBe('pay-cod');
+    expect(emitter.emit).toHaveBeenCalledWith(
+      EventNames.AUCTION_SETTLED,
+      expect.objectContaining({ cashOnDelivery: true, buyerTotalAmount: 1320 }),
+    );
+    expect(emitter.emit).toHaveBeenCalledWith(
+      EventNames.PAYMENT_COD_CONFIRMED,
+      expect.objectContaining({
+        paymentId: 'pay-cod',
+        amount: 1200,
+        deliveryCharge: 120,
+      }),
+    );
+  });
+
+  it('refuses an Instant Buy bid', async () => {
+    const product = awaitingPayment();
+    const { service, qr } = buildCodService({
+      product,
+      bid: winningBid({ isInstantBuy: true }),
+    });
+
+    await expect(
+      service.confirmCod('buyer-1', 'product-1', 'addr-1'),
+    ).rejects.toThrow('Instant Buy');
+    expect(qr.rollbackTransaction).toHaveBeenCalled();
+    expect(product.status).toBe(ProductStatus.AWAITING_PAYMENT);
+  });
+
+  it('refuses an Instant Buy hold (product not AWAITING_PAYMENT)', async () => {
+    const { service, qr } = buildCodService({
+      product: makeProduct({ status: ProductStatus.AWAITING_INSTANT_BUY }),
+      bid: winningBid({ isInstantBuy: true }),
+    });
+
+    await expect(
+      service.confirmCod('buyer-1', 'product-1', 'addr-1'),
+    ).rejects.toThrow('not awaiting payment');
+    expect(qr.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses anyone but the responsible bidder', async () => {
+    const { service, qr } = buildCodService({
+      product: awaitingPayment(),
+      bid: winningBid({ bidderId: 'someone-else' }),
+    });
+
+    await expect(
+      service.confirmCod('buyer-1', 'product-1', 'addr-1'),
+    ).rejects.toThrow('not the current winner');
+    expect(qr.commitTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuctionLifecycleService.abandonAfterCodRefusal', () => {
+  const codPayment = (overrides: Partial<ProductPayment> = {}) => ({
+    id: 'pay-cod',
+    productId: 'product-1',
+    productSettlementId: 'round-1',
+    winnerUserId: 'buyer-1',
+    method: PaymentMethod.COD,
+    status: PaymentStatus.COD_PENDING,
+    ...overrides,
+  });
+
+  it('abandons the sale, marks the parcel returned and adds a buyer strike', async () => {
+    const product = makeProduct({ status: ProductStatus.SETTLED });
+    const delivery: Partial<ProductDelivery> = {
+      id: 'delivery-1',
+      deliveredAt: null,
+      returnedAt: null,
+    };
+    const { service, qr, userRepo, bidRepo } = buildCodService({
+      product,
+      payment: codPayment(),
+      delivery,
+    });
+
+    const payment = await service.abandonAfterCodRefusal('admin-1', 'pay-cod');
+
+    expect(qr.commitTransaction).toHaveBeenCalled();
+    expect(payment.status).toBe(PaymentStatus.FAILED);
+    expect(product.status).toBe(ProductStatus.ABANDONED);
+    expect(product.settledAt).toBeNull();
+    expect(delivery.returnedAt).toBeInstanceOf(Date);
+    expect(delivery.returnedById).toBe('admin-1');
+    expect(bidRepo.update).toHaveBeenCalledWith('bid-1', {
+      paymentStatus: BidPaymentStatus.EXPIRED,
+    });
+    expect(userRepo.increment).toHaveBeenCalledWith(
+      { id: 'buyer-1' },
+      'codRefusalCount',
+      1,
+    );
+  });
+
+  it('refuses once Pathao has reported the parcel delivered', async () => {
+    const product = makeProduct({ status: ProductStatus.SETTLED });
+    const { service, qr, userRepo } = buildCodService({
+      product,
+      payment: codPayment(),
+      delivery: { id: 'delivery-1', deliveredAt: new Date() },
+    });
+
+    await expect(
+      service.abandonAfterCodRefusal('admin-1', 'pay-cod'),
+    ).rejects.toThrow('delivered');
+    expect(qr.rollbackTransaction).toHaveBeenCalled();
+    expect(product.status).toBe(ProductStatus.SETTLED);
+    expect(userRepo.increment).not.toHaveBeenCalled();
+  });
+
+  it('refuses a prepaid payment', async () => {
+    const { service, qr } = buildCodService({
+      product: makeProduct({ status: ProductStatus.SETTLED }),
+      payment: codPayment({
+        method: PaymentMethod.FONEPAY,
+        status: PaymentStatus.SUCCESS,
+      }),
+    });
+
+    await expect(
+      service.abandonAfterCodRefusal('admin-1', 'pay-cod'),
+    ).rejects.toThrow('uncollected cash-on-delivery');
+    expect(qr.commitTransaction).not.toHaveBeenCalled();
   });
 });

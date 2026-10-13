@@ -342,6 +342,7 @@ export class MailService implements OnModuleInit {
       productTitle: string;
       amount: number | string;
       buyerName: string;
+      cashOnDelivery?: boolean;
     },
   ): Promise<void> {
     const { subject, html } = paymentConfirmedSellerTemplate(params);
@@ -356,6 +357,7 @@ export class MailService implements OnModuleInit {
       buyerName: string;
       productTitle: string;
       amount: number | string;
+      cashOnDelivery?: boolean;
     },
   ): Promise<void> {
     const { subject, html } = paymentConfirmedBuyerTemplate(params);

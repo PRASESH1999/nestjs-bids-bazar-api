@@ -831,3 +831,114 @@ describe('ProductsService — product code', () => {
     expect(result.data[0].deletedAt).toEqual(new Date('2026-10-01'));
   });
 });
+
+describe('ProductsService — paginated home-page sections', () => {
+  function buildListed(id: string, ownerId: string): Product {
+    return {
+      id,
+      ownerId,
+      productCode: null,
+      title: `Product ${id}`,
+      description: 'Description text that is long enough.',
+      specifications: null,
+      categoryId: 'cat-1',
+      subcategoryId: 'sub-1',
+      condition: ItemCondition.NEW,
+      status: ProductStatus.ACTIVE,
+      basePrice: 1000,
+      biddingStartPrice: 1200,
+      instantBuyPrice: 1400,
+      biddingEndPrice: 1600,
+      currency: 'NPR',
+      biddingDurationHours: 72,
+      currentHighestBid: null,
+      currentHighestBidderId: null,
+      biddingStartedAt: null,
+      biddingEndsAt: null,
+      viewCount: 0,
+      isRare: false,
+      submittedAt: null,
+      reviewedById: null,
+      reviewedAt: null,
+      rejectionReason: null,
+      province: null,
+      district: null,
+      city: null,
+      street: null,
+      wardNumber: null,
+      winningBidId: null,
+      closedAt: null,
+      settledAt: null,
+      settledAmount: null,
+      abandonedAt: null,
+      relistedProductId: null,
+      withdrawnAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+      images: [],
+    };
+  }
+
+  function buildService(
+    repo: Partial<Record<keyof ProductsRepository, jest.Mock>>,
+  ) {
+    return new ProductsService(
+      repo as unknown as ProductsRepository,
+      {} as never,
+      {} as never,
+      mockUsersService as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        getFavoritedProductIds: jest
+          .fn()
+          .mockResolvedValue(new Set<string>(['p-2'])),
+      } as never,
+      { boostedUntilFor: jest.fn().mockResolvedValue(new Map()) } as never, // boostsService
+    );
+  }
+
+  it('passes page/limit through and keeps the repository ranking', async () => {
+    const findTrendingProducts = jest.fn().mockResolvedValue([
+      [
+        { product: buildListed('p-1', 'seller-1'), totalBids: 9 },
+        { product: buildListed('p-2', 'seller-2'), totalBids: 4 },
+      ],
+      23,
+    ]);
+    const service = buildService({ findTrendingProducts });
+
+    const result = await service.getTrendingProducts(3, 2, 'viewer-1');
+
+    expect(findTrendingProducts).toHaveBeenCalledWith(3, 2);
+    expect(result.meta).toEqual({ page: 3, limit: 2, total: 23 });
+    expect(result.data.map((p) => [p.id, p.totalBids])).toEqual([
+      ['p-1', 9],
+      ['p-2', 4],
+    ]);
+    expect(result.data.map((p) => p.isFavorited)).toEqual([false, true]);
+  });
+
+  it.each([
+    ['getNewArrivals', 'findNewestProducts'],
+    ['getRareItems', 'findRareProducts'],
+    ['getRecentlySold', 'findRecentlySoldProducts'],
+  ] as const)(
+    '%s returns an empty page with the total when past the end',
+    async (method, repoMethod) => {
+      const repoFn = jest.fn().mockResolvedValue([[], 7]);
+      const service = buildService({ [repoMethod]: repoFn });
+
+      const result = await service[method](5, 10, null);
+
+      expect(repoFn).toHaveBeenCalledWith(5, 10);
+      expect(result).toEqual({
+        data: [],
+        meta: { page: 5, limit: 10, total: 7 },
+      });
+    },
+  );
+});
