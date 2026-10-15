@@ -17,6 +17,7 @@ import { PathaoClientService } from '@modules/pathao/services/pathao-client.serv
 import { ProductDeliveriesService } from '@modules/pathao/services/product-deliveries.service';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
+import { assertPhoneOnFileForBuying } from '@modules/users/profile-completion';
 import {
   BadRequestException,
   ConflictException,
@@ -236,6 +237,15 @@ export class PaymentsService implements OnModuleInit {
     requestingUserId: string,
     dto: InitiatePaymentDto,
   ): Promise<InitiatePaymentResponseDto> {
+    // Instant Buy wins the lot outright, so it carries the same requirement
+    // as a bid — otherwise it is the way around it.
+    assertPhoneOnFileForBuying(
+      await this.dataSource.getRepository(User).findOne({
+        where: { id: requestingUserId },
+        select: { id: true, phone: true, pendingPhone: true },
+      }),
+    );
+
     const now = new Date();
 
     // Idempotent retry: a slow first response re-submitted by the client

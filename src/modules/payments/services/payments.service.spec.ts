@@ -172,7 +172,13 @@ describe('PaymentsService.confirmSuccess', () => {
  * refund, not just logged (and later expired by the cron as if unpaid).
  * A54 — a gateway FAILED on an Instant Buy hold releases the hold.
  */
-function setupFull(payment: ProductPayment) {
+function setupFull(
+  payment: ProductPayment,
+  buyer: { phone: string | null; pendingPhone: string | null } = {
+    phone: '9841234567',
+    pendingPhone: null,
+  },
+) {
   const paymentRepo = {
     // By id, or the buyer's own pending attempt — both are the payment under
     // test. The "another SUCCESS payment" lookup (Not(id)) finds nothing.
@@ -192,13 +198,19 @@ function setupFull(payment: ProductPayment) {
   const fonepay = { getPaymentStatus: jest.fn() };
   const eventEmitter = { emit: jest.fn() };
   const shipping = { getOwned: jest.fn().mockResolvedValue({}) };
+  // The Instant Buy phone check's user lookup.
+  const dataSource = {
+    getRepository: jest.fn(() => ({
+      findOne: jest.fn().mockResolvedValue({ id: 'buyer-1', ...buyer }),
+    })),
+  };
 
   const service = new PaymentsService(
     paymentRepo as unknown as Repository<ProductPayment>,
     {} as Repository<Bid>,
     {} as Repository<Product>,
     {} as Repository<ProductSettlement>,
-    {} as DataSource,
+    dataSource as unknown as DataSource,
     fonepay as unknown as FonepayClientService,
     lifecycle as unknown as AuctionLifecycleService,
     shipping as unknown as ShippingService,
@@ -329,6 +341,24 @@ describe('PaymentsService.initiateInstantBuyPayment — idempotent while the hol
     expect(lifecycle.startInstantBuyHold).not.toHaveBeenCalled();
     expect(res.paymentId).toBe('pay-gateway');
     expect(res.qrString).toBe('QR-PAYLOAD');
+  });
+});
+
+describe('PaymentsService.initiateInstantBuyPayment — mobile number required', () => {
+  it('refuses a buyer with no phone before any hold is taken', async () => {
+    const { service, lifecycle } = setupFull(makePayment({}), {
+      phone: null,
+      pendingPhone: null,
+    });
+
+    const attempt = service.initiateInstantBuyPayment('product-1', 'buyer-1', {
+      shippingAddressId: 'addr-1',
+    });
+    await expect(attempt).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(attempt).rejects.toMatchObject({
+      response: { errorCode: 'PHONE_REQUIRED' },
+    });
+    expect(lifecycle.startInstantBuyHold).not.toHaveBeenCalled();
   });
 });
 

@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 // import { ThrottlerGuard } from '@nestjs/throttler';
 import { CommonModule } from '@common/common.module';
+import { ContactModule } from '@modules/contact/contact.module';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { AuthModule } from '@modules/auth/auth.module';
 import { BiddingModule } from '@modules/bidding/bidding.module';
@@ -92,6 +93,7 @@ import { envValidationSchema } from './config/env.validation';
     ReportsModule,
     RatingsModule,
     BoostsModule,
+    ContactModule,
   ],
   controllers: [AppController],
   providers: [

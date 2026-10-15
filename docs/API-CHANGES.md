@@ -14,6 +14,78 @@ knowing **why** a decision was made so it is not quietly undone later.
 
 ---
 
+## 2026-10-15 — a mobile number is required to bid or Instant Buy
+
+### Changed — check your client
+
+| Endpoint | New refusal |
+|---|---|
+| `POST /products/:id/bids` | **403** `errorCode: PHONE_REQUIRED` |
+| `POST /payments/:productId/instant-buy/initiate` | **403** `errorCode: PHONE_REQUIRED` |
+
+- Refused when the account has neither `phone` (verified) nor `pendingPhone`.
+  A pending, unverified number is enough — the same rule
+  `missingProfileFields` uses, so a client can predict the refusal from
+  `missingProfileFields.includes('phone')` on `GET /users/me` or the login
+  response.
+- Why: Google/Facebook signups arrive with no phone, and the complete-profile
+  step that asks for one can be skipped. A winning buyer has to be reachable
+  for payment and delivery. Instant Buy is included because it wins a lot
+  outright; leaving it open would be the way around the bid check.
+- The bid check runs before the product row is locked, so a refused bidder
+  never holds up anyone else's bid.
+- Both bidding 403s are now distinguishable: `PHONE_REQUIRED` vs the existing
+  "you already hold the highest bid" (no custom code). Branch on `errorCode`,
+  not on the status.
+- `assertPhoneOnFileForBuying` in `users/profile-completion.ts`.
+
+---
+
+## 2026-10-15 — Contact Us endpoint
+
+### Added
+
+`POST /contact` — **public**. Emails a Contact Us message to the support inbox
+and a copy to the sender; nothing is stored, the mailbox is the record.
+
+| Field | Rules |
+|---|---|
+| `topic` | one of `general`, `order`, `payment`, `selling`, `account`, `report`, `advertising` |
+| `fullName` | required, ≤ 120 |
+| `email` | required, valid email |
+| `phone` | optional, 10-digit Nepali mobile (`98XXXXXXXX`, no `+977`) |
+| `referenceId` | optional, ≤ 64 — order / transaction / product code |
+| `message` | required, 10–1000 |
+
+- **200** `{ "ticket": "BB-104382" }` — the ticket is quoted in both emails'
+  subjects; it is a reference, not a database id.
+- **400** validation, **429** over 5 messages an hour per visitor, **503** the
+  SMTP send to the inbox failed (the visitor is not told it was received).
+- The inbox is `CONTACT_INBOX`, falling back to `MAIL_FROM`. Reply-To is the
+  sender, so support answers by replying.
+- Every user value is HTML-escaped in the templates (`escapeHtml` in
+  `mail/utils/mail-format.util.ts`) — the other templates only interpolate
+  server data, this is the first that takes public input.
+
+### Why the rate limit has its own guard
+
+The global `ThrottlerGuard` is disabled, so the route applies one itself —
+`ClientIpThrottlerGuard`. The frontend calls this from a Next.js server action,
+so every request arrives from the Next server's address; keyed on that, "5 per
+IP" is 5 for the whole site. The guard keys on the first `X-Forwarded-For` hop,
+but **only when the request comes from a trusted proxy** (`TRUSTED_PROXY_IPS`,
+comma-separated, default loopback). Set it to the Next server's address in any
+deployment where the two are not on the same host, or every visitor shares one
+budget again. Do not widen it to "any caller": the header is then forgeable and
+the limit is gone.
+
+### New env (both optional)
+
+- `CONTACT_INBOX` — where messages go. Default `MAIL_FROM`.
+- `TRUSTED_PROXY_IPS` — see above. Default `127.0.0.1,::1,::ffff:127.0.0.1`.
+
+---
+
 ## 2026-10-13 — home-page sections are paginated
 
 Trending, new arrivals, rare items and recently sold used to return a fixed

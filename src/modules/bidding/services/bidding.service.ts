@@ -22,6 +22,7 @@ import { PaginatedResult } from '@common/types/paginated-result.type';
 import { PaginationDto } from '@common/dto/pagination.dto';
 import { Product } from '@modules/products/entities/product.entity';
 import { User } from '@modules/users/entities/user.entity';
+import { assertPhoneOnFileForBuying } from '@modules/users/profile-completion';
 import { MailService } from '@modules/mail/mail.service';
 import { ProductPayment } from '@modules/payments/entities/product-payment.entity';
 import { RatingsService } from '@modules/ratings/ratings.service';
@@ -126,6 +127,15 @@ export class BiddingService {
     let previousBidAmount: number | null;
 
     try {
+      // Checked before the product row is locked: a bidder with no phone
+      // should not hold up anyone else's bid on this lot.
+      assertPhoneOnFileForBuying(
+        await qr.manager.getRepository(User).findOne({
+          where: { id: userId },
+          select: { id: true, phone: true, pendingPhone: true },
+        }),
+      );
+
       const product = await qr.manager
         .getRepository(Product)
         .createQueryBuilder('product')

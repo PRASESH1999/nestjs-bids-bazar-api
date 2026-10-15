@@ -18,3 +18,13 @@ export function formatDateTime(date: Date): string {
   }).format(date);
   return `${formatted} NPT`;
 }
+
+/** Escape text for an HTML email body — required for any user-supplied value. */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

@@ -1,9 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { ProductStatus } from '@common/enums/product-status.enum';
 import { Product } from '@modules/products/entities/product.entity';
+import { User } from '@modules/users/entities/user.entity';
 import { MailService } from '@modules/mail/mail.service';
 import { Bid } from '../entities/bid.entity';
 import { PlaceBidDto } from '../dto/place-bid.dto';
@@ -103,10 +104,24 @@ const configService = {
 const mailService = {} as unknown as MailService;
 const eventEmitter = { emit: jest.fn() } as unknown as EventEmitter2;
 
+/** The bidder as the phone check sees them — a pending number counts. */
+type BidderStub = {
+  id: string;
+  phone: string | null;
+  pendingPhone: string | null;
+} | null;
+const BIDDER_WITH_PHONE: BidderStub = {
+  id: USER_ID,
+  phone: null,
+  pendingPhone: '9841234567',
+};
+
 function buildService(
   bidRepo: BidRepoStub,
   productRepo: ReturnType<typeof makeProductRepo>,
+  bidder: BidderStub = BIDDER_WITH_PHONE,
 ) {
+  const userRepo = { findOne: jest.fn().mockResolvedValue(bidder) };
   const qr = {
     connect: jest.fn(),
     startTransaction: jest.fn(),
@@ -118,6 +133,7 @@ function buildService(
       getRepository: jest.fn((entity: unknown) => {
         if (entity === Bid) return bidRepo;
         if (entity === Product) return productRepo;
+        if (entity === User) return userRepo;
         throw new Error('Unexpected repository requested in test');
       }),
     },
@@ -147,6 +163,42 @@ function buildService(
 
   return { service, qr };
 }
+
+describe('BiddingService.placeBid — mobile number required', () => {
+  const dto: PlaceBidDto = { amount: 1020 };
+
+  it('refuses a bidder with no phone, verified or pending, with PHONE_REQUIRED', async () => {
+    const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
+    const productRepo = makeProductRepo(makeProduct());
+    const { service, qr } = buildService(bidRepo, productRepo, {
+      id: USER_ID,
+      phone: null,
+      pendingPhone: null,
+    });
+
+    const attempt = service.placeBid(USER_ID, 'product-1', dto);
+    await expect(attempt).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(attempt).rejects.toMatchObject({
+      response: { errorCode: 'PHONE_REQUIRED' },
+    });
+    expect(qr.rollbackTransaction).toHaveBeenCalled();
+    expect(bidRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('accepts a bidder whose number is verified', async () => {
+    const bidRepo = makeBidRepo({ existingBidCount: 0, activeProductCount: 0 });
+    const productRepo = makeProductRepo(makeProduct());
+    const { service } = buildService(bidRepo, productRepo, {
+      id: USER_ID,
+      phone: '9841234567',
+      pendingPhone: null,
+    });
+
+    await expect(
+      service.placeBid(USER_ID, 'product-1', dto),
+    ).resolves.toBeDefined();
+  });
+});
 
 describe('BiddingService.placeBid — max active bids per user', () => {
   const dto: PlaceBidDto = { amount: 1020 };

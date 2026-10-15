@@ -22,6 +22,11 @@ export const envValidationSchema = Joi.object({
   MAIL_USER: Joi.string().required(),
   MAIL_PASSWORD: Joi.string().required(),
   MAIL_FROM: Joi.string().required(),
+  // Where Contact Us messages go. Optional — falls back to MAIL_FROM.
+  CONTACT_INBOX: Joi.string().optional(),
+  // Addresses allowed to name the visitor's IP in X-Forwarded-For (the Next
+  // server). Comma-separated; defaults to loopback. See ClientIpThrottlerGuard.
+  TRUSTED_PROXY_IPS: Joi.string().optional(),
   APP_FRONTEND_URL: Joi.string().uri().required(),
   // Comma-separated list of browser origins allowed by CORS. Optional — when
   // omitted, the server falls back to APP_FRONTEND_URL (see main.ts).

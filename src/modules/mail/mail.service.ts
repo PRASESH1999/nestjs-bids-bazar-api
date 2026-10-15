@@ -28,6 +28,11 @@ import { nameChangedTemplate } from './templates/name-changed.template';
 import { emailChangeVerificationTemplate } from './templates/email-change-verification.template';
 import { emailChangedOldAddressTemplate } from './templates/email-changed-old-address.template';
 import { emailChangedNewAddressTemplate } from './templates/email-changed-new-address.template';
+import {
+  contactAcknowledgementTemplate,
+  contactMessageTemplate,
+  type ContactMessageTemplateParams,
+} from './templates/contact-message.template';
 
 /**
  * Global mail service that wraps nodemailer for all transactional emails.
@@ -392,6 +397,52 @@ export class MailService implements OnModuleInit {
     const { subject, html } = deliveryCancelledAdminTemplate(params);
     await this.send(to, subject, html);
     this.logger.log('Delivery cancelled admin alert dispatched', { to });
+  }
+
+  // ─── Contact Us ───────────────────────────────────────────────────────────
+
+  /**
+   * Forward a Contact Us message to the support inbox — CONTACT_INBOX when set,
+   * otherwise MAIL_FROM, the mailbox the ops alerts already go to. Reply-To is
+   * the sender, so support answers them by replying.
+   *
+   * Returns whether it was handed to SMTP: the caller tells the visitor their
+   * message was received, so it has to know.
+   */
+  async sendContactMessage(
+    params: ContactMessageTemplateParams,
+  ): Promise<boolean> {
+    const to =
+      this.configService.get<string>('CONTACT_INBOX') ||
+      this.configService.getOrThrow<string>('MAIL_FROM');
+    const from = this.configService.getOrThrow<string>('MAIL_FROM');
+    const { subject, html } = contactMessageTemplate(params);
+    try {
+      await this.transporter.sendMail({
+        from,
+        to,
+        replyTo: { name: params.fullName, address: params.email },
+        subject,
+        html,
+      });
+      this.logger.log('Contact message dispatched', { ticket: params.ticket });
+      return true;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error('Failed to send contact message', {
+        ticket: params.ticket,
+        error: message,
+      });
+      return false;
+    }
+  }
+
+  /** The sender's copy of their Contact Us message. Best-effort. */
+  async sendContactAcknowledgement(
+    params: ContactMessageTemplateParams,
+  ): Promise<void> {
+    const { subject, html } = contactAcknowledgementTemplate(params);
+    await this.send(params.email, subject, html);
   }
 
   // ─── Password reset emails ────────────────────────────────────────────────
